@@ -30,7 +30,6 @@ parser.add_argument('--help', action='help')
 args = parser.parse_args()
 
 import torch
-from PIL import Image
 from diffusers import (
     StableDiffusionXLPipeline,
     DDIMScheduler,
