@@ -88,6 +88,9 @@ pipe.safety_checker = None
 if args.compile:
     pipe.unet = torch.compile(pipe.unet)
 
+pipe.unet.set_default_attn_processor()
+pipe.vae.set_default_attn_processor()
+
 if args.dpm:
     pipe.scheduler = DPMSolverMultistepScheduler.from_config(
         pipe.scheduler.config,
