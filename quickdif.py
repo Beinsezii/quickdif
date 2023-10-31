@@ -1,6 +1,23 @@
-COLS_XL = {'black': [-2.8232955932617188, 0.5033664703369141, 0.3139435052871704, 0.3359411954879761], 'white': [2.3501884937286377, 0.224839448928833, 1.2127048969268799, -1.0597002506256104], 'red': [-2.561439037322998, -2.5784878730773926, 1.3915523290634155, -1.6186809539794922], 'green': [-0.45990604162216187, 1.8333771228790283, 3.4502267837524414, 1.1301288604736328], 'blue': [0.05935399606823921, 2.129012107849121, -2.3017752170562744, 0.5399889349937439], 'cyan': [1.619562029838562, 3.388197183609009, 0.5599392056465149, 1.0360429286956787], 'magenta': [-0.12525132298469543, -0.6654946208000183, -1.5711115598678589, -1.175052523612976], 'yellow': [-0.8608582019805908, -1.375950574874878, 4.230403900146484, -1.0693323612213135]}
-COLS_FTMSE = {'black': [-0.9953256249427795, -2.602407455444336, 1.1153717041015625, 1.2966053485870361], 'white': [2.1749563217163086, 1.4434212446212769, -0.03183012455701828, -1.162193775177002], 'red': [1.2575085163116455, -0.8768408298492432, -1.8788076639175415, 0.7792190313339233], 'green': [0.768126904964447, 0.821873128414154, 2.3520827293395996, 1.8135154247283936], 'blue': [-0.6330060958862305, -3.0466079711914062, 0.9888341426849365, -1.4022014141082764], 'cyan': [0.5828086137771606, -0.10415874421596527, 2.934731960296631, -0.09788236021995544], 'magenta': [0.7387062311172485, -1.555786371231079, -1.3593989610671997, -1.438640832901001], 'yellow': [2.3476614952087402, 2.0031352043151855, -0.079119011759758, 1.6609115600585938]}
-
+COLS_XL = {
+    'black': [-2.8232955932617188, 0.5033664703369141, 0.3139435052871704, 0.3359411954879761],
+    'white': [2.3501884937286377, 0.224839448928833, 1.2127048969268799, -1.0597002506256104],
+    'red': [-2.561439037322998, -2.5784878730773926, 1.3915523290634155, -1.6186809539794922],
+    'green': [-0.45990604162216187, 1.8333771228790283, 3.4502267837524414, 1.1301288604736328],
+    'blue': [0.05935399606823921, 2.129012107849121, -2.3017752170562744, 0.5399889349937439],
+    'cyan': [1.619562029838562, 3.388197183609009, 0.5599392056465149, 1.0360429286956787],
+    'magenta': [-0.12525132298469543, -0.6654946208000183, -1.5711115598678589, -1.175052523612976],
+    'yellow': [-0.8608582019805908, -1.375950574874878, 4.230403900146484, -1.0693323612213135]
+}
+COLS_FTMSE = {
+    'black': [-0.9953256249427795, -2.602407455444336, 1.1153717041015625, 1.2966053485870361],
+    'white': [2.1749563217163086, 1.4434212446212769, -0.03183012455701828, -1.162193775177002],
+    'red': [1.2575085163116455, -0.8768408298492432, -1.8788076639175415, 0.7792190313339233],
+    'green': [0.768126904964447, 0.821873128414154, 2.3520827293395996, 1.8135154247283936],
+    'blue': [-0.6330060958862305, -3.0466079711914062, 0.9888341426849365, -1.4022014141082764],
+    'cyan': [0.5828086137771606, -0.10415874421596527, 2.934731960296631, -0.09788236021995544],
+    'magenta': [0.7387062311172485, -1.555786371231079, -1.3593989610671997, -1.438640832901001],
+    'yellow': [2.3476614952087402, 2.0031352043151855, -0.079119011759758, 1.6609115600585938]
+}
 
 import argparse
 from pathlib import Path
@@ -41,30 +58,35 @@ from diffusers import (
     EulerDiscreteScheduler,
 )
 from compel import Compel, ReturnedEmbeddingsType
-torch.set_float32_matmul_precision('high')
-dtype = {"fp16":torch.float16, "bf16":torch.bfloat16, "fp32":torch.float32}[args.dtype]
 
-pipe_args = {'torch_dtype':dtype, 'use_safetensors':True, 'add_watermarker':False}
+torch.set_float32_matmul_precision('high')
+dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[args.dtype]
+
+pipe_args = {'torch_dtype': dtype, 'use_safetensors': True, 'add_watermarker': False}
 
 if args.model.endswith('.safetensors'):
     try:
         pipe = StableDiffusionXLPipeline.from_single_file(args.model, **pipe_args)
-        XL=True
+        XL = True
     except:
         pipe = StableDiffusionPipeline.from_single_file(args.model, **pipe_args)
-        XL=False
+        XL = False
 else:
     try:
         pipe = StableDiffusionXLPipeline.from_pretrained(args.model, **pipe_args)
-        XL=True
+        XL = True
     except:
         pipe = StableDiffusionPipeline.from_pretrained(args.model, **pipe_args)
-        XL=False
+        XL = False
 
 if XL:
-    compel = Compel(tokenizer=[pipe.tokenizer, pipe.tokenizer_2] , text_encoder=[pipe.text_encoder, pipe.text_encoder_2], returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED, requires_pooled=[False, True], truncate_long_prompts= False)
+    compel = Compel(tokenizer=[pipe.tokenizer, pipe.tokenizer_2],
+                    text_encoder=[pipe.text_encoder, pipe.text_encoder_2],
+                    returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
+                    requires_pooled=[False, True],
+                    truncate_long_prompts=False)
 else:
-    compel = Compel(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder, truncate_long_prompts= False)
+    compel = Compel(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder, truncate_long_prompts=False)
 
 pipe.safety_checker = None
 if dtype != torch.float16:
@@ -98,35 +120,35 @@ size = [1, 4, args.height // 8, args.width // 8]
 if args.color_scale <= 0.0:
     latents = torch.zeros(size, dtype=dtype, device='cpu')
 else:
-    latents = torch.tensor(COLS_XL[args.color] if XL else COLS_FTMSE[args.color], dtype=dtype, device='cpu').mul(args.color_scale).div(sigma).expand([size[0], size[2], size[3], size[1]]).permute((0, 3, 1, 2)).clone()
+    latents = torch.tensor(COLS_XL[args.color] if XL else COLS_FTMSE[args.color], dtype=dtype,
+                           device='cpu').mul(args.color_scale).div(sigma).expand([size[0], size[2], size[3], size[1]]).permute((0, 3, 1, 2)).clone()
 
 # f32 noise for equal seeds amongst other UIs
 latents += torch.randn(latents.shape, generator=generator, dtype=torch.float32)
 
-
 pipe.to('cuda')
 
-n=0
+n = 0
 for prompt in args.prompts:
     kwargs = {
-    "width":args.width,
-    "height":args.height,
-    "latents":latents,
-    "num_inference_steps":args.steps,
-    "guidance_scale":args.cfg,
-    "guidance_rescale":args.rescale,
+        "width": args.width,
+        "height": args.height,
+        "latents": latents,
+        "num_inference_steps": args.steps,
+        "guidance_scale": args.cfg,
+        "guidance_rescale": args.rescale,
     }
 
     if XL:
         ncond, npool = compel.build_conditioning_tensor(args.negative)
         pcond, ppool = compel.build_conditioning_tensor(prompt)
-        kwargs = kwargs | {'pooled_prompt_embeds':ppool, 'negative_pooled_prompt_embeds':npool}
+        kwargs = kwargs | {'pooled_prompt_embeds': ppool, 'negative_pooled_prompt_embeds': npool}
     else:
         pcond = compel.build_conditioning_tensor(prompt)
         ncond = compel.build_conditioning_tensor(args.negative)
 
     pcond, ncond = compel.pad_conditioning_tensors_to_same_length([pcond, ncond])
-    kwargs = kwargs | {'prompt_embeds':pcond, 'negative_prompt_embeds':ncond}
+    kwargs = kwargs | {'prompt_embeds': pcond, 'negative_prompt_embeds': ncond}
     image = pipe(**kwargs).images[0]
 
     p = args.out.joinpath(f"{n:05}.png")
@@ -137,7 +159,8 @@ for prompt in args.prompts:
     image.save(p, format="PNG")
 
     del image, p, kwargs, pcond, ncond
-    if XL: del ppool, npool
-    if (lambda f,t: f/t)(*torch.cuda.mem_get_info()) < 0.25:
+    if XL:
+        del ppool, npool
+    if (lambda f, t: f / t)(*torch.cuda.mem_get_info()) < 0.25:
         gc.collect()
         torch.cuda.empty_cache()
