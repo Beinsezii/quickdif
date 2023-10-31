@@ -60,7 +60,7 @@ else:
 # f32 noise for equal seeds amongst other UIs
 latents += torch.randn(latents.shape, generator=generator, dtype=torch.float32)
 
-pipe_args = {'torch_dtype':torch.float16, 'use_safetensors':True, 'add_watermarker':False}
+pipe_args = {'torch_dtype':torch.float16, 'use_safetensors':True, 'add_watermarker':False, 'safety_checker':None}
 
 if args.model.endswith('.safetensors'):
     try:
@@ -72,6 +72,8 @@ else:
         pipe = StableDiffusionXLPipeline.from_pretrained(args.model, **pipe_args)
     except:
         pipe = StableDiffusionPipeline.from_pretrained(args.model, **pipe_args)
+
+pipe.safety_checker = None
 
 if args.compile:
     pipe.unet = torch.compile(pipe.unet)
