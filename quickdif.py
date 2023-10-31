@@ -40,7 +40,7 @@ elif not args.out.exists():
 else:
     raise ValueError("out must be directory")
 
-import torch
+import torch, gc
 from diffusers import (
     StableDiffusionPipeline,
     StableDiffusionXLPipeline,
@@ -84,7 +84,6 @@ else:
     compel = Compel(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder, truncate_long_prompts= False)
 
 pipe.safety_checker = None
-
 
 if args.compile:
     pipe.unet = torch.compile(pipe.unet)
@@ -136,3 +135,4 @@ for prompt in args.prompts:
 
     del image, p, kwargs, pcond, ncond
     if XL: del ppool, npool
+    gc.collect()
