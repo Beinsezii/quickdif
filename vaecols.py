@@ -15,8 +15,7 @@ vae.set_default_attn_processor()
 vae_scale = 2 ** (len(vae.config.block_out_channels) - 1)
 processor = image_processor.VaeImageProcessor(vae_scale)
 
-power = 1 + round(0.5 / vae.config.scaling_factor)
-print(f"factor: {vae.config.scaling_factor}, scale: {vae_scale}, power: {power}")
+print(f"factor: {vae.config.scaling_factor}, scale: {vae_scale}")
 
 results = {}
 
@@ -34,7 +33,7 @@ for col, pix in [
     img = processor.preprocess(img)
     tensor = vae.to('cuda').encode(img.to('cuda')).latent_dist.sample()
     if not args.noscale:
-        tensor *= (vae.config.scaling_factor ** vae_scale * 10 ** power)
+        tensor *= vae.config.scaling_factor / vae_scale / 2
     results[col] = [c.mean().item() for c in tensor[0]]
 
     del img, tensor
