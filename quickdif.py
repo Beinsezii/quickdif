@@ -24,8 +24,9 @@ parser.add_argument('-G', '--rescale', type=float, default=0.7)
 parser.add_argument('-c', '--color', choices=list(COLS_XL.keys()), default='black')
 parser.add_argument('-C', '--color_scale', type=float, default=0.0)
 parser.add_argument('-m', '--model', type=str, default="ptx0/coco-xltest")
-parser.add_argument('-o', '--out', type=argparse.FileType('wb'), default="/tmp/quickdiff.png")
+parser.add_argument('-o', '--out', type=argparse.FileType('wb'), default="/tmp/quickdif.png")
 parser.add_argument('--seed', type=int, default=-1)
+parser.add_argument('--dpm', action='store_true')
 parser.add_argument('--compile', action='store_true')
 parser.add_argument('--help', action='help')
 
@@ -35,6 +36,7 @@ import torch
 from diffusers import (
     StableDiffusionXLPipeline,
     DDIMScheduler,
+    DPMSolverMultistepScheduler,
 )
 
 generator = torch.manual_seed(args.seed) if args.seed >= 0 else torch.default_generator
@@ -67,7 +69,15 @@ else:
 if args.compile:
     pipe.unet = torch.compile(pipe.unet)
 
-pipe.scheduler = DDIMScheduler.from_config(
+if args.dpm:
+    pipe.scheduler = DPMSolverMultistepScheduler.from_config(
+        pipe.scheduler.config,
+        timestep_spacing='trailing',
+        algorithm_type='dpmsolver++',
+        use_karras_sigmas=True,
+    )
+else:
+    pipe.scheduler = DDIMScheduler.from_config(
         pipe.scheduler.config,
         timestep_spacing='trailing',
     )
