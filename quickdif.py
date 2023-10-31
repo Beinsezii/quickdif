@@ -60,7 +60,7 @@ else:
 # f32 noise for equal seeds amongst other UIs
 latents += torch.randn(latents.shape, generator=generator, dtype=torch.float32)
 
-pipe_args = {'torch_dtype':torch.float16, 'use_safetensors':True, 'add_watermarker':False, 'safety_checker':None}
+pipe_args = {'torch_dtype':torch.float16, 'use_safetensors':True, 'add_watermarker':False}
 
 if args.model.endswith('.safetensors'):
     try:
