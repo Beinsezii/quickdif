@@ -139,4 +139,6 @@ for prompt in args.prompts:
 
     del image, p, kwargs, pcond, ncond
     if XL: del ppool, npool
-    gc.collect()
+    if (lambda f,t: f/t)(*torch.cuda.mem_get_info()) < 0.25:
+        gc.collect()
+        torch.cuda.empty_cache()
