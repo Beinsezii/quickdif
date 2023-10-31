@@ -47,6 +47,7 @@ from diffusers import (
     DDIMScheduler,
     DPMSolverMultistepScheduler,
 )
+from compel import Compel, ReturnedEmbeddingsType
 
 generator = torch.manual_seed(args.seed) if args.seed >= 0 else torch.default_generator
 
@@ -65,15 +66,25 @@ pipe_args = {'torch_dtype':torch.float16, 'use_safetensors':True, 'add_watermark
 if args.model.endswith('.safetensors'):
     try:
         pipe = StableDiffusionXLPipeline.from_single_file(args.model, **pipe_args)
+        XL=True
     except:
         pipe = StableDiffusionPipeline.from_single_file(args.model, **pipe_args)
+        XL=False
 else:
     try:
         pipe = StableDiffusionXLPipeline.from_pretrained(args.model, **pipe_args)
+        XL=True
     except:
         pipe = StableDiffusionPipeline.from_pretrained(args.model, **pipe_args)
+        XL=False
+
+if XL:
+    compel = Compel(tokenizer=[pipe.tokenizer, pipe.tokenizer_2] , text_encoder=[pipe.text_encoder, pipe.text_encoder_2], returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED, requires_pooled=[False, True], truncate_long_prompts= False)
+else:
+    compel = Compel(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder, truncate_long_prompts= False)
 
 pipe.safety_checker = None
+
 
 if args.compile:
     pipe.unet = torch.compile(pipe.unet)
@@ -92,19 +103,29 @@ else:
     )
 
 pipe.to('cuda')
-n=0
 
+n=0
 for prompt in args.prompts:
-    image = pipe(
-        prompt=prompt,
-        width=args.width,
-        height=args.height,
-        negative_prompt=args.negative,
-        latents=latents,
-        num_inference_steps=args.steps,
-        guidance_scale=args.cfg,
-        guidance_rescale=args.rescale,
-    ).images[0]
+    kwargs = {
+    "width":args.width,
+    "height":args.height,
+    "latents":latents,
+    "num_inference_steps":args.steps,
+    "guidance_scale":args.cfg,
+    "guidance_rescale":args.rescale,
+    }
+
+    if XL:
+        ncond, npool = compel.build_conditioning_tensor(args.negative)
+        pcond, ppool = compel.build_conditioning_tensor(prompt)
+        kwargs = kwargs | {'pooled_prompt_embeds':ppool, 'negative_pooled_prompt_embeds':npool}
+    else:
+        pcond = compel.build_conditioning_tensor(prompt)
+        ncond = compel.build_conditioning_tensor(args.negative)
+
+    pcond, ncond = compel.pad_conditioning_tensors_to_same_length([pcond, ncond])
+    kwargs = kwargs | {'prompt_embeds':pcond, 'negative_prompt_embeds':ncond}
+    image = pipe(**kwargs).images[0]
 
     p = args.out.joinpath(f"{n:05}.png")
     while p.exists():
@@ -112,3 +133,6 @@ for prompt in args.prompts:
         p = args.out.joinpath(f"{n:05}.png")
 
     image.save(p, format="PNG")
+
+    del image, p, kwargs, pcond, ncond
+    if XL: del ppool, npool
