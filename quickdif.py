@@ -48,6 +48,7 @@ from diffusers import (
     DPMSolverMultistepScheduler,
 )
 from compel import Compel, ReturnedEmbeddingsType
+torch.set_float32_matmul_precision('high')
 
 generator = torch.manual_seed(args.seed) if args.seed >= 0 else torch.default_generator
 
@@ -87,9 +88,9 @@ pipe.safety_checker = None
 
 if args.compile:
     pipe.unet = torch.compile(pipe.unet)
-
-pipe.unet.set_default_attn_processor()
-pipe.vae.set_default_attn_processor()
+else:
+    pipe.unet.set_default_attn_processor()
+    pipe.vae.set_default_attn_processor()
 
 if args.dpm:
     pipe.scheduler = DPMSolverMultistepScheduler.from_config(
