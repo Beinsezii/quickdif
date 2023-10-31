@@ -2,17 +2,20 @@ import argparse
 from pathlib import Path
 
 parser = argparse.ArgumentParser(description='Measure cardinal colors on VAE')
-parser.add_argument('vae', type=Path)
+parser.add_argument('-v', '--vae', type=str, default='stabilityai/sdxl-vae')
 parser.add_argument('-s', '--size', type=int, default=1024)
 args = parser.parse_args()
 
-# assert str(args.vae).endswith('.safetensors')
-# assert args.vae.is_file()
-
 import torch, diffusers
+from diffusers import image_processor
 
 vae = diffusers.AutoencoderKL.from_pretrained(str(args.vae), use_safetensors=True)
-print(vae.config)
+vae.set_default_attn_processor()
+vae_scale = 2 ** (len(vae.config.block_out_channels) - 1)
+processor = image_processor.VaeImageProcessor(vae_scale)
+
+power = 1 + round(0.5 / vae.config.scaling_factor)
+print(f"factor: {vae.config.scaling_factor}, scale: {vae_scale}, power: {power}")
 
 results = {}
 
@@ -27,10 +30,9 @@ for col, pix in [
         ("yellow",  (1.0, 1.0, 0.0)),
 ]:
     img = torch.tensor(pix, dtype=torch.float32).expand([1, args.size, args.size, 3]).permute((0, 3, 1, 2)).clone()
-    tensor = vae.to('cuda').encode(img.to('cuda'), False)[0].sample().to('cpu').type(torch.float64)
-    wh = tensor.shape[-1] * tensor.shape[-2]
-
-    results[col] = [c.sum().div(wh).item() for c in tensor[0]]
+    img = processor.preprocess(img)
+    tensor = vae.to('cuda').encode(img.to('cuda')).latent_dist.sample().to('cpu') * (vae.config.scaling_factor ** vae_scale * 10 ** power)
+    results[col] = [c.mean().item() for c in tensor[0]]
 
     del img, tensor
 
