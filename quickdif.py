@@ -20,7 +20,7 @@ parser.add_argument('-n', '--negative', type=str, default="blurry, cropped, text
 parser.add_argument('-w', '--width', type=int, default=1024)
 parser.add_argument('-h', '--height', type=int, default=1024)
 parser.add_argument('-s', '--steps', type=int, default=30)
-parser.add_argument('-g', '--cfg', type=float, default=6.0)
+parser.add_argument('-g', '--cfg', type=float, default=8.0)
 parser.add_argument('-G', '--rescale', type=float, default=0.7)
 parser.add_argument('-c', '--color', choices=list(COLS_XL.keys()), default='black')
 parser.add_argument('-C', '--color_scale', type=float, default=0.0)
