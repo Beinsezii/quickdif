@@ -12,9 +12,10 @@
 COLS_XL = {'black': [-5.54072403911232, 4.526814351169378, 3.550338567178642, -4.3354098796480685], 'white': [18.00428923824802, 1.7538797715308192, 9.681977973719768, -7.940033342878451], 'red': [-7.282218298323642, -11.132304124286748, 0.5311491123161431, -14.735129391861847], 'green': [1.9356177158456376, 10.37097296048887, 18.36263093616435, 0.7188784081624817], 'blue': [3.8997846263082465, 9.811691337861703, -8.77209970181866, -2.86256140756484], 'cyan': [12.624110033444595, 17.35059885602095, 6.341289376941859, 1.3279199944506672], 'magenta': [2.867751094221603, -4.095526434520252, -6.159327863522776, -10.434268915982102], 'yellow': [1.8804551483053729, -5.611284743616125, 23.825928250560537, -8.86957961715234]}
 
 import argparse
+from pathlib import Path
 
 parser = argparse.ArgumentParser(description='Custom diffusers models', add_help=False)
-parser.add_argument('prompt', type=str)
+parser.add_argument('prompts', nargs='+', type=str)
 parser.add_argument('-n', '--negative', type=str, default="blurry, cropped, text")
 parser.add_argument('-w', '--width', type=int, default=1024)
 parser.add_argument('-h', '--height', type=int, default=1024)
@@ -24,13 +25,20 @@ parser.add_argument('-G', '--rescale', type=float, default=0.7)
 parser.add_argument('-c', '--color', choices=list(COLS_XL.keys()), default='black')
 parser.add_argument('-C', '--color_scale', type=float, default=0.0)
 parser.add_argument('-m', '--model', type=str, default="stabilityai/stable-diffusion-xl-base-1.0")
-parser.add_argument('-o', '--out', type=argparse.FileType('wb'), default="/tmp/quickdif.png")
+parser.add_argument('-o', '--out', type=Path, default="/tmp/quickdif/")
 parser.add_argument('--seed', type=int, default=-1)
 parser.add_argument('--dpm', action='store_true')
 parser.add_argument('--compile', action='store_true')
 parser.add_argument('--help', action='help')
 
 args = parser.parse_args()
+
+if args.out.is_dir():
+    pass
+elif not args.out.exists():
+    args.out.mkdir()
+else:
+    raise ValueError("out must be directory")
 
 import torch
 from diffusers import (
@@ -81,15 +89,24 @@ else:
         timestep_spacing='trailing',
     )
 
-image = pipe.to('cuda')(
-    prompt=args.prompt,
-    width=args.width,
-    height=args.height,
-    negative_prompt=args.negative,
-    latents=latents,
-    num_inference_steps=args.steps,
-    guidance_scale=args.cfg,
-    guidance_rescale=args.rescale,
-).images[0]
+pipe.to('cuda')
+n=0
 
-image.save(args.out, format="PNG")
+for prompt in args.prompts:
+    image = pipe(
+        prompt=prompt,
+        width=args.width,
+        height=args.height,
+        negative_prompt=args.negative,
+        latents=latents,
+        num_inference_steps=args.steps,
+        guidance_scale=args.cfg,
+        guidance_rescale=args.rescale,
+    ).images[0]
+
+    p = args.out.joinpath(f"{n:05}.png")
+    while p.exists():
+        n += 1
+        p = args.out.joinpath(f"{n:05}.png")
+
+    image.save(p, format="PNG")
