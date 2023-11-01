@@ -103,15 +103,11 @@ sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config, timestep_spaci
 if args.dpm:
     pipe.scheduler = DPMSolverMultistepScheduler.from_config(
         pipe.scheduler.config,
-        timestep_spacing='trailing',
         algorithm_type='dpmsolver++',
         use_karras_sigmas=True,
     )
-else:
-    pipe.scheduler = DDIMScheduler.from_config(
-        pipe.scheduler.config,
-        timestep_spacing='trailing',
-    )
+
+pipe.scheduler.config.timestep_spacing='trailing'
 
 generator = torch.manual_seed(args.seed) if args.seed >= 0 else torch.default_generator
 
