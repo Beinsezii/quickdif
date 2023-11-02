@@ -108,6 +108,23 @@ if args.sampler == "dpm":
     )
 elif args.sampler == "ddim":
     pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
+    print("PATCHING TIMESTEPS")
+    tsbase = pipe.scheduler.set_timesteps
+
+    def tspatch(*args, **kwargs):
+        if 'num_inference_steps' in kwargs:
+            num_inference_steps = kwargs['num_inference_steps']
+            num_inference_steps -= 1
+            kwargs['num_inference_steps'] = num_inference_steps
+        else:
+            args=list(args)
+            num_inference_steps = args[0]
+            num_inference_steps -= 1
+            args[0] = num_inference_steps
+        tsbase(*args, **kwargs)
+        pipe.scheduler.timesteps = torch.cat([pipe.scheduler.timesteps, pipe.scheduler.timesteps[-1].remainder(num_inference_steps).reshape(1)])
+
+    pipe.scheduler.set_timesteps = tspatch
 elif args.sampler == "euler":
     pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
 
