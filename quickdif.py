@@ -36,7 +36,7 @@ parser.add_argument('-m', '--model', type=str, default="stabilityai/stable-diffu
 parser.add_argument('-o', '--out', type=Path, default="/tmp/quickdif/")
 parser.add_argument('-d', '--dtype', choices=["fp16", "bf16", "fp32"], default="fp16")
 parser.add_argument('--seed', type=int, default=-1)
-parser.add_argument('--dpm', action='store_true')
+parser.add_argument('-S', '--sampler', choices=['default', 'dpm', 'ddim', 'euler'], default='default')
 parser.add_argument('--compile', action='store_true')
 parser.add_argument('--help', action='help')
 
@@ -100,12 +100,16 @@ else:
 
 sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config, timestep_spacing='trailing').init_noise_sigma
 
-if args.dpm:
+if args.sampler == "dpm":
     pipe.scheduler = DPMSolverMultistepScheduler.from_config(
         pipe.scheduler.config,
         algorithm_type='dpmsolver++',
         use_karras_sigmas=True,
     )
+elif args.sampler == "ddim":
+    pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
+elif args.sampler == "euler":
+    pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
 
 pipe.scheduler.config.timestep_spacing='trailing'
 
