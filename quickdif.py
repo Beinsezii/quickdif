@@ -151,9 +151,10 @@ n = 0
 for (pn, prompt) in enumerate(args.prompts * args.batch_count):
     # add noise
     latents = latent_input.expand(size).clone()
+    seeds = []
     for (ln, latent) in enumerate(latents):
-        seed = (args.seed if args.seed >= 0 else torch.randint(2**31-1).item()) + pn * args.batch_size + ln
-        print(f"seed:{seed}")
+        seed = torch.randint(high=2**31-1, size=(1,)).item() if args.seed < 0 else args.seed + pn * args.batch_size + ln
+        seeds.append(seed)
         generator = torch.manual_seed(seed)
         # f32 noise for equal seeds amongst other UIs
         latent += torch.randn(latents.shape[1:], generator=generator, dtype=torch.float32)
@@ -180,6 +181,7 @@ for (pn, prompt) in enumerate(args.prompts * args.batch_count):
     kwargs = kwargs | {'prompt_embeds': pcond, 'negative_prompt_embeds': ncond}
 
     # compute + save
+    print("seeds:", ' '.join(map(str, seeds)))
     for image in pipe(**kwargs).images:
         p = args.out.joinpath(f"{n:05}.png")
         while p.exists():
