@@ -148,7 +148,7 @@ size[0] = args.batch_size
 pipe.to('cuda')
 
 n = 0
-for (pn, prompt) in enumerate(args.prompts * args.batch_count):
+for (pn, prompt) in enumerate([p for p in args.prompts for _ in range(args.batch_count)]):
     # add noise
     latents = latent_input.expand(size).clone()
     seeds = []
