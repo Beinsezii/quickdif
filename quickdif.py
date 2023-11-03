@@ -30,13 +30,15 @@ parser.add_argument('-h', '--height', type=int, default=1024)
 parser.add_argument('-s', '--steps', type=int, default=30)
 parser.add_argument('-g', '--cfg', type=float, default=8.0)
 parser.add_argument('-G', '--rescale', type=float, default=0.7)
+parser.add_argument('-b', '--batch-count', type=int, default=1)
+parser.add_argument('-B', '--batch-size', type=int, default=1)
 parser.add_argument('-c', '--color', choices=list(COLS_XL.keys()), default='black')
-parser.add_argument('-C', '--color_scale', type=float, default=0.0)
+parser.add_argument('-C', '--color-scale', type=float, default=0.0)
 parser.add_argument('-m', '--model', type=str, default="stabilityai/stable-diffusion-xl-base-1.0")
 parser.add_argument('-o', '--out', type=Path, default="/tmp/quickdif/")
 parser.add_argument('-d', '--dtype', choices=["fp16", "bf16", "fp32"], default="fp16")
 parser.add_argument('--seed', type=int, default=-1)
-parser.add_argument('-S', '--sampler', choices=['default', 'dpm', 'ddim', 'euler'], default='default')
+parser.add_argument('-S', '--sampler', choices=['default', 'dpm', 'ddim', 'ddimp', 'euler'], default='default')
 parser.add_argument('--compile', action='store_true')
 parser.add_argument('--help', action='help')
 
@@ -108,6 +110,8 @@ if args.sampler == "dpm":
     )
 elif args.sampler == "ddim":
     pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
+elif args.sampler == "ddimp":
+    pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
     print("PATCHING TIMESTEPS")
     tsbase = pipe.scheduler.set_timesteps
 
@@ -130,23 +134,29 @@ elif args.sampler == "euler":
 
 pipe.scheduler.config.timestep_spacing='trailing'
 
-generator = torch.manual_seed(args.seed) if args.seed >= 0 else torch.default_generator
 
 size = [1, 4, args.height // 8, args.width // 8]
 
 if args.color_scale <= 0.0:
-    latents = torch.zeros(size, dtype=dtype, device='cpu')
+    latent_input = torch.zeros(size, dtype=dtype, device='cpu')
 else:
-    latents = torch.tensor(COLS_XL[args.color] if XL else COLS_FTMSE[args.color], dtype=dtype,
+    latent_input = torch.tensor(COLS_XL[args.color] if XL else COLS_FTMSE[args.color], dtype=dtype,
                            device='cpu').mul(args.color_scale).div(sigma).expand([size[0], size[2], size[3], size[1]]).permute((0, 3, 1, 2)).clone()
 
-# f32 noise for equal seeds amongst other UIs
-latents += torch.randn(latents.shape, generator=generator, dtype=torch.float32)
+size[0] = args.batch_size
 
 pipe.to('cuda')
 
 n = 0
-for prompt in args.prompts:
+for (pn, prompt) in enumerate(args.prompts * args.batch_count):
+    # add noise
+    latents = latent_input.expand(size).clone()
+    for (ln, latent) in enumerate(latents):
+        seed = (args.seed if args.seed >= 0 else torch.randint(2**31-1).item()) + pn * args.batch_size + ln
+        print(f"seed:{seed}")
+        generator = torch.manual_seed(seed)
+        # f32 noise for equal seeds amongst other UIs
+        latent += torch.randn(latents.shape[1:], generator=generator, dtype=torch.float32)
     kwargs = {
         "width": args.width,
         "height": args.height,
@@ -154,8 +164,10 @@ for prompt in args.prompts:
         "num_inference_steps": args.steps,
         "guidance_scale": args.cfg,
         "guidance_rescale": args.rescale,
+        "num_images_per_prompt": args.batch_size,
     }
 
+    # compel
     if XL:
         ncond, npool = compel.build_conditioning_tensor(args.negative)
         pcond, ppool = compel.build_conditioning_tensor(prompt)
@@ -166,16 +178,19 @@ for prompt in args.prompts:
 
     pcond, ncond = compel.pad_conditioning_tensors_to_same_length([pcond, ncond])
     kwargs = kwargs | {'prompt_embeds': pcond, 'negative_prompt_embeds': ncond}
-    image = pipe(**kwargs).images[0]
 
-    p = args.out.joinpath(f"{n:05}.png")
-    while p.exists():
-        n += 1
+    # compute + save
+    for image in pipe(**kwargs).images:
         p = args.out.joinpath(f"{n:05}.png")
+        while p.exists():
+            n += 1
+            p = args.out.joinpath(f"{n:05}.png")
 
-    image.save(p, format="PNG")
+        image.save(p, format="PNG")
+        del image, p
 
-    del image, p, kwargs, pcond, ncond
+    # fix memleak
+    del kwargs, latents, pcond, ncond
     if XL:
         del ppool, npool
     if (lambda f, t: f / t)(*torch.cuda.mem_get_info()) < 0.25:
