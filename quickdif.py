@@ -91,6 +91,7 @@ else:
     compel = Compel(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder, truncate_long_prompts=False)
 
 pipe.safety_checker = None
+pipe.enable_vae_slicing()
 if dtype != torch.float16:
     pipe.vae.force_upcast = False
 
