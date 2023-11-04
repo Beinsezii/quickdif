@@ -30,9 +30,9 @@ parser.add_argument('prompts', nargs='+', type=str)
 parser.add_argument('-n', '--negative', type=str, default="blurry, cropped, text")
 parser.add_argument('-w', '--width', type=int)
 parser.add_argument('-h', '--height', type=int)
-parser.add_argument('-s', '--steps', type=int, default=30)
-parser.add_argument('-g', '--cfg', type=float, default=8.0)
-parser.add_argument('-G', '--rescale', type=float, default=0.7)
+parser.add_argument('-s', '--steps', type=int)
+parser.add_argument('-g', '--cfg', type=float)
+parser.add_argument('-G', '--rescale', type=float)
 parser.add_argument('-b', '--batch-count', type=int, default=1)
 parser.add_argument('-B', '--batch-size', type=int, default=1)
 parser.add_argument('-c', '--color', choices=list(COLS_XL.keys()), default='black')
@@ -41,7 +41,7 @@ parser.add_argument('-m', '--model', type=str, default="stabilityai/stable-diffu
 parser.add_argument('-o', '--out', type=Path, default="/tmp/quickdif/")
 parser.add_argument('-d', '--dtype', choices=["fp16", "bf16", "fp32"], default="fp16")
 parser.add_argument('--seed', type=int, default=-1)
-parser.add_argument('-S', '--sampler', choices=['default', 'dpm', 'ddim', 'ddimp', 'euler'], default='default')
+parser.add_argument('-S', '--sampler', choices=['dpm', 'ddim', 'ddimp', 'euler'])
 parser.add_argument('--compile', action='store_true')
 parser.add_argument('--help', action='help')
 
@@ -180,15 +180,15 @@ if hasattr(pipe, 'vae'):
 n = 0
 for (pn, prompt) in enumerate([p for p in args.prompts for _ in range(args.batch_count)]):
     kwargs = {
-        "num_inference_steps": args.steps,
-        "guidance_scale": args.cfg,
         "num_images_per_prompt": args.batch_size,
-        "guidance_rescale": args.rescale,
         "clean_caption": False,  # stop IF nag. what does this even do
     }
 
     if args.width is not None: kwargs['width'] = args.width
     if args.height is not None: kwargs['height'] = args.height
+    if args.steps is not None: kwargs["num_inference_steps"] = args.steps
+    if args.cfg is not None: kwargs["guidance_scale"] = args.cfg
+    if args.rescale is not None: kwargs["guidance_rescale"] = args.rescale
 
     # NOISE {{{
     seed = torch.randint(high=2**31 - 1, size=(1, )).item() if args.seed < 0 else args.seed + pn * args.batch_size
