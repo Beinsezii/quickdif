@@ -140,7 +140,7 @@ if hasattr(pipe, 'scheduler'):
                 num_inference_steps -= 1
                 kwargs['num_inference_steps'] = num_inference_steps
             else:
-                args=list(args)
+                args = list(args)
                 num_inference_steps = args[0]
                 num_inference_steps -= 1
                 args[0] = num_inference_steps
@@ -151,15 +151,13 @@ if hasattr(pipe, 'scheduler'):
     elif args.sampler == "euler":
         pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
 
-    pipe.scheduler.config.timestep_spacing='trailing'
+    pipe.scheduler.config.timestep_spacing = 'trailing'
 # SCHEDULER }}}
 
 # INPUT {{{
 if hasattr(pipe, 'vae'):
     size = [
-        1,
-        pipe.unet.config.in_channels,
-        args.height // pipe.vae_scale_factor if args.height is not None else pipe.unet.config.sample_size,
+        1, pipe.unet.config.in_channels, args.height // pipe.vae_scale_factor if args.height is not None else pipe.unet.config.sample_size,
         args.width // pipe.vae_scale_factor if args.width is not None else pipe.unet.config.sample_size
     ]
 
@@ -169,7 +167,8 @@ if hasattr(pipe, 'vae'):
         latent_input = torch.zeros(size, dtype=dtype, device='cpu')
     else:
         latent_input = torch.tensor(COLS_XL[args.color] if XL else COLS_FTMSE[args.color], dtype=dtype,
-                               device='cpu').mul(args.color_scale).div(sigma).expand([size[0], size[2], size[3], size[1]]).permute((0, 3, 1, 2)).clone()
+                                    device='cpu').mul(args.color_scale).div(sigma).expand([size[0], size[2], size[3], size[1]]).permute(
+                                        (0, 3, 1, 2)).clone()
 
     size[0] = args.batch_size
 # INPUT }}}
@@ -182,14 +181,14 @@ for (pn, prompt) in enumerate([p for p in args.prompts for _ in range(args.batch
         "guidance_scale": args.cfg,
         "num_images_per_prompt": args.batch_size,
         "guidance_rescale": args.rescale,
-        "clean_caption": False, # stop IF nag. what does this even do
+        "clean_caption": False,  # stop IF nag. what does this even do
     }
 
     kwargs['width'] = getattr(args, 'width', None)
     kwargs['height'] = getattr(args, 'height', None)
 
     # NOISE {{{
-    seed = torch.randint(high=2**31-1, size=(1,)).item() if args.seed < 0 else args.seed + pn * args.batch_size
+    seed = torch.randint(high=2**31 - 1, size=(1, )).item() if args.seed < 0 else args.seed + pn * args.batch_size
     if 'latent_input' in locals():
         latents = latent_input.expand(size).clone()
         seeds = []
@@ -200,7 +199,7 @@ for (pn, prompt) in enumerate([p for p in args.prompts for _ in range(args.batch
             latent += torch.randn(latents.shape[1:], generator=generator, dtype=torch.float32)
         kwargs["latents"] = latents
         print("seeds:", ' '.join(map(str, seeds)))
-    else: # No input tensors for diffusion pipeline call?
+    else:  # No input tensors for diffusion pipeline call?
         kwargs["generator"] = torch.manual_seed(seed)
         print("seed:", seed)
     # NOISE }}}
@@ -218,8 +217,8 @@ for (pn, prompt) in enumerate([p for p in args.prompts for _ in range(args.batch
         kwargs |= {'prompt_embeds': pcond, 'negative_prompt_embeds': ncond}
     else:
         kwargs |= {
-            "prompt":prompt,
-            "negative_prompt":args.negative,
+            "prompt": prompt,
+            "negative_prompt": args.negative,
         }
     # CONDITIONING }}}
 
