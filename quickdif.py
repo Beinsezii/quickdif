@@ -98,7 +98,7 @@ pipe.enable_model_cpu_offload()
 # PIPE }}}
 
 # TOKENIZER/COMPEL {{{
-if isinstance(pipe.tokenizer, transformers.models.clip.tokenization_clip.CLIPTokenizer):
+if hasattr(pipe, 'tokenizer') and isinstance(pipe.tokenizer, transformers.models.clip.tokenization_clip.CLIPTokenizer):
     if XL:
         compel = Compel(tokenizer=[pipe.tokenizer, pipe.tokenizer_2],
                         text_encoder=[pipe.text_encoder, pipe.text_encoder_2],
