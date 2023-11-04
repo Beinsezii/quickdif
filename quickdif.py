@@ -1,3 +1,4 @@
+# LATENT COLORS {{{
 COLS_XL = {
     'black': [-2.8232955932617188, 0.5033664703369141, 0.3139435052871704, 0.3359411954879761],
     'white': [2.3501884937286377, 0.224839448928833, 1.2127048969268799, -1.0597002506256104],
@@ -18,7 +19,9 @@ COLS_FTMSE = {
     'magenta': [0.7387062311172485, -1.555786371231079, -1.3593989610671997, -1.438640832901001],
     'yellow': [2.3476614952087402, 2.0031352043151855, -0.079119011759758, 1.6609115600585938]
 }
+# LATENT COLORS }}}
 
+# CLI {{{
 import argparse
 from pathlib import Path
 
@@ -50,9 +53,12 @@ elif not args.out.exists():
     args.out.mkdir()
 else:
     raise ValueError("out must be directory")
+# CLI }}}
 
+# TORCH {{{
 import torch, gc
 from diffusers import (
+    DiffusionPipeline,
     StableDiffusionPipeline,
     StableDiffusionXLPipeline,
     DDIMScheduler,
@@ -63,126 +69,142 @@ from compel import Compel, ReturnedEmbeddingsType
 
 torch.set_float32_matmul_precision('high')
 dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[args.dtype]
+# TORCH }}}
 
-pipe_args = {'torch_dtype': dtype, 'use_safetensors': True, 'add_watermarker': False}
+# PIPE {{{
+pipe_args = {'torch_dtype': dtype, 'use_safetensors': True, 'add_watermarker': False, 'safety_checker': None, 'watermarker': None}
 
 if args.model.endswith('.safetensors'):
-    try:
-        pipe = StableDiffusionXLPipeline.from_single_file(args.model, **pipe_args)
-        XL = True
-    except:
-        pipe = StableDiffusionPipeline.from_single_file(args.model, **pipe_args)
-        XL = False
+    pipe = StableDiffusionPipeline.from_single_file(args.model, **pipe_args)
 else:
-    try:
-        pipe = StableDiffusionXLPipeline.from_pretrained(args.model, **pipe_args)
-        XL = True
-    except:
-        pipe = StableDiffusionPipeline.from_pretrained(args.model, **pipe_args)
-        XL = False
+    pipe = DiffusionPipeline.from_pretrained(args.model, **pipe_args)
 
+XL = isinstance(pipe, StableDiffusionXLPipeline)
+SD = isinstance(pipe, StableDiffusionPipeline)
+
+pipe.safety_checker = None
+pipe.watermarker = None
+pipe.enable_model_cpu_offload()
+# PIPE }}}
+
+# TOKENIZER/COMPEL {{{
 if XL:
     compel = Compel(tokenizer=[pipe.tokenizer, pipe.tokenizer_2],
                     text_encoder=[pipe.text_encoder, pipe.text_encoder_2],
                     returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
                     requires_pooled=[False, True],
                     truncate_long_prompts=False)
-else:
+elif SD:
     compel = Compel(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder, truncate_long_prompts=False)
+# TOKENIZER/COMPEL }}}
 
-pipe.safety_checker = None
-pipe.enable_vae_slicing()
-if dtype != torch.float16:
-    pipe.vae.force_upcast = False
+# VAE {{{
+if hasattr(pipe, 'vae'):
+    pipe.enable_vae_slicing()
+    if dtype != torch.float16: pipe.vae.force_upcast = False
+    if not args.compile: pipe.vae.set_default_attn_processor()
+# VAE }}}
 
-if args.compile:
-    pipe.unet = torch.compile(pipe.unet)
-else:
-    pipe.unet.set_default_attn_processor()
-    pipe.vae.set_default_attn_processor()
+# UNET {{{
+if hasattr(pipe, 'unet'):
+    if args.compile:
+        pipe.unet = torch.compile(pipe.unet)
+    else:
+        pipe.unet.set_default_attn_processor()
+# UNET }}}
 
-sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config, timestep_spacing='trailing').init_noise_sigma
+# SCHEDULER {{{
+if hasattr(pipe, 'scheduler'):
+    if args.sampler == "dpm":
+        pipe.scheduler = DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config,
+            algorithm_type='dpmsolver++',
+            use_karras_sigmas=True,
+        )
+    elif args.sampler == "ddim":
+        pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
+    elif args.sampler == "ddimp":
+        pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
+        print("PATCHING TIMESTEPS")
+        tsbase = pipe.scheduler.set_timesteps
 
-if args.sampler == "dpm":
-    pipe.scheduler = DPMSolverMultistepScheduler.from_config(
-        pipe.scheduler.config,
-        algorithm_type='dpmsolver++',
-        use_karras_sigmas=True,
-    )
-elif args.sampler == "ddim":
-    pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
-elif args.sampler == "ddimp":
-    pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
-    print("PATCHING TIMESTEPS")
-    tsbase = pipe.scheduler.set_timesteps
+        def tspatch(*args, **kwargs):
+            if 'num_inference_steps' in kwargs:
+                num_inference_steps = kwargs['num_inference_steps']
+                num_inference_steps -= 1
+                kwargs['num_inference_steps'] = num_inference_steps
+            else:
+                args=list(args)
+                num_inference_steps = args[0]
+                num_inference_steps -= 1
+                args[0] = num_inference_steps
+            tsbase(*args, **kwargs)
+            pipe.scheduler.timesteps = torch.cat([pipe.scheduler.timesteps, pipe.scheduler.timesteps[-1].remainder(num_inference_steps).reshape(1)])
 
-    def tspatch(*args, **kwargs):
-        if 'num_inference_steps' in kwargs:
-            num_inference_steps = kwargs['num_inference_steps']
-            num_inference_steps -= 1
-            kwargs['num_inference_steps'] = num_inference_steps
-        else:
-            args=list(args)
-            num_inference_steps = args[0]
-            num_inference_steps -= 1
-            args[0] = num_inference_steps
-        tsbase(*args, **kwargs)
-        pipe.scheduler.timesteps = torch.cat([pipe.scheduler.timesteps, pipe.scheduler.timesteps[-1].remainder(num_inference_steps).reshape(1)])
+        pipe.scheduler.set_timesteps = tspatch
+    elif args.sampler == "euler":
+        pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
 
-    pipe.scheduler.set_timesteps = tspatch
-elif args.sampler == "euler":
-    pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
+    pipe.scheduler.config.timestep_spacing='trailing'
+# SCHEDULER }}}
 
-pipe.scheduler.config.timestep_spacing='trailing'
+# INPUT {{{
+if hasattr(pipe, 'vae'):
+    sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config, timestep_spacing='trailing').init_noise_sigma
+    size = [1, 4, args.height // 8, args.width // 8]
 
+    if args.color_scale <= 0.0:
+        latent_input = torch.zeros(size, dtype=dtype, device='cpu')
+    else:
+        latent_input = torch.tensor(COLS_XL[args.color] if XL else COLS_FTMSE[args.color], dtype=dtype,
+                               device='cpu').mul(args.color_scale).div(sigma).expand([size[0], size[2], size[3], size[1]]).permute((0, 3, 1, 2)).clone()
 
-size = [1, 4, args.height // 8, args.width // 8]
+    size[0] = args.batch_size
+# INPUT }}}
 
-if args.color_scale <= 0.0:
-    latent_input = torch.zeros(size, dtype=dtype, device='cpu')
-else:
-    latent_input = torch.tensor(COLS_XL[args.color] if XL else COLS_FTMSE[args.color], dtype=dtype,
-                           device='cpu').mul(args.color_scale).div(sigma).expand([size[0], size[2], size[3], size[1]]).permute((0, 3, 1, 2)).clone()
-
-size[0] = args.batch_size
-
-pipe.to('cuda')
-
+# INFERENCE {{{
 n = 0
 for (pn, prompt) in enumerate([p for p in args.prompts for _ in range(args.batch_count)]):
     # add noise
-    latents = latent_input.expand(size).clone()
-    seeds = []
-    for (ln, latent) in enumerate(latents):
-        seed = torch.randint(high=2**31-1, size=(1,)).item() if args.seed < 0 else args.seed + pn * args.batch_size + ln
-        seeds.append(seed)
-        generator = torch.manual_seed(seed)
-        # f32 noise for equal seeds amongst other UIs
-        latent += torch.randn(latents.shape[1:], generator=generator, dtype=torch.float32)
-    kwargs = {
-        "width": args.width,
-        "height": args.height,
-        "latents": latents,
-        "num_inference_steps": args.steps,
-        "guidance_scale": args.cfg,
-        "guidance_rescale": args.rescale,
-        "num_images_per_prompt": args.batch_size,
-    }
+    if SD or XL:
+        latents = latent_input.expand(size).clone()
+        seeds = []
+        for (ln, latent) in enumerate(latents):
+            seed = torch.randint(high=2**31-1, size=(1,)).item() if args.seed < 0 else args.seed + pn * args.batch_size + ln
+            seeds.append(seed)
+            generator = torch.manual_seed(seed)
+            # f32 noise for equal seeds amongst other UIs
+            latent += torch.randn(latents.shape[1:], generator=generator, dtype=torch.float32)
+        kwargs = {
+            "width": args.width,
+            "height": args.height,
+            "latents": latents,
+            "num_inference_steps": args.steps,
+            "guidance_scale": args.cfg,
+            "guidance_rescale": args.rescale,
+            "num_images_per_prompt": args.batch_size,
+        }
+        print("seeds:", ' '.join(map(str, seeds)))
 
-    # compel
-    if XL:
-        ncond, npool = compel.build_conditioning_tensor(args.negative)
-        pcond, ppool = compel.build_conditioning_tensor(prompt)
-        kwargs = kwargs | {'pooled_prompt_embeds': ppool, 'negative_pooled_prompt_embeds': npool}
+        # compel
+        if XL:
+            ncond, npool = compel.build_conditioning_tensor(args.negative)
+            pcond, ppool = compel.build_conditioning_tensor(prompt)
+            kwargs = kwargs | {'pooled_prompt_embeds': ppool, 'negative_pooled_prompt_embeds': npool}
+        else:
+            pcond = compel.build_conditioning_tensor(prompt)
+            ncond = compel.build_conditioning_tensor(args.negative)
+
+        pcond, ncond = compel.pad_conditioning_tensors_to_same_length([pcond, ncond])
+        kwargs = kwargs | {'prompt_embeds': pcond, 'negative_prompt_embeds': ncond}
     else:
-        pcond = compel.build_conditioning_tensor(prompt)
-        ncond = compel.build_conditioning_tensor(args.negative)
-
-    pcond, ncond = compel.pad_conditioning_tensors_to_same_length([pcond, ncond])
-    kwargs = kwargs | {'prompt_embeds': pcond, 'negative_prompt_embeds': ncond}
+        kwargs = {
+            "prompt":prompt,
+            "negative_prompt":args.negative,
+            "num_inference_steps":args.steps,
+        }
 
     # compute + save
-    print("seeds:", ' '.join(map(str, seeds)))
     for image in pipe(**kwargs).images:
         p = args.out.joinpath(f"{n:05}.png")
         while p.exists():
@@ -193,9 +215,11 @@ for (pn, prompt) in enumerate([p for p in args.prompts for _ in range(args.batch
         del image, p
 
     # fix memleak
-    del kwargs, latents, pcond, ncond
+    del kwargs
+    if SD or XL: del latents, pcond, ncond
     if XL:
         del ppool, npool
     if (lambda f, t: f / t)(*torch.cuda.mem_get_info()) < 0.25:
         gc.collect()
         torch.cuda.empty_cache()
+# INFERENCE }}}
