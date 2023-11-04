@@ -68,6 +68,7 @@ from diffusers import (
 from compel import Compel, ReturnedEmbeddingsType
 
 torch.set_float32_matmul_precision('high')
+AMD = 'AMD' in torch.cuda.get_device_name()
 dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[args.dtype]
 # TORCH }}}
 
@@ -108,15 +109,13 @@ elif SD:
 if hasattr(pipe, 'vae'):
     pipe.enable_vae_slicing()
     if dtype != torch.float16: pipe.vae.force_upcast = False
-    if not args.compile: pipe.vae.set_default_attn_processor()
+    if not args.compile and AMD: pipe.vae.set_default_attn_processor()
 # VAE }}}
 
 # UNET {{{
 if hasattr(pipe, 'unet'):
-    if args.compile:
-        pipe.unet = torch.compile(pipe.unet)
-    else:
-        pipe.unet.set_default_attn_processor()
+    if args.compile: pipe.unet = torch.compile(pipe.unet)
+    elif AMD: pipe.unet.set_default_attn_processor()
 # UNET }}}
 
 # SCHEDULER {{{
