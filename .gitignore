@@ -1,4 +1,6 @@
-prompts.yaml
+prompts.json
+models.json
+checkpoints
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
