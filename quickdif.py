@@ -43,6 +43,7 @@ parser.add_argument('-d', '--dtype', choices=["fp16", "bf16", "fp32"], default="
 parser.add_argument('--seed', type=int, default=-1)
 parser.add_argument('-S', '--sampler', choices=['dpm', 'ddim', 'ddimp', 'euler'])
 parser.add_argument('--compile', action='store_true')
+parser.add_argument('--no-trail', action='store_true')
 parser.add_argument('--help', action='help')
 
 args = parser.parse_args()
@@ -154,7 +155,8 @@ if hasattr(pipe, 'scheduler'):
     elif args.sampler == "euler":
         pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
 
-    pipe.scheduler.config.timestep_spacing = 'trailing'
+    # what most UIs use
+    if not args.no_trail: pipe.scheduler.config.timestep_spacing = 'trailing'
 # SCHEDULER }}}
 
 # INPUT {{{
