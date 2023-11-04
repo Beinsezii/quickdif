@@ -28,8 +28,8 @@ from pathlib import Path
 parser = argparse.ArgumentParser(description='Custom diffusers models', add_help=False)
 parser.add_argument('prompts', nargs='+', type=str)
 parser.add_argument('-n', '--negative', type=str, default="blurry, cropped, text")
-parser.add_argument('-w', '--width', type=int, default=1024)
-parser.add_argument('-h', '--height', type=int, default=1024)
+parser.add_argument('-w', '--width', type=int)
+parser.add_argument('-h', '--height', type=int)
 parser.add_argument('-s', '--steps', type=int, default=30)
 parser.add_argument('-g', '--cfg', type=float, default=8.0)
 parser.add_argument('-G', '--rescale', type=float, default=0.7)
@@ -56,7 +56,7 @@ else:
 # CLI }}}
 
 # TORCH {{{
-import torch, gc
+import torch, gc, inspect
 from diffusers import (
     DiffusionPipeline,
     StableDiffusionPipeline,
@@ -72,7 +72,13 @@ dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[a
 # TORCH }}}
 
 # PIPE {{{
-pipe_args = {'torch_dtype': dtype, 'use_safetensors': True, 'add_watermarker': False, 'safety_checker': None, 'watermarker': None}
+pipe_args = {
+    "add_watermarker": False,
+    "safety_checker": None,
+    "torch_dtype": dtype,
+    "use_safetensors": True,
+    "watermarker": None,
+}
 
 if args.model.endswith('.safetensors'):
     pipe = StableDiffusionPipeline.from_single_file(args.model, **pipe_args)
@@ -150,9 +156,15 @@ if hasattr(pipe, 'scheduler'):
 
 # INPUT {{{
 if hasattr(pipe, 'vae'):
-    sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config, timestep_spacing='trailing').init_noise_sigma
-    size = [1, 4, args.height // 8, args.width // 8]
+    size = [
+        1,
+        pipe.unet.config.in_channels,
+        args.height // pipe.vae_scale_factor if args.height is not None else pipe.unet.config.sample_size,
+        args.width // pipe.vae_scale_factor if args.width is not None else pipe.unet.config.sample_size
+    ]
 
+    # colored latents
+    sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config, timestep_spacing='trailing').init_noise_sigma
     if args.color_scale <= 0.0:
         latent_input = torch.zeros(size, dtype=dtype, device='cpu')
     else:
@@ -165,28 +177,36 @@ if hasattr(pipe, 'vae'):
 # INFERENCE {{{
 n = 0
 for (pn, prompt) in enumerate([p for p in args.prompts for _ in range(args.batch_count)]):
-    # add noise
-    if SD or XL:
+    kwargs = {
+        "num_inference_steps": args.steps,
+        "guidance_scale": args.cfg,
+        "num_images_per_prompt": args.batch_size,
+        "guidance_rescale": args.rescale,
+        "clean_caption": False, # stop IF nag. what does this even do
+    }
+
+    kwargs['width'] = getattr(args, 'width', None)
+    kwargs['height'] = getattr(args, 'height', None)
+
+    # NOISE {{{
+    seed = torch.randint(high=2**31-1, size=(1,)).item() if args.seed < 0 else args.seed + pn * args.batch_size
+    if 'latent_input' in locals():
         latents = latent_input.expand(size).clone()
         seeds = []
         for (ln, latent) in enumerate(latents):
-            seed = torch.randint(high=2**31-1, size=(1,)).item() if args.seed < 0 else args.seed + pn * args.batch_size + ln
-            seeds.append(seed)
-            generator = torch.manual_seed(seed)
+            seeds.append(seed + ln)
+            generator = torch.manual_seed(seed + ln)
             # f32 noise for equal seeds amongst other UIs
             latent += torch.randn(latents.shape[1:], generator=generator, dtype=torch.float32)
-        kwargs = {
-            "width": args.width,
-            "height": args.height,
-            "latents": latents,
-            "num_inference_steps": args.steps,
-            "guidance_scale": args.cfg,
-            "guidance_rescale": args.rescale,
-            "num_images_per_prompt": args.batch_size,
-        }
+        kwargs["latents"] = latents
         print("seeds:", ' '.join(map(str, seeds)))
+    else: # No input tensors for diffusion pipeline call?
+        kwargs["generator"] = torch.manual_seed(seed)
+        print("seed:", seed)
+    # NOISE }}}
 
-        # compel
+    # CONDITIONING {{{
+    if 'compel' in locals():
         if XL:
             ncond, npool = compel.build_conditioning_tensor(args.negative)
             pcond, ppool = compel.build_conditioning_tensor(prompt)
@@ -194,17 +214,21 @@ for (pn, prompt) in enumerate([p for p in args.prompts for _ in range(args.batch
         else:
             pcond = compel.build_conditioning_tensor(prompt)
             ncond = compel.build_conditioning_tensor(args.negative)
-
         pcond, ncond = compel.pad_conditioning_tensors_to_same_length([pcond, ncond])
-        kwargs = kwargs | {'prompt_embeds': pcond, 'negative_prompt_embeds': ncond}
+        kwargs |= {'prompt_embeds': pcond, 'negative_prompt_embeds': ncond}
     else:
-        kwargs = {
+        kwargs |= {
             "prompt":prompt,
             "negative_prompt":args.negative,
-            "num_inference_steps":args.steps,
         }
+    # CONDITIONING }}}
 
-    # compute + save
+    # PROCESS {{{
+    # make sure call doesnt err
+    params = inspect.signature(pipe).parameters
+    for k in list(kwargs.keys()):
+        if k not in params: del kwargs[k]
+
     for image in pipe(**kwargs).images:
         p = args.out.joinpath(f"{n:05}.png")
         while p.exists():
@@ -213,13 +237,14 @@ for (pn, prompt) in enumerate([p for p in args.prompts for _ in range(args.batch
 
         image.save(p, format="PNG")
         del image, p
+    # PROCESS }}}
 
-    # fix memleak
-    del kwargs
-    if SD or XL: del latents, pcond, ncond
-    if XL:
-        del ppool, npool
+    # CLEANUP {{{
+    for k in ['kwargs', 'pcond', 'ncond', 'ppool', 'npool', 'latents', 'generator']:
+        if k in locals():
+            del locals()[k]
     if (lambda f, t: f / t)(*torch.cuda.mem_get_info()) < 0.25:
         gc.collect()
         torch.cuda.empty_cache()
+    # CLEANUP }}}
 # INFERENCE }}}
