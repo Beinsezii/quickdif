@@ -66,6 +66,8 @@ from diffusers import (
     DPMSolverMultistepScheduler,
     EulerDiscreteScheduler,
 )
+import transformers
+# from transformers import transformers.models.clip.tokenization_clip.CLIPTokenizer
 from compel import Compel, ReturnedEmbeddingsType
 
 torch.set_float32_matmul_precision('high')
@@ -96,14 +98,15 @@ pipe.enable_model_cpu_offload()
 # PIPE }}}
 
 # TOKENIZER/COMPEL {{{
-if XL:
-    compel = Compel(tokenizer=[pipe.tokenizer, pipe.tokenizer_2],
-                    text_encoder=[pipe.text_encoder, pipe.text_encoder_2],
-                    returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
-                    requires_pooled=[False, True],
-                    truncate_long_prompts=False)
-elif SD:
-    compel = Compel(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder, truncate_long_prompts=False)
+if isinstance(pipe.tokenizer, transformers.models.clip.tokenization_clip.CLIPTokenizer):
+    if XL:
+        compel = Compel(tokenizer=[pipe.tokenizer, pipe.tokenizer_2],
+                        text_encoder=[pipe.text_encoder, pipe.text_encoder_2],
+                        returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
+                        requires_pooled=[False, True],
+                        truncate_long_prompts=False)
+    else:
+        compel = Compel(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder, truncate_long_prompts=False)
 # TOKENIZER/COMPEL }}}
 
 # VAE {{{
@@ -162,13 +165,13 @@ if hasattr(pipe, 'vae'):
     ]
 
     # colored latents
-    sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config, timestep_spacing='trailing').init_noise_sigma
-    if args.color_scale <= 0.0:
-        latent_input = torch.zeros(size, dtype=dtype, device='cpu')
-    else:
+    if args.color_scale > 0 and (SD or XL):
+        sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config, timestep_spacing='trailing').init_noise_sigma
         latent_input = torch.tensor(COLS_XL[args.color] if XL else COLS_FTMSE[args.color], dtype=dtype,
                                     device='cpu').mul(args.color_scale).div(sigma).expand([size[0], size[2], size[3], size[1]]).permute(
                                         (0, 3, 1, 2)).clone()
+    else:
+        latent_input = torch.zeros(size, dtype=dtype, device='cpu')
 
     size[0] = args.batch_size
 # INPUT }}}
