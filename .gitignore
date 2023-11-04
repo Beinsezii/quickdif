@@ -1,3 +1,5 @@
+prompts.yaml
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -17,6 +19,7 @@ eggs/
 lib/
 lib64/
 parts/
+repo/
 sdist/
 var/
 wheels/
