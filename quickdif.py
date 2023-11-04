@@ -59,7 +59,7 @@ else:
 import torch, gc, inspect
 from diffusers import (
     AutoPipelineForText2Image,
-    DiffusionPipeline,
+    # DiffusionPipeline, maybe re-add once multi-stage is manually implemented
     StableDiffusionPipeline,
     StableDiffusionXLPipeline,
     DDIMScheduler,
