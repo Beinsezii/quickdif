@@ -58,6 +58,7 @@ else:
 # TORCH {{{
 import torch, gc, inspect
 from diffusers import (
+    AutoPipelineForText2Image,
     DiffusionPipeline,
     StableDiffusionPipeline,
     StableDiffusionXLPipeline,
@@ -84,7 +85,7 @@ pipe_args = {
 if args.model.endswith('.safetensors'):
     pipe = StableDiffusionPipeline.from_single_file(args.model, **pipe_args)
 else:
-    pipe = DiffusionPipeline.from_pretrained(args.model, **pipe_args)
+    pipe = AutoPipelineForText2Image.from_pretrained(args.model, **pipe_args)
 
 XL = isinstance(pipe, StableDiffusionXLPipeline)
 SD = isinstance(pipe, StableDiffusionPipeline)
@@ -183,8 +184,8 @@ for (pn, prompt) in enumerate([p for p in args.prompts for _ in range(args.batch
         "clean_caption": False,  # stop IF nag. what does this even do
     }
 
-    kwargs['width'] = getattr(args, 'width', None)
-    kwargs['height'] = getattr(args, 'height', None)
+    if args.width is not None: kwargs['width'] = args.width
+    if args.height is not None: kwargs['height'] = args.height
 
     # NOISE {{{
     seed = torch.randint(high=2**31 - 1, size=(1, )).item() if args.seed < 0 else args.seed + pn * args.batch_size
