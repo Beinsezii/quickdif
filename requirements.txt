@@ -1,0 +1,6 @@
+torch >= 2.1
+diffusers >= 0.21
+transformers
+accelerate
+omegaconf
+compel
