@@ -22,28 +22,33 @@ COLS_FTMSE = {
 # LATENT COLORS }}}
 
 # CLI {{{
-import argparse
+import argparse, os
 from pathlib import Path
 
-parser = argparse.ArgumentParser(description='Custom diffusers models', add_help=False)
+outdefault = '/tmp/' if os.path.exists('/tmp/') else './output/'
+mdefault = "stabilityai/stable-diffusion-xl-base-1.0"
+samplers = ['dpm', "ddim", "ddimp", "euler"]
+dtypes = ["fp16", "bf16", "fp32"]
+
+parser = argparse.ArgumentParser(description="Quick and easy inference for a variety of Diffusers models. Not all models support all options", add_help=False)
 parser.add_argument('prompts', nargs='+', type=str)
-parser.add_argument('-n', '--negative', type=str, default="blurry, cropped, text")
-parser.add_argument('-w', '--width', type=int)
-parser.add_argument('-h', '--height', type=int)
-parser.add_argument('-s', '--steps', type=int)
-parser.add_argument('-g', '--cfg', type=float)
-parser.add_argument('-G', '--rescale', type=float)
-parser.add_argument('-b', '--batch-count', type=int, default=1)
-parser.add_argument('-B', '--batch-size', type=int, default=1)
-parser.add_argument('-c', '--color', choices=list(COLS_XL.keys()), default='black')
-parser.add_argument('-C', '--color-scale', type=float, default=0.0)
-parser.add_argument('-m', '--model', type=str, default="stabilityai/stable-diffusion-xl-base-1.0")
-parser.add_argument('-o', '--out', type=Path, default="/tmp/quickdif/")
-parser.add_argument('-d', '--dtype', choices=["fp16", "bf16", "fp32"], default="fp16")
-parser.add_argument('--seed', type=int, default=-1)
-parser.add_argument('-S', '--sampler', choices=['dpm', 'ddim', 'ddimp', 'euler'])
-parser.add_argument('--compile', action='store_true')
-parser.add_argument('--no-trail', action='store_true')
+parser.add_argument('-n', '--negative', type=str, default="blurry, cropped, text", help="Universal negative for all prompts")
+parser.add_argument('-w', '--width', type=int, help="Final output width. Default varies by model")
+parser.add_argument('-h', '--height', type=int, help="Final output height. Default varies by model")
+parser.add_argument('-s', '--steps', type=int, help="Number of inference steps. Default varies by model")
+parser.add_argument('-g', '--cfg', type=float, help="Guidance for conditioning. Default varies by model")
+parser.add_argument('-G', '--rescale', type=float, help="Guidance rescale factor. Default varies by model")
+parser.add_argument('-b', '--batch-count', type=int, default=1, help="Amount of times to run each prompt sequentially. Default 1")
+parser.add_argument('-B', '--batch-size', type=int, default=1, help="Amount of times to run each prompt in parallel. Default 1")
+parser.add_argument('-C', '--color', choices=list(COLS_XL.keys()), default='black', help=f"Color of input latent. Only supported with sd-ft-mse and sdxl VAEs. Default black, can be one of {list(COLS_XL.keys())}")
+parser.add_argument('-c', '--color-scale', type=float, default=0.0, help="Alpha of colored latent. Default 0.0")
+parser.add_argument('-m', '--model', type=str, default=mdefault, help=f"Huggingface model or Stable Diffusion safetensors checkpoint to load. Default {mdefault}")
+parser.add_argument('-o', '--out', type=Path, default="/tmp/quickdif/", help=f"Output directory for images. Default {outdefault}")
+parser.add_argument('-d', '--dtype', choices=dtypes, default="fp16", help=f"Data format for inference. Default fp16, can be one of {dtypes}")
+parser.add_argument('--seed', type=int, default=-1, help="Seed for deterministic outputs. If < 0, seed will be random. Default -1")
+parser.add_argument('-S', '--sampler', choices=samplers, help=f"Override model's default sampler. Can be one of {samplers}")
+parser.add_argument('--compile', action='store_true', help="Compile unet with torch.compile()")
+parser.add_argument('--no-trail', action='store_true', help="Do not force trailing timestep spacing. Changes seeds.")
 parser.add_argument('--help', action='help')
 
 args = parser.parse_args()
@@ -114,7 +119,7 @@ if hasattr(pipe, 'tokenizer') and isinstance(pipe.tokenizer, transformers.models
 if hasattr(pipe, 'vae'):
     pipe.enable_vae_slicing()
     if dtype != torch.float16: pipe.vae.force_upcast = False
-    if not args.compile and AMD: pipe.vae.set_default_attn_processor()
+    if AMD: pipe.vae.set_default_attn_processor()
 # VAE }}}
 
 # UNET {{{
