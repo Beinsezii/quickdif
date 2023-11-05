@@ -189,7 +189,10 @@ for (pn, prompt) in enumerate([p for p in args.prompts for _ in range(args.batch
     if args.width is not None: kwargs['width'] = args.width
     if args.height is not None: kwargs['height'] = args.height
     if args.steps is not None: kwargs["num_inference_steps"] = args.steps
-    if args.cfg is not None: kwargs["guidance_scale"] = args.cfg
+    if args.cfg is not None:
+        kwargs["guidance_scale"] = args.cfg
+        kwargs["prior_guidance_scale"] = args.cfg
+        kwargs["decoder_guidance_scale"] = args.cfg
     if args.rescale is not None: kwargs["guidance_rescale"] = args.rescale
 
     # NOISE {{{
