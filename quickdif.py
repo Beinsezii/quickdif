@@ -29,6 +29,7 @@ outdefault = '/tmp/' if os.path.exists('/tmp/') else './output/'
 mdefault = "stabilityai/stable-diffusion-xl-base-1.0"
 samplers = ['dpm', "ddim", "ddimp", "euler"]
 dtypes = ["fp16", "bf16", "fp32"]
+offload = ["none", "model", "sequential"]
 
 parser = argparse.ArgumentParser(description="Quick and easy inference for a variety of Diffusers models. Not all models support all options",
                                  add_help=False)
@@ -56,6 +57,7 @@ parser.add_argument('-o', '--out', type=Path, default="/tmp/quickdif/", help=f"O
 parser.add_argument('-d', '--dtype', choices=dtypes, default="fp16", help=f"Data format for inference. Default fp16, can be one of {dtypes}")
 parser.add_argument('--seed', type=int, nargs='*', help="Seed for deterministic outputs. If not set, will be random")
 parser.add_argument('-S', '--sampler', choices=samplers, help=f"Override model's default sampler. Can be one of {samplers}")
+parser.add_argument('--offload', choices=offload, default="model", help=f"Set amount of CPU offload. Can be one of {offload}. Default 'model'")
 parser.add_argument('--compile', action='store_true', help="Compile unet with torch.compile()")
 parser.add_argument('--no-trail', action='store_true', help="Do not force trailing timestep spacing. Changes seeds.")
 parser.add_argument('--help', action='help')
@@ -81,7 +83,6 @@ from diffusers import (
     DPMSolverMultistepScheduler,
     EulerDiscreteScheduler,
 )
-from diffusers.models.attention_processor import AttnProcessor
 import transformers
 # from transformers import transformers.models.clip.tokenization_clip.CLIPTokenizer
 from compel import Compel, ReturnedEmbeddingsType
@@ -110,7 +111,9 @@ SD = isinstance(pipe, StableDiffusionPipeline)
 
 pipe.safety_checker = None
 pipe.watermarker = None
-pipe.enable_model_cpu_offload()
+if args.offload == "model": pipe.enable_model_cpu_offload()
+elif args.offload == "sequential": pipe.enable_sequential_cpu_offload()
+else: pipe.to('cuda')
 # PIPE }}}
 
 # MODEL {{{
@@ -121,7 +124,7 @@ if hasattr(pipe, 'transformer'): weights = pipe.transformer
 if args.compile:
     if weights: weights = torch.compile(weights)
 elif AMD:
-    if weights and hasattr(weights, 'set_attn_processor'): weights.set_attn_processor(AttnProcessor())
+    if weights and hasattr(weights, 'set_default_attn_processor'): weights.set_default_attn_processor()
 # MODEL }}}
 
 # TOKENIZER/COMPEL {{{
