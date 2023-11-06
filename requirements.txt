@@ -1,5 +1,5 @@
 torch >= 2.1
-diffusers >= 0.21
+diffusers >= 0.22
 transformers
 accelerate
 omegaconf
