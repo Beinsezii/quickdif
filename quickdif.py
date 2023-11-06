@@ -195,15 +195,12 @@ if hasattr(pipe, 'vae'):
 # INPUT ARGS {{{
 i32max = 2**31 - 1
 seeds = [torch.randint(high=i32max, low=-i32max, size=(1, )).item()] if not args.seed else args.seed
-key_dicts = [{
-    "num_images_per_prompt": args.batch_size,
-    'seed': s + n * args.batch_size
-    } for n in range(args.batch_count) for s in seeds]
-key_dicts = [k | {'prompt':p} for k in key_dicts for p in args.prompts]
-key_dicts = [k | {"negative_prompt":n} for k in key_dicts for n in args.negative]
-if args.steps: key_dicts = [k | {'num_inference_steps':s} for k in key_dicts for s in args.steps]
-if args.cfg: key_dicts = [k | {'guidance_scale':g, 'prior_guidance_scale':g, 'decoder_guidance_scale':g} for k in key_dicts for g in args.cfg]
-if args.rescale: key_dicts = [k | {'guidance_rescale':g} for k in key_dicts for g in args.rescale]
+key_dicts = [{"num_images_per_prompt": args.batch_size, 'seed': s + n * args.batch_size} for n in range(args.batch_count) for s in seeds]
+key_dicts = [k | {'prompt': p} for k in key_dicts for p in args.prompts]
+key_dicts = [k | {"negative_prompt": n} for k in key_dicts for n in args.negative]
+if args.steps: key_dicts = [k | {'num_inference_steps': s} for k in key_dicts for s in args.steps]
+if args.cfg: key_dicts = [k | {'guidance_scale': g, 'prior_guidance_scale': g, 'decoder_guidance_scale': g} for k in key_dicts for g in args.cfg]
+if args.rescale: key_dicts = [k | {'guidance_rescale': g} for k in key_dicts for g in args.rescale]
 # INPUT ARGS }}}
 
 # INFERENCE {{{
