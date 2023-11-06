@@ -81,6 +81,7 @@ from diffusers import (
     DPMSolverMultistepScheduler,
     EulerDiscreteScheduler,
 )
+from diffusers.models.attention_processor import AttnProcessor
 import transformers
 # from transformers import transformers.models.clip.tokenization_clip.CLIPTokenizer
 from compel import Compel, ReturnedEmbeddingsType
@@ -112,6 +113,17 @@ pipe.watermarker = None
 pipe.enable_model_cpu_offload()
 # PIPE }}}
 
+# MODEL {{{
+weights = None
+if hasattr(pipe, 'unet'): weights = pipe.unet
+if hasattr(pipe, 'transformer'): weights = pipe.transformer
+
+if args.compile:
+    if weights: weights = torch.compile(weights)
+elif AMD:
+    if weights and hasattr(weights, 'set_attn_processor'): weights.set_attn_processor(AttnProcessor())
+# MODEL }}}
+
 # TOKENIZER/COMPEL {{{
 if hasattr(pipe, 'tokenizer') and isinstance(pipe.tokenizer, transformers.models.clip.tokenization_clip.CLIPTokenizer):
     if XL:
@@ -126,16 +138,10 @@ if hasattr(pipe, 'tokenizer') and isinstance(pipe.tokenizer, transformers.models
 
 # VAE {{{
 if hasattr(pipe, 'vae'):
-    pipe.enable_vae_slicing()
+    pipe.vae.enable_slicing()
     if dtype != torch.float16: pipe.vae.force_upcast = False
     if AMD: pipe.vae.set_default_attn_processor()
 # VAE }}}
-
-# UNET {{{
-if hasattr(pipe, 'unet'):
-    if args.compile: pipe.unet = torch.compile(pipe.unet)
-    elif AMD: pipe.unet.set_default_attn_processor()
-# UNET }}}
 
 # SCHEDULER {{{
 if hasattr(pipe, 'scheduler'):
@@ -174,10 +180,10 @@ if hasattr(pipe, 'scheduler'):
 # SCHEDULER }}}
 
 # INPUT TENSOR {{{
-if hasattr(pipe, 'vae'):
+if hasattr(pipe, 'vae') and weights:
     size = [
-        1, pipe.unet.config.in_channels, args.height // pipe.vae_scale_factor if args.height else pipe.unet.config.sample_size,
-        args.width // pipe.vae_scale_factor if args.width else pipe.unet.config.sample_size
+        1, weights.config.in_channels, args.height // pipe.vae_scale_factor if args.height else weights.config.sample_size,
+        args.width // pipe.vae_scale_factor if args.width else weights.config.sample_size
     ]
 
     # colored latents
