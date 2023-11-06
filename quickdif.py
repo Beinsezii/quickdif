@@ -207,7 +207,7 @@ if args.rescale: key_dicts = [k | {'guidance_rescale':g} for k in key_dicts for 
 # INPUT ARGS }}}
 
 # INFERENCE {{{
-print(f"Generating {len(key_dicts)} images...")
+print(f"Generating {len(key_dicts)} batches of {args.batch_size} images for {len(key_dicts) * args.batch_size} total...")
 n = 0
 for kwargs in key_dicts:
     seed = kwargs.pop('seed')
