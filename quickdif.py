@@ -33,12 +33,12 @@ dtypes = ["fp16", "bf16", "fp32"]
 parser = argparse.ArgumentParser(description="Quick and easy inference for a variety of Diffusers models. Not all models support all options",
                                  add_help=False)
 parser.add_argument('prompts', nargs='+', type=str)
-parser.add_argument('-n', '--negative', type=str, default="blurry, cropped, text", help="Universal negative for all prompts")
+parser.add_argument('-n', '--negative', type=str, nargs='+', default=["blurry, cropped, text"], help="Universal negative for all prompts")
 parser.add_argument('-w', '--width', type=int, help="Final output width. Default varies by model")
 parser.add_argument('-h', '--height', type=int, help="Final output height. Default varies by model")
-parser.add_argument('-s', '--steps', type=int, help="Number of inference steps. Default varies by model")
-parser.add_argument('-g', '--cfg', type=float, help="Guidance for conditioning. Default varies by model")
-parser.add_argument('-G', '--rescale', type=float, default=0.7, help="Guidance rescale factor. Default 0.7")
+parser.add_argument('-s', '--steps', type=int, nargs='*', default=[30], help="Number of inference steps. Default 30")
+parser.add_argument('-g', '--cfg', type=float, nargs='*', default=[8], help="Guidance for conditioning. Default 8")
+parser.add_argument('-G', '--rescale', type=float, nargs='*', default=[0.7], help="Guidance rescale factor. Default 0.7")
 parser.add_argument('-b', '--batch-count', type=int, default=1, help="Amount of times to run each prompt sequentially. Default 1")
 parser.add_argument('-B', '--batch-size', type=int, default=1, help="Amount of times to run each prompt in parallel. Default 1")
 parser.add_argument('-C',
@@ -173,11 +173,11 @@ if hasattr(pipe, 'scheduler'):
     if not args.no_trail: pipe.scheduler.config.timestep_spacing = 'trailing'
 # SCHEDULER }}}
 
-# INPUT {{{
+# INPUT TENSOR {{{
 if hasattr(pipe, 'vae'):
     size = [
-        1, pipe.unet.config.in_channels, args.height // pipe.vae_scale_factor if args.height is not None else pipe.unet.config.sample_size,
-        args.width // pipe.vae_scale_factor if args.width is not None else pipe.unet.config.sample_size
+        1, pipe.unet.config.in_channels, args.height // pipe.vae_scale_factor if args.height else pipe.unet.config.sample_size,
+        args.width // pipe.vae_scale_factor if args.width else pipe.unet.config.sample_size
     ]
 
     # colored latents
@@ -190,27 +190,33 @@ if hasattr(pipe, 'vae'):
         latent_input = torch.zeros(size, dtype=dtype, device='cpu')
 
     size[0] = args.batch_size
-# INPUT }}}
+# INPUT TENSOR }}}
+
+# INPUT ARGS {{{
+key_dicts = [{
+    "num_images_per_prompt": args.batch_size,
+    'seed': torch.randint(high=2**31 - 1, size=(1, )).item() if args.seed < 0 else args.seed + n * args.batch_size
+    } for n in range(args.batch_count)]
+key_dicts = [k | {'prompt':p} for k in key_dicts for p in args.prompts]
+key_dicts = [k | {"negative_prompt":n} for k in key_dicts for n in args.negative]
+if args.steps: key_dicts = [k | {'num_inference_steps':s} for k in key_dicts for s in args.steps]
+if args.cfg: key_dicts = [k | {'guidance_scale':g, 'prior_guidance_scale':g, 'decoder_guidance_scale':g} for k in key_dicts for g in args.cfg]
+if args.rescale: key_dicts = [k | {'guidance_rescale':g} for k in key_dicts for g in args.rescale]
+# INPUT ARGS }}}
 
 # INFERENCE {{{
+print(f"Generating {len(key_dicts)} images...")
 n = 0
-for (pn, prompt) in enumerate([p for p in args.prompts for _ in range(args.batch_count)]):
-    kwargs = {
-        "num_images_per_prompt": args.batch_size,
-        "guidance_rescale": args.rescale,
+for kwargs in key_dicts:
+    seed = kwargs.pop('seed')
+    if args.width: kwargs['width'] = args.width
+    if args.height: kwargs['height'] = args.height
+    print(kwargs)
+    kwargs |= {
         "clean_caption": False,  # stop IF nag. what does this even do
     }
 
-    if args.width is not None: kwargs['width'] = args.width
-    if args.height is not None: kwargs['height'] = args.height
-    if args.steps is not None: kwargs["num_inference_steps"] = args.steps
-    if args.cfg is not None:
-        kwargs["guidance_scale"] = args.cfg
-        kwargs["prior_guidance_scale"] = args.cfg
-        kwargs["decoder_guidance_scale"] = args.cfg
-
     # NOISE {{{
-    seed = torch.randint(high=2**31 - 1, size=(1, )).item() if args.seed < 0 else args.seed + pn * args.batch_size
     if 'latent_input' in locals():
         latents = latent_input.expand(size).clone()
         seeds = []
@@ -228,20 +234,17 @@ for (pn, prompt) in enumerate([p for p in args.prompts for _ in range(args.batch
 
     # CONDITIONING {{{
     if 'compel' in locals():
+        pos = kwargs.pop('prompt')
+        neg = kwargs.pop('negative_prompt')
         if XL:
-            ncond, npool = compel.build_conditioning_tensor(args.negative)
-            pcond, ppool = compel.build_conditioning_tensor(prompt)
+            ncond, npool = compel.build_conditioning_tensor(neg)
+            pcond, ppool = compel.build_conditioning_tensor(pos)
             kwargs = kwargs | {'pooled_prompt_embeds': ppool, 'negative_pooled_prompt_embeds': npool}
         else:
-            pcond = compel.build_conditioning_tensor(prompt)
-            ncond = compel.build_conditioning_tensor(args.negative)
+            pcond = compel.build_conditioning_tensor(pos)
+            ncond = compel.build_conditioning_tensor(neg)
         pcond, ncond = compel.pad_conditioning_tensors_to_same_length([pcond, ncond])
         kwargs |= {'prompt_embeds': pcond, 'negative_prompt_embeds': ncond}
-    else:
-        kwargs |= {
-            "prompt": prompt,
-            "negative_prompt": args.negative,
-        }
     # CONDITIONING }}}
 
     # PROCESS {{{
