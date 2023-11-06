@@ -54,7 +54,7 @@ parser.add_argument('-m',
                     help=f"Huggingface model or Stable Diffusion safetensors checkpoint to load. Default {mdefault}")
 parser.add_argument('-o', '--out', type=Path, default="/tmp/quickdif/", help=f"Output directory for images. Default {outdefault}")
 parser.add_argument('-d', '--dtype', choices=dtypes, default="fp16", help=f"Data format for inference. Default fp16, can be one of {dtypes}")
-parser.add_argument('--seed', type=int, default=-1, help="Seed for deterministic outputs. If < 0, seed will be random. Default -1")
+parser.add_argument('--seed', type=int, nargs='*', help="Seed for deterministic outputs. If not set, will be random")
 parser.add_argument('-S', '--sampler', choices=samplers, help=f"Override model's default sampler. Can be one of {samplers}")
 parser.add_argument('--compile', action='store_true', help="Compile unet with torch.compile()")
 parser.add_argument('--no-trail', action='store_true', help="Do not force trailing timestep spacing. Changes seeds.")
@@ -193,10 +193,12 @@ if hasattr(pipe, 'vae'):
 # INPUT TENSOR }}}
 
 # INPUT ARGS {{{
+i32max = 2**31 - 1
+seeds = [torch.randint(high=i32max, low=-i32max, size=(1, )).item()] if not args.seed else args.seed
 key_dicts = [{
     "num_images_per_prompt": args.batch_size,
-    'seed': torch.randint(high=2**31 - 1, size=(1, )).item() if args.seed < 0 else args.seed + n * args.batch_size
-    } for n in range(args.batch_count)]
+    'seed': s + n * args.batch_size
+    } for n in range(args.batch_count) for s in seeds]
 key_dicts = [k | {'prompt':p} for k in key_dicts for p in args.prompts]
 key_dicts = [k | {"negative_prompt":n} for k in key_dicts for n in args.negative]
 if args.steps: key_dicts = [k | {'num_inference_steps':s} for k in key_dicts for s in args.steps]
