@@ -38,7 +38,7 @@ parser.add_argument('-w', '--width', type=int, help="Final output width. Default
 parser.add_argument('-h', '--height', type=int, help="Final output height. Default varies by model")
 parser.add_argument('-s', '--steps', type=int, help="Number of inference steps. Default varies by model")
 parser.add_argument('-g', '--cfg', type=float, help="Guidance for conditioning. Default varies by model")
-parser.add_argument('-G', '--rescale', type=float, help="Guidance rescale factor. Default varies by model")
+parser.add_argument('-G', '--rescale', type=float, default=0.7, help="Guidance rescale factor. Default 0.7")
 parser.add_argument('-b', '--batch-count', type=int, default=1, help="Amount of times to run each prompt sequentially. Default 1")
 parser.add_argument('-B', '--batch-size', type=int, default=1, help="Amount of times to run each prompt in parallel. Default 1")
 parser.add_argument('-C',
@@ -197,6 +197,7 @@ n = 0
 for (pn, prompt) in enumerate([p for p in args.prompts for _ in range(args.batch_count)]):
     kwargs = {
         "num_images_per_prompt": args.batch_size,
+        "guidance_rescale": args.rescale,
         "clean_caption": False,  # stop IF nag. what does this even do
     }
 
@@ -207,7 +208,6 @@ for (pn, prompt) in enumerate([p for p in args.prompts for _ in range(args.batch
         kwargs["guidance_scale"] = args.cfg
         kwargs["prior_guidance_scale"] = args.cfg
         kwargs["decoder_guidance_scale"] = args.cfg
-    if args.rescale is not None: kwargs["guidance_rescale"] = args.rescale
 
     # NOISE {{{
     seed = torch.randint(high=2**31 - 1, size=(1, )).item() if args.seed < 0 else args.seed + pn * args.batch_size
