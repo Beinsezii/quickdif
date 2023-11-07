@@ -76,12 +76,13 @@ else:
 import torch, gc, inspect
 from diffusers import (
     AutoPipelineForText2Image,
-    # DiffusionPipeline, maybe re-add once multi-stage is manually implemented
-    StableDiffusionPipeline,
-    StableDiffusionXLPipeline,
     DDIMScheduler,
+    # DiffusionPipeline, maybe re-add once multi-stage is manually implemented
     DPMSolverMultistepScheduler,
     EulerDiscreteScheduler,
+    PixArtAlphaPipeline,
+    StableDiffusionPipeline,
+    StableDiffusionXLPipeline,
 )
 import transformers
 # from transformers import transformers.models.clip.tokenization_clip.CLIPTokenizer
@@ -190,9 +191,12 @@ if hasattr(pipe, 'vae') and weights:
     ]
 
     # colored latents
-    if args.color_scale > 0 and (SD or XL):
+    cols = None
+    if XL: cols = COLS_XL
+    elif SD or isinstance(pipe, PixArtAlphaPipeline): cols = COLS_FTMSE
+    if args.color_scale > 0 and cols:
         sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config, timestep_spacing='trailing').init_noise_sigma
-        latent_input = torch.tensor(COLS_XL[args.color] if XL else COLS_FTMSE[args.color], dtype=dtype,
+        latent_input = torch.tensor(cols[args.color], dtype=dtype,
                                     device='cpu').mul(args.color_scale).div(sigma).expand([size[0], size[2], size[3], size[1]]).permute(
                                         (0, 3, 1, 2)).clone()
     else:
