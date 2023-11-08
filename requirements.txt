@@ -1,5 +1,5 @@
 torch >= 2.1
-diffusers @ git+https://github.com/Beinsezii/diffusers.git # has my pixart patch
+diffusers @ git+https://github.com/Beinsezii/diffusers.git@v0.22.3-patch # has my pixart patch
 transformers
 accelerate
 omegaconf
