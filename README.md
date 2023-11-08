@@ -2,7 +2,7 @@
 Quick and easy CLI inference that just works™ for a variety of Diffusers models
 
 ## Including
-  - Verified working with Stable Diffusion (1.5/2.1/XL Base), Wuerstchen, Kandinsky22, DeepFloydIF (Stage 1 only)
+  - Verified working with Stable Diffusion (1.5/2.1/XL Base), Wuerstchen, Kandinsky22, Pixart, DeepFloydIF (Stage 1 only)
   - Supports many common settings found in GUIs
   - Some more advanced options like `torch.compile()` and colored latents
   - Extremely small 1-shot script using `accelerate` for hot loading models
