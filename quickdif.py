@@ -87,6 +87,7 @@ from diffusers import (
 import transformers
 # from transformers import transformers.models.clip.tokenization_clip.CLIPTokenizer
 from compel import Compel, ReturnedEmbeddingsType
+from PIL.PngImagePlugin import PngInfo
 
 torch.set_float32_matmul_precision('high')
 AMD = 'AMD' in torch.cuda.get_device_name()
@@ -221,9 +222,13 @@ print(f"Generating {len(key_dicts)} batches of {args.batch_size} images for {len
 n = 0
 for kwargs in key_dicts:
     seed = kwargs.pop('seed')
+    params = inspect.signature(pipe).parameters
     if args.width: kwargs['width'] = args.width
     if args.height: kwargs['height'] = args.height
-    print(kwargs)
+    meta = PngInfo()
+    meta.add_text('model', args.model)
+    for k in kwargs.keys():
+        if k in params: meta.add_text(k, str(kwargs[k]))
     kwargs |= {
         "clean_caption": False,  # stop IF nag. what does this even do
     }
@@ -261,22 +266,22 @@ for kwargs in key_dicts:
 
     # PROCESS {{{
     # make sure call doesnt err
-    params = inspect.signature(pipe).parameters
     for k in list(kwargs.keys()):
         if k not in params: del kwargs[k]
 
-    for image in pipe(**kwargs).images:
+    for n, image in enumerate(pipe(**kwargs).images):
         p = args.out.joinpath(f"{n:05}.png")
+        meta.add_text('seed', str(seed+(n if 'latents' in kwargs else 0)))
         while p.exists():
             n += 1
             p = args.out.joinpath(f"{n:05}.png")
 
-        image.save(p, format="PNG")
+        image.save(p, format="PNG", pnginfo=meta)
         del image, p
     # PROCESS }}}
 
     # CLEANUP {{{
-    for k in ['kwargs', 'pcond', 'ncond', 'ppool', 'npool', 'latents', 'generator']:
+    for k in ['kwargs', 'pcond', 'ncond', 'ppool', 'npool', 'latents', 'generator', 'meta']:
         if k in locals():
             del locals()[k]
     if (lambda f, t: f / t)(*torch.cuda.mem_get_info()) < 0.25:
