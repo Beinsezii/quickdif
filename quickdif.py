@@ -75,7 +75,7 @@ else:
 # CLI }}}
 
 # TORCH {{{
-import torch, gc, inspect
+import torch, inspect
 from diffusers import (
     AutoPipelineForText2Image,
     DDIMScheduler,
@@ -91,6 +91,7 @@ import transformers
 from compel import Compel, ReturnedEmbeddingsType
 from PIL.PngImagePlugin import PngInfo
 
+torch.set_grad_enabled(False)
 torch.set_float32_matmul_precision('high')
 AMD = 'AMD' in torch.cuda.get_device_name()
 dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[args.dtype]
@@ -292,12 +293,4 @@ for kwargs in key_dicts:
         image.save(p, format="PNG", pnginfo=meta)
         del image, p
     # PROCESS }}}
-
-    # CLEANUP {{{
-    for k in ['kwargs', 'pcond', 'ncond', 'ppool', 'npool', 'latents', 'generator', 'meta']:
-        if k in locals():
-            del locals()[k]
-    gc.collect()
-    torch.cuda.empty_cache()
-    # CLEANUP }}}
 # INFERENCE }}}
