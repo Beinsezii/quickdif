@@ -4,16 +4,17 @@ Quick and easy CLI inference that just works™ for a variety of Diffusers model
 ## Including
   - Verified working with Stable Diffusion (1.5/2.1/XL Base), Wuerstchen, Kandinsky22, Pixart, DeepFloydIF (Stage 1 only)
   - Supports many common settings found in GUIs
-  - Some more advanced options like `torch.compile()` and colored latents
+  - Iterate over parameters like prompt or CFG
+  - Some more advanced tweaks like Lora and colored latents
   - Extremely small 1-shot script using `accelerate` for hot loading models
   - Just works™; not broken
 
 ## Not Including
-  - Lora, ControlNet + other Stable Diffusion extensions
-  - Other diffusion models may or may not work properly.
+  - ControlNet + other Stable Diffusion extensions
+  - Other diffusion models may or may not work properly
   - Multi-stage model control. DFIF Stage 2, SDXL Refiner, Wuerstchen/Kandinsky more precise controls
   - Server/API for a perpetual instance
-  - Grids/N-arg settings outside of prompts
+  - Output as grid
   - 100% maximum optimization
   - 1-click installer
 
