@@ -53,6 +53,8 @@ parser.add_argument('-m',
                     type=str,
                     default=mdefault,
                     help=f"Huggingface model or Stable Diffusion safetensors checkpoint to load. Default {mdefault}")
+parser.add_argument('-l', '--lora', type=str, help="Apply a Lora")
+parser.add_argument('-L', '--lora-scale', type=float, default=1.0, help="Strength of the lora. Default 1.0")
 parser.add_argument('-o', '--out', type=Path, default="/tmp/quickdif/", help=f"Output directory for images. Default {outdefault}")
 parser.add_argument('-d', '--dtype', choices=dtypes, default="fp16", help=f"Data format for inference. Default fp16, can be one of {dtypes}")
 parser.add_argument('--seed', type=int, nargs='*', help="Seed for deterministic outputs. If not set, will be random")
@@ -128,6 +130,11 @@ if args.compile:
 elif AMD:
     if weights and hasattr(weights, 'set_default_attn_processor'): weights.set_default_attn_processor()
 # MODEL }}}
+
+# LORA {{{
+if args.lora_scale == 0: args.lora = None
+if args.lora: pipe.load_lora_weights(args.lora)
+# LORA }}}
 
 # TOKENIZER/COMPEL {{{
 if hasattr(pipe, 'tokenizer') and isinstance(pipe.tokenizer, transformers.models.clip.tokenization_clip.CLIPTokenizer):
@@ -207,9 +214,11 @@ if hasattr(pipe, 'vae') and weights:
 # INPUT TENSOR }}}
 
 # INPUT ARGS {{{
+base_dict = {"num_images_per_prompt": args.batch_size}
+if args.lora: base_dict |= {'cross_attention_kwargs':{"scale": args.lora_scale}}
 i32max = 2**31 - 1
 seeds = [torch.randint(high=i32max, low=-i32max, size=(1, )).item()] if not args.seed else args.seed
-key_dicts = [{"num_images_per_prompt": args.batch_size, 'seed': s + n * args.batch_size} for n in range(args.batch_count) for s in seeds]
+key_dicts = [base_dict | {'seed': s + n * args.batch_size} for n in range(args.batch_count) for s in seeds]
 key_dicts = [k | {'prompt': p} for k in key_dicts for p in args.prompts]
 key_dicts = [k | {"negative_prompt": n} for k in key_dicts for n in args.negative]
 if args.steps: key_dicts = [k | {'num_inference_steps': s} for k in key_dicts for s in args.steps]
@@ -227,8 +236,12 @@ for kwargs in key_dicts:
     if args.height: kwargs['height'] = args.height
     meta = PngInfo()
     meta.add_text('model', args.model)
+    if args.lora:
+        meta.add_text('lora', args.lora)
+        meta.add_text('lora_scale', str(args.lora_scale))
     for k in kwargs.keys():
-        if k in params: meta.add_text(k, str(kwargs[k]))
+        # TODO: use a proper meta dict
+        if k in params and k != 'cross_attention_kwargs': meta.add_text(k, str(kwargs[k]))
     kwargs |= {
         "clean_caption": False,  # stop IF nag. what does this even do
     }
