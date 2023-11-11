@@ -284,8 +284,7 @@ for kwargs in key_dicts:
     for k in ['kwargs', 'pcond', 'ncond', 'ppool', 'npool', 'latents', 'generator', 'meta']:
         if k in locals():
             del locals()[k]
-    if (lambda f, t: f / t)(*torch.cuda.mem_get_info()) < 0.25:
-        gc.collect()
-        torch.cuda.empty_cache()
+    gc.collect()
+    torch.cuda.empty_cache()
     # CLEANUP }}}
 # INFERENCE }}}
