@@ -291,6 +291,9 @@ for kwargs in key_dicts:
     for k in list(kwargs.keys()):
         if k not in params: del kwargs[k]
 
+    if 'num_inference_steps' in kwargs: meta['steps'] = kwargs['num_inference_steps']
+    if 'guidance_scale' in kwargs: meta['cfg'] = kwargs['guidance_scale']
+    if 'guidance_rescale' in kwargs: meta['rescale'] = kwargs['guidance_rescale']
     for n, image in enumerate(pipe(**kwargs).images):
         p = args.out.joinpath(f"{filenum:05}.png")
         while p.exists():
