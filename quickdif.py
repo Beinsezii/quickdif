@@ -72,6 +72,14 @@ elif not args.out.exists():
     args.out.mkdir()
 else:
     raise ValueError("out must be directory")
+
+# start meta
+base_meta = {
+    "model": args.model,
+    "url": 'https://github.com/Beinsezii/quickdif'
+}
+if args.batch_size > 1: base_meta["batch_size"] = args.batch_size
+if args.sampler: base_meta['sampler'] = args.sampler
 # CLI }}}
 
 # TORCH {{{
@@ -134,7 +142,10 @@ elif AMD:
 
 # LORA {{{
 if args.lora_scale == 0: args.lora = None
-if args.lora: pipe.load_lora_weights(args.lora)
+if args.lora:
+    pipe.load_lora_weights(args.lora)
+    base_meta['lora'] = args.lora
+    base_meta['lora_scale'] = args.lora_scale
 # LORA }}}
 
 # TOKENIZER/COMPEL {{{
@@ -208,6 +219,8 @@ if hasattr(pipe, 'vae') and weights:
         latent_input = torch.tensor(cols[args.color], dtype=dtype,
                                     device='cpu').mul(args.color_scale).div(sigma).expand([size[0], size[2], size[3], size[1]]).permute(
                                         (0, 3, 1, 2)).clone()
+        base_meta['color'] = args.color
+        base_meta['color_scale'] = args.color_scale
     else:
         latent_input = torch.zeros(size, dtype=dtype, device='cpu')
 
@@ -215,8 +228,13 @@ if hasattr(pipe, 'vae') and weights:
 # INPUT TENSOR }}}
 
 # INPUT ARGS {{{
-base_dict = {"num_images_per_prompt": args.batch_size}
-if args.lora: base_dict |= {'cross_attention_kwargs':{"scale": args.lora_scale}}
+base_dict = {
+    "num_images_per_prompt": args.batch_size,
+    "clean_caption": False,  # stop IF nag. what does this even do
+}
+if args.width: base_dict['width'] = args.width
+if args.height: base_dict['height'] = args.height
+if args.lora: base_dict['cross_attention_kwargs'] = {"scale": args.lora_scale}
 i32max = 2**31 - 1
 seeds = [torch.randint(high=i32max, low=-i32max, size=(1, )).item()] if not args.seed else args.seed
 key_dicts = [base_dict | {'seed': s + n * args.batch_size} for n in range(args.batch_count) for s in seeds]
@@ -229,31 +247,19 @@ if args.rescale: key_dicts = [k | {'guidance_rescale': g} for k in key_dicts for
 
 # INFERENCE {{{
 print(f"Generating {len(key_dicts)} batches of {args.batch_size} images for {len(key_dicts) * args.batch_size} total...")
-n = 0
+filenum = 0
 for kwargs in key_dicts:
+    meta = base_meta.copy()
     seed = kwargs.pop('seed')
     params = inspect.signature(pipe).parameters
-    if args.width: kwargs['width'] = args.width
-    if args.height: kwargs['height'] = args.height
-    meta = PngInfo()
-    meta.add_text('model', args.model)
-    if args.lora:
-        meta.add_text('lora', args.lora)
-        meta.add_text('lora_scale', str(args.lora_scale))
-    for k in kwargs.keys():
-        # TODO: use a proper meta dict
-        if k in params and k != 'cross_attention_kwargs': meta.add_text(k, str(kwargs[k]))
-    kwargs |= {
-        "clean_caption": False,  # stop IF nag. what does this even do
-    }
 
     # NOISE {{{
     if 'latent_input' in locals():
         latents = latent_input.expand(size).clone()
         seeds = []
-        for (ln, latent) in enumerate(latents):
-            seeds.append(seed + ln)
-            generator = torch.manual_seed(seed + ln)
+        for n, latent in enumerate(latents):
+            seeds.append(seed + n)
+            generator = torch.manual_seed(seed + n)
             # f32 noise for equal seeds amongst other UIs
             latent += torch.randn(latents.shape[1:], generator=generator, dtype=torch.float32)
         kwargs["latents"] = latents
@@ -264,6 +270,8 @@ for kwargs in key_dicts:
     # NOISE }}}
 
     # CONDITIONING {{{
+    meta['prompt'] = kwargs['prompt']
+    meta['negative'] = kwargs['negative_prompt']
     if 'compel' in locals():
         pos = kwargs.pop('prompt')
         neg = kwargs.pop('negative_prompt')
@@ -284,13 +292,17 @@ for kwargs in key_dicts:
         if k not in params: del kwargs[k]
 
     for n, image in enumerate(pipe(**kwargs).images):
-        p = args.out.joinpath(f"{n:05}.png")
-        meta.add_text('seed', str(seed+(n if 'latents' in kwargs else 0)))
+        p = args.out.joinpath(f"{filenum:05}.png")
         while p.exists():
-            n += 1
-            p = args.out.joinpath(f"{n:05}.png")
-
-        image.save(p, format="PNG", pnginfo=meta)
-        del image, p
+            filenum += 1
+            p = args.out.joinpath(f"{filenum:05}.png")
+        pnginfo = PngInfo()
+        for (k, v) in meta.items():
+            pnginfo.add_text(k, str(v))
+        if 'latents' in kwargs or n == 0:
+            pnginfo.add_text('seed', str(seed + n))
+        else:
+            pnginfo.add_text('seed', f"{seed} + {n}")
+        image.save(p, format="PNG", pnginfo=pnginfo)
     # PROCESS }}}
 # INFERENCE }}}
