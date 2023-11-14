@@ -206,7 +206,8 @@ if hasattr(pipe, 'scheduler'):
             tsbase = pipe.scheduler.set_timesteps
             def tspatch(*args, **kwargs):
                 tsbase(*args, **kwargs)
-                pipe.scheduler.sigmas = rescale_zero_terminal_snr_sigmas(pipe.scheduler.sigmas)
+                # diffusers adds an extra 0 sig to avoid extra noise at end
+                pipe.scheduler.sigmas[:-1] = rescale_zero_terminal_snr_sigmas(pipe.scheduler.sigmas[:-1])
             pipe.scheduler.set_timesteps = tspatch
 
     # what most UIs use
