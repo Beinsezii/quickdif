@@ -30,6 +30,7 @@ mdefault = "stabilityai/stable-diffusion-xl-base-1.0"
 samplers = ['dpm', "ddim", "euler"]
 dtypes = ["fp16", "bf16", "fp32"]
 offload = ["model", "sequential"]
+noise_types = ["cpu16", "cpu16b", "cpu32", "cuda16", "cuda16b", "cuda32"]
 
 parser = argparse.ArgumentParser(description="Quick and easy inference for a variety of Diffusers models. Not all models support all options",
                                  add_help=False)
@@ -59,6 +60,7 @@ parser.add_argument('-o', '--out', type=Path, default="/tmp/quickdif/", help=f"O
 parser.add_argument('-d', '--dtype', choices=dtypes, default="fp16", help=f"Data format for inference. Default fp16, can be one of {dtypes}")
 parser.add_argument('--seed', type=int, nargs='*', help="Seed for deterministic outputs. If not set, will be random")
 parser.add_argument('-S', '--sampler', choices=samplers, help=f"Override model's default sampler. Can be one of {samplers}")
+parser.add_argument('--noise-type', choices=noise_types, default="cpu32", help=f"Device/precision for random noise if supported by pipeline. Can be one of {noise_types}. Default 'cpu32'")
 parser.add_argument('--offload', choices=offload, help=f"Set amount of CPU offload. Can be one of {offload}")
 parser.add_argument('--compile', action='store_true', help="Compile unet with torch.compile()")
 parser.add_argument('--no-trail', action='store_true', help="Do not force trailing timestep spacing. Changes seeds.")
@@ -103,6 +105,12 @@ torch.set_grad_enabled(False)
 torch.set_float32_matmul_precision('high')
 AMD = 'AMD' in torch.cuda.get_device_name()
 dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[args.dtype]
+noise_dtype, noise_device = {"cpu16": (torch.float16, 'cpu'),
+                             "cpu16b": (torch.bfloat16, 'cpu'),
+                             "cpu32": (torch.float32, 'cpu'),
+                             "cuda16": (torch.float16, 'cuda'),
+                             "cuda16b": (torch.bfloat16, 'cuda'),
+                             "cuda32": (torch.float32, 'cuda')}[args.noise_type]
 # TORCH }}}
 
 # PIPE {{{
@@ -270,13 +278,12 @@ for kwargs in key_dicts:
         seeds = []
         for n, latent in enumerate(latents):
             seeds.append(seed + n)
-            generator = torch.manual_seed(seed + n)
-            # f32 noise for equal seeds amongst other UIs
-            latent += torch.randn(latents.shape[1:], generator=generator, dtype=torch.float32)
+            generator = torch.Generator(noise_device).manual_seed(seed + n)
+            latent += torch.randn(latents.shape[1:], generator=generator, dtype=noise_dtype, device=noise_device).to('cpu')
         kwargs["latents"] = latents
         print("seeds:", ' '.join(map(str, seeds)))
-    else:  # No input tensors for diffusion pipeline call?
-        kwargs["generator"] = torch.manual_seed(seed)
+    else:  # No input tensors for non-VAE pipe calls?
+        kwargs["generator"] = torch.Generator(noise_device).manual_seed(seed)
         print("seed:", seed)
     # NOISE }}}
 
