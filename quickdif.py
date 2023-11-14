@@ -78,6 +78,7 @@ else:
 # start meta
 base_meta = {
     "model": args.model,
+    "noise_type": args.noise_type,
     "url": 'https://github.com/Beinsezii/quickdif'
 }
 if args.batch_size > 1: base_meta["batch_size"] = args.batch_size
