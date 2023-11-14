@@ -27,7 +27,7 @@ from pathlib import Path
 
 outdefault = '/tmp/' if os.path.exists('/tmp/') else './output/'
 mdefault = "stabilityai/stable-diffusion-xl-base-1.0"
-samplers = ['dpm', "ddim", "ddimp", "euler"]
+samplers = ['dpm', "ddim", "euler"]
 dtypes = ["fp16", "bf16", "fp32"]
 offload = ["model", "sequential"]
 
@@ -168,6 +168,27 @@ if hasattr(pipe, 'vae'):
 # VAE }}}
 
 # SCHEDULER {{{
+def rescale_zero_terminal_snr_sigmas(sigmas):
+    sigmas = sigmas.flip(0)
+    alphas_cumprod = 1 / ((sigmas * sigmas) + 1)
+    alphas_bar_sqrt = alphas_cumprod.sqrt()
+
+    # Store old values.
+    alphas_bar_sqrt_0 = alphas_bar_sqrt[0].clone()
+    alphas_bar_sqrt_T = alphas_bar_sqrt[-1].clone()
+
+    # Shift so the last timestep is zero.
+    alphas_bar_sqrt -= (alphas_bar_sqrt_T)
+
+    # Scale so the first timestep is back to the old value.
+    alphas_bar_sqrt *= alphas_bar_sqrt_0 / (alphas_bar_sqrt_0 - alphas_bar_sqrt_T)
+
+    # Convert alphas_bar_sqrt to betas
+    alphas_bar = alphas_bar_sqrt**2  # Revert sqrt
+    alphas_bar[-1] = 4.8973451890853435e-08
+    sigmas = ((1 - alphas_bar) / alphas_bar) ** 0.5
+    return sigmas.flip(0)
+
 if hasattr(pipe, 'scheduler'):
     if args.sampler == "dpm":
         pipe.scheduler = DPMSolverMultistepScheduler.from_config(
@@ -177,27 +198,16 @@ if hasattr(pipe, 'scheduler'):
         )
     elif args.sampler == "ddim":
         pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
-    elif args.sampler == "ddimp":
-        pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
-        print("PATCHING TIMESTEPS")
-        tsbase = pipe.scheduler.set_timesteps
-
-        def tspatch(*args, **kwargs):
-            if 'num_inference_steps' in kwargs:
-                num_inference_steps = kwargs['num_inference_steps']
-                num_inference_steps -= 1
-                kwargs['num_inference_steps'] = num_inference_steps
-            else:
-                args = list(args)
-                num_inference_steps = args[0]
-                num_inference_steps -= 1
-                args[0] = num_inference_steps
-            tsbase(*args, **kwargs)
-            pipe.scheduler.timesteps = torch.cat([pipe.scheduler.timesteps, pipe.scheduler.timesteps[-1].remainder(num_inference_steps).reshape(1)])
-
-        pipe.scheduler.set_timesteps = tspatch
     elif args.sampler == "euler":
+        zsnr = getattr(pipe.scheduler.config, 'rescale_betas_zero_snr', False)
         pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
+
+        if zsnr:
+            tsbase = pipe.scheduler.set_timesteps
+            def tspatch(*args, **kwargs):
+                tsbase(*args, **kwargs)
+                pipe.scheduler.sigmas = rescale_zero_terminal_snr_sigmas(pipe.scheduler.sigmas)
+            pipe.scheduler.set_timesteps = tspatch
 
     # what most UIs use
     if not args.no_trail: pipe.scheduler.config.timestep_spacing = 'trailing'
