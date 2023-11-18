@@ -1,2 +1,2 @@
 #! /usr/bin/env sh
-source ./virtualenv/bin/activate && python3 quickdif.py "$@"
+source ./venv/bin/activate && python3 quickdif.py "$@"
