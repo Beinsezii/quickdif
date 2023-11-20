@@ -24,6 +24,7 @@ COLS_FTMSE = {
 # CLI {{{
 import argparse, os
 from pathlib import Path
+from PIL import Image
 
 outdefault = '/tmp/' if os.path.exists('/tmp/') else './output/'
 mdefault = "stabilityai/stable-diffusion-xl-base-1.0"
@@ -56,8 +57,10 @@ parser.add_argument('-m',
                     help=f"Huggingface model or Stable Diffusion safetensors checkpoint to load. Default {mdefault}")
 parser.add_argument('-l', '--lora', type=str, help="Apply a Lora")
 parser.add_argument('-L', '--lora-scale', type=float, default=1.0, help="Strength of the lora. Default 1.0")
+parser.add_argument('-i', '--input', type=argparse.FileType(mode='rb'), help="Input image")
+parser.add_argument('-d', '--denoise', type=float, default=1.0, help="Denoise amount. Default 1.0")
 parser.add_argument('-o', '--out', type=Path, default="/tmp/quickdif/", help=f"Output directory for images. Default {outdefault}")
-parser.add_argument('-d', '--dtype', choices=dtypes, default="fp16", help=f"Data format for inference. Default fp16, can be one of {dtypes}")
+parser.add_argument('-D', '--dtype', choices=dtypes, default="fp16", help=f"Data format for inference. Default fp16, can be one of {dtypes}")
 parser.add_argument('--seed', type=int, nargs='*', help="Seed for deterministic outputs. If not set, will be random")
 parser.add_argument('-S', '--sampler', choices=samplers, help=f"Override model's default sampler. Can be one of {samplers}")
 parser.add_argument('--noise-type', choices=noise_types, default="cpu32", help=f"Device/precision for random noise if supported by pipeline. Can be one of {noise_types}. Default 'cpu32'")
@@ -75,10 +78,14 @@ elif not args.out.exists():
 else:
     raise ValueError("out must be directory")
 
+input_image = None
+if args.input: input_image = Image.open(args.input)
+
 # start meta
 base_meta = {
     "model": args.model,
     "noise_type": args.noise_type,
+    "denoise": args.denoise,
     "url": 'https://github.com/Beinsezii/quickdif'
 }
 if args.batch_size > 1: base_meta["batch_size"] = args.batch_size
@@ -89,13 +96,16 @@ if args.sampler: base_meta['sampler'] = args.sampler
 import torch, inspect
 from diffusers import (
     AutoPipelineForText2Image,
+    AutoPipelineForImage2Image,
     DDIMScheduler,
     # DiffusionPipeline, maybe re-add once multi-stage is manually implemented
     DPMSolverMultistepScheduler,
     EulerDiscreteScheduler,
     PixArtAlphaPipeline,
     StableDiffusionPipeline,
+    StableDiffusionImg2ImgPipeline,
     StableDiffusionXLPipeline,
+    StableDiffusionXLImg2ImgPipeline,
 )
 import transformers
 # from transformers import transformers.models.clip.tokenization_clip.CLIPTokenizer
@@ -124,12 +134,19 @@ pipe_args = {
 }
 
 if args.model.endswith('.safetensors'):
-    pipe = StableDiffusionPipeline.from_single_file(args.model, **pipe_args)
+    if input_image is not None:
+        pipe = StableDiffusionImg2ImgPipeline.from_single_file(args.model, **pipe_args)
+    else:
+        pipe = StableDiffusionPipeline.from_single_file(args.model, **pipe_args)
 else:
-    pipe = AutoPipelineForText2Image.from_pretrained(args.model, **pipe_args)
+    if input_image is not None:
+        pipe = AutoPipelineForImage2Image.from_pretrained(args.model, **pipe_args)
+    else:
+        pipe = AutoPipelineForText2Image.from_pretrained(args.model, **pipe_args)
 
-XL = isinstance(pipe, StableDiffusionXLPipeline)
-SD = isinstance(pipe, StableDiffusionPipeline)
+
+XL = isinstance(pipe, StableDiffusionXLPipeline) or isinstance(pipe, StableDiffusionXLImg2ImgPipeline)
+SD = isinstance(pipe, StableDiffusionPipeline) or isinstance(pipe, StableDiffusionImg2ImgPipeline)
 
 pipe.safety_checker = None
 pipe.watermarker = None
@@ -224,7 +241,8 @@ if hasattr(pipe, 'scheduler'):
 # SCHEDULER }}}
 
 # INPUT TENSOR {{{
-if hasattr(pipe, 'vae') and weights:
+if hasattr(pipe, 'vae') and weights and input_image is None:
+
     size = [
         1, weights.config.in_channels, args.height // pipe.vae_scale_factor if args.height else weights.config.sample_size,
         args.width // pipe.vae_scale_factor if args.width else weights.config.sample_size
@@ -251,6 +269,7 @@ if hasattr(pipe, 'vae') and weights:
 base_dict = {
     "num_images_per_prompt": args.batch_size,
     "clean_caption": False,  # stop IF nag. what does this even do
+    "strength": args.denoise,
 }
 if args.width: base_dict['width'] = args.width
 if args.height: base_dict['height'] = args.height
@@ -307,6 +326,7 @@ for kwargs in key_dicts:
 
     # PROCESS {{{
     # make sure call doesnt err
+    if input_image is not None: kwargs['image'] = input_image
     for k in list(kwargs.keys()):
         if k not in params: del kwargs[k]
 
