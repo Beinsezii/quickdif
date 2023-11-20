@@ -3,4 +3,5 @@ diffusers >= 0.23
 transformers
 accelerate
 omegaconf
+sentencepiece
 compel
