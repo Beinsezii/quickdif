@@ -46,6 +46,7 @@ from diffusers import image_processor
 
 dtype = torch.float32
 torch.set_grad_enabled(False)
+torch.set_float32_matmul_precision('high')
 
 vae = diffusers.AutoencoderKL.from_pretrained(str(args.vae), use_safetensors=True, torch_dtype=dtype).to('cuda')
 processor = image_processor.VaeImageProcessor(2**(len(vae.config.block_out_channels) - 1))
