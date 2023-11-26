@@ -36,7 +36,8 @@ import argparse
 parser = argparse.ArgumentParser(description='Measure cardinal colors on VAE')
 parser.add_argument('-v', '--vae', type=str, default='stabilityai/sdxl-vae')
 parser.add_argument('-r', '--raw', action='store_true', help='Return raw/unscaled values')
-if has_colcon: parser.add_argument('-m', '--map', type=argparse.FileType(mode='w'), help="Output LAB map as .json")
+if has_colcon: parser.add_argument('--lab', type=argparse.FileType(mode='w'), help="Output LAB map as .json")
+if has_colcon: parser.add_argument('--rgb', type=argparse.FileType(mode='w'), help="Output SRGB map as .json")
 args = parser.parse_args()
 
 import torch, diffusers
@@ -49,7 +50,7 @@ torch.set_grad_enabled(False)
 vae = diffusers.AutoencoderKL.from_pretrained(str(args.vae), use_safetensors=True, torch_dtype=dtype).to('cuda')
 processor = image_processor.VaeImageProcessor(2**(len(vae.config.block_out_channels) - 1))
 
-if args.map:
+if args.lab:
     scale = 5
     iters = (100 // scale) + 1
     data = [[[{} for _ in range(iters)] for _ in range(iters)] for _ in range(iters)]
@@ -77,9 +78,39 @@ if args.map:
                 result['latent'] = [c.mean().item() for c in tensor[0]]
                 data[L][A][B] = result
                 bar.update()
-    json.dump({'index_scale': scale, 'index_space': 'LAB', 'vae_scale_factor': vae.config.scaling_factor, 'data': data}, args.map)
+    json.dump({'index_scale': scale, 'index_space': 'LAB', 'vae_scale_factor': vae.config.scaling_factor, 'data': data}, args.lab)
 
-else:
+if args.rgb:
+    scale = 5
+    exp = 0.01
+    iters = (100 // scale) + 1
+    data = [[[{} for _ in range(iters)] for _ in range(iters)] for _ in range(iters)]
+    bar = tqdm(total=iters**3)
+    for R in range(iters):
+        for G in range(iters):
+            for B in range(iters):
+                result = {}
+                pix = cpixel(R * scale * exp, G * scale * exp, B * scale * exp)
+                img = torch.tensor(pix, dtype=dtype).clamp(min=0.0, max=1.0).expand([1, vae.config.sample_size, vae.config.sample_size, 3]).permute((0, 3, 1, 2)).clone()
+                img = processor.preprocess(img).to('cuda')
+                tensor = vae.encode(img).latent_dist.sample()
+                result['latent'] = [c.mean().item() for c in tensor[0]]
+                data[R][G][B] = result
+
+                result['SRGB'] = list(pix)
+                colcon.srgb_to_lrgb(pix)
+                result['LRGB'] = list(pix)
+                colcon.lrgb_to_xyz(pix)
+                result['XYZ'] = list(pix)
+                colcon.xyz_to_lab(pix)
+                result['LAB'] = list(pix)
+                colcon.lab_to_lch(pix)
+                result['LCH'] = list(pix)
+
+                bar.update()
+    json.dump({'index_scale': scale, 'index_space': 'SRGB', 'vae_scale_factor': vae.config.scaling_factor, 'data': data}, args.rgb)
+
+if not (args.rgb or args.lab):
     results = {}
 
     for col, pix in [
