@@ -194,27 +194,6 @@ if hasattr(pipe, 'vae'):
 # VAE }}}
 
 # SCHEDULER {{{
-def rescale_zero_terminal_snr_sigmas(sigmas):
-    sigmas = sigmas.flip(0)
-    alphas_cumprod = 1 / ((sigmas * sigmas) + 1)
-    alphas_bar_sqrt = alphas_cumprod.sqrt()
-
-    # Store old values.
-    alphas_bar_sqrt_0 = alphas_bar_sqrt[0].clone()
-    alphas_bar_sqrt_T = alphas_bar_sqrt[-1].clone()
-
-    # Shift so the last timestep is zero.
-    alphas_bar_sqrt -= (alphas_bar_sqrt_T)
-
-    # Scale so the first timestep is back to the old value.
-    alphas_bar_sqrt *= alphas_bar_sqrt_0 / (alphas_bar_sqrt_0 - alphas_bar_sqrt_T)
-
-    # Convert alphas_bar_sqrt to betas
-    alphas_bar = alphas_bar_sqrt**2  # Revert sqrt
-    alphas_bar[-1] = 4.8973451890853435e-08
-    sigmas = ((1 - alphas_bar) / alphas_bar) ** 0.5
-    return sigmas.flip(0)
-
 if hasattr(pipe, 'scheduler'):
     if args.sampler == "dpm":
         pipe.scheduler = DPMSolverMultistepScheduler.from_config(
@@ -225,16 +204,7 @@ if hasattr(pipe, 'scheduler'):
     elif args.sampler == "ddim":
         pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
     elif args.sampler == "euler":
-        zsnr = getattr(pipe.scheduler.config, 'rescale_betas_zero_snr', False)
         pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
-
-        if zsnr:
-            tsbase = pipe.scheduler.set_timesteps
-            def tspatch(*args, **kwargs):
-                tsbase(*args, **kwargs)
-                # diffusers adds an extra 0 sig to avoid extra noise at end
-                pipe.scheduler.sigmas[:-1] = rescale_zero_terminal_snr_sigmas(pipe.scheduler.sigmas[:-1])
-            pipe.scheduler.set_timesteps = tspatch
 
     # what most UIs use
     if not args.no_trail: pipe.scheduler.config.timestep_spacing = 'trailing'
