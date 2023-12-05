@@ -24,7 +24,7 @@ def train(channel, latent, steps, rate):
     mul = torch.randn([4, 4])
     add = torch.randn([4, 4])
 
-    dev, mean = evaluate(lab[:,:,:,0], latent, mul, add)
+    dev, mean = evaluate(channel, latent, mul, add)
 
     mul_best = mul.clone()
     add_best = add.clone()
