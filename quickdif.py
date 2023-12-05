@@ -28,7 +28,7 @@ from PIL import Image
 
 outdefault = '/tmp/' if os.path.exists('/tmp/') else './output/'
 mdefault = "stabilityai/stable-diffusion-xl-base-1.0"
-samplers = ['dpm', "ddim", "euler"]
+samplers = ["dpm", "ddim", "euler", "eulerk", "eulera"]
 dtypes = ["fp16", "bf16", "fp32"]
 offload = ["model", "sequential"]
 noise_types = ["cpu16", "cpu16b", "cpu32", "cuda16", "cuda16b", "cuda32"]
@@ -100,6 +100,7 @@ from diffusers import (
     DDIMScheduler,
     # DiffusionPipeline, maybe re-add once multi-stage is manually implemented
     DPMSolverMultistepScheduler,
+    EulerAncestralDiscreteScheduler,
     EulerDiscreteScheduler,
     PixArtAlphaPipeline,
     StableDiffusionPipeline,
@@ -195,16 +196,13 @@ if hasattr(pipe, 'vae'):
 
 # SCHEDULER {{{
 if hasattr(pipe, 'scheduler'):
-    if args.sampler == "dpm":
-        pipe.scheduler = DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config,
-            algorithm_type='dpmsolver++',
-            use_karras_sigmas=True,
-        )
-    elif args.sampler == "ddim":
-        pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
-    elif args.sampler == "euler":
-        pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
+    if args.sampler: pipe.scheduler = {
+        "dpm": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type='dpmsolver++', use_karras_sigmas=True),
+        "ddim": DDIMScheduler.from_config(pipe.scheduler.config),
+        "euler": EulerDiscreteScheduler.from_config(pipe.scheduler.config),
+        "eulerk": EulerDiscreteScheduler.from_config(pipe.scheduler.config, use_karras_sigmas=True),
+        "eulera": EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config),
+    }[args.sampler]
 
     # what most UIs use
     if not args.no_trail: pipe.scheduler.config.timestep_spacing = 'trailing'
