@@ -27,17 +27,17 @@ You must have a recent Python version installed, likely at least 3.10+. In essen
 > cd ./quickdif/
 ```
 
-#### Create a virtualenv in the quickdif folder
+#### Create a venv in the quickdif folder
 ```sh
-> python3 -m venv ./virtualenv
-# alternatively, it's recommended to use the full virtualenv if you have it
-> virtualenv ./virtualenv
+> python3 -m venv ./venv
+# alternatively, it's recommended to use the full venv if you have it
+> virtualenv ./venv
 ```
 
 #### Install dependencies
 ```sh
 # replace with appropriate activation script for other shells
-> source ./virtualenv/bin/activate
+> source ./venv/bin/activate
 # It's recommended to first install torch using the recommended commands from https://pytorch.org/get-started/locally/
 > pip3 install torch --index-url https://download.pytorch.org/whl/rocm5.6 # AMD example
 # finally
