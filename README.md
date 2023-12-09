@@ -30,7 +30,7 @@ You must have a recent Python version installed, likely at least 3.10+. In essen
 #### Create a venv in the quickdif folder
 ```sh
 > python3 -m venv ./venv
-# alternatively, it's recommended to use the full venv if you have it
+# alternatively, it's recommended to use the full virtualenv if you have it
 > virtualenv ./venv
 ```
 
