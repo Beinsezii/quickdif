@@ -158,13 +158,17 @@ else: pipe.to('cuda')
 
 # MODEL {{{
 weights = None
-if hasattr(pipe, 'unet'): weights = pipe.unet
-if hasattr(pipe, 'transformer'): weights = pipe.transformer
 
-if args.compile:
-    if weights: weights = torch.compile(weights)
-elif AMD:
-    if weights and hasattr(weights, 'set_default_attn_processor'): weights.set_default_attn_processor()
+if hasattr(pipe, 'unet'):
+    if args.compile: pipe.unet = torch.compile(pipe.unet)
+    weights = pipe.unet
+
+if hasattr(pipe, 'transformer'):
+    if args.compile: pipe.transformer = torch.compile(pipe.transformer)
+    weights = pipe.transformer
+
+if AMD and not args.compile and weights and hasattr(weights, 'set_default_attn_processor'):
+    weights.set_default_attn_processor()
 # MODEL }}}
 
 # LORA {{{
