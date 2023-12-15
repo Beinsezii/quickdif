@@ -36,7 +36,7 @@ noise_types = ["cpu16", "cpu16b", "cpu32", "cuda16", "cuda16b", "cuda32"]
 parser = argparse.ArgumentParser(description="Quick and easy inference for a variety of Diffusers models. Not all models support all options",
                                  add_help=False)
 parser.add_argument('prompts', nargs='+', type=str)
-parser.add_argument('-n', '--negative', type=str, nargs='+', default=["blurry, cropped, text"], help="Universal negative for all prompts")
+parser.add_argument('-n', '--negative', type=str, nargs='*', default=["blurry"], help="Universal negative for all prompts. Default 'blurry'")
 parser.add_argument('-w', '--width', type=int, help="Final output width. Default varies by model")
 parser.add_argument('-h', '--height', type=int, help="Final output height. Default varies by model")
 parser.add_argument('-s', '--steps', type=int, nargs='*', default=[30], help="Number of inference steps. Default 30. Can be unset")
@@ -243,6 +243,7 @@ base_dict = {
     "clean_caption": False,  # stop IF nag. what does this even do
     "strength": args.denoise,
 }
+if not args.negative: args.negative = [""]
 if args.width: base_dict['width'] = args.width
 if args.height: base_dict['height'] = args.height
 if args.lora: base_dict['cross_attention_kwargs'] = {"scale": args.lora_scale}
@@ -272,6 +273,7 @@ for kwargs in key_dicts:
             seeds.append(seed + n)
             generator = torch.Generator(noise_device).manual_seed(seed + n)
             latent += torch.randn(latents.shape[1:], generator=generator, dtype=noise_dtype, device=noise_device).to('cpu')
+            if n == 0: kwargs["generator"] = generator
         kwargs["latents"] = latents
         print("seeds:", ' '.join(map(str, seeds)))
     else:  # No input tensors for non-VAE pipe calls?
