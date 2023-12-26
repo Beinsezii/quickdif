@@ -112,6 +112,7 @@ import transformers
 # from transformers import transformers.models.clip.tokenization_clip.CLIPTokenizer
 from compel import Compel, ReturnedEmbeddingsType
 from PIL.PngImagePlugin import PngInfo
+from tqdm import tqdm
 
 torch.set_grad_enabled(False)
 torch.set_float32_matmul_precision('high')
@@ -260,7 +261,7 @@ if args.rescale: key_dicts = [k | {'guidance_rescale': g} for k in key_dicts for
 # INFERENCE {{{
 print(f"Generating {len(key_dicts)} batches of {args.batch_size} images for {len(key_dicts) * args.batch_size} total...")
 filenum = 0
-for kwargs in key_dicts:
+for kwargs in tqdm(key_dicts, desc="Images"):
     meta = base_meta.copy()
     seed = kwargs.pop('seed')
     params = inspect.signature(pipe).parameters
