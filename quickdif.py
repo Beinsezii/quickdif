@@ -93,7 +93,7 @@ if args.sampler: base_meta['sampler'] = args.sampler
 # CLI }}}
 
 # TORCH {{{
-import torch, inspect
+import torch, inspect, tqdm
 from diffusers import (
     AutoPipelineForText2Image,
     AutoPipelineForImage2Image,
@@ -112,7 +112,6 @@ import transformers
 # from transformers import transformers.models.clip.tokenization_clip.CLIPTokenizer
 from compel import Compel, ReturnedEmbeddingsType
 from PIL.PngImagePlugin import PngInfo
-from tqdm import tqdm
 
 torch.set_grad_enabled(False)
 torch.set_float32_matmul_precision('high')
@@ -261,7 +260,8 @@ if args.rescale: key_dicts = [k | {'guidance_rescale': g} for k in key_dicts for
 # INFERENCE {{{
 print(f"Generating {len(key_dicts)} batches of {args.batch_size} images for {len(key_dicts) * args.batch_size} total...")
 filenum = 0
-for kwargs in tqdm(key_dicts, desc="Images"):
+if len(key_dicts) > 1: bar = tqdm.tqdm(desc="Images", total=len(key_dicts) * args.batch_size)
+for kwargs in key_dicts:
     meta = base_meta.copy()
     seed = kwargs.pop('seed')
     params = inspect.signature(pipe).parameters
@@ -321,5 +321,6 @@ for kwargs in tqdm(key_dicts, desc="Images"):
         else:
             pnginfo.add_text('seed', f"{seed} + {n}")
         image.save(p, format="PNG", pnginfo=pnginfo)
+    if len(key_dicts) > 1: bar.update(args.batch_size)
     # PROCESS }}}
 # INFERENCE }}}
