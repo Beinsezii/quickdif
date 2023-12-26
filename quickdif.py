@@ -22,7 +22,7 @@ COLS_FTMSE = {
 # LATENT COLORS }}}
 
 # CLI {{{
-import argparse, os
+import argparse, os, inspect
 from pathlib import Path
 from PIL import Image
 
@@ -93,7 +93,7 @@ if args.sampler: base_meta['sampler'] = args.sampler
 # CLI }}}
 
 # TORCH {{{
-import torch, inspect, tqdm
+import torch, transformers, tqdm
 from diffusers import (
     AutoPipelineForText2Image,
     AutoPipelineForImage2Image,
@@ -108,8 +108,6 @@ from diffusers import (
     StableDiffusionXLPipeline,
     StableDiffusionXLImg2ImgPipeline,
 )
-import transformers
-# from transformers import transformers.models.clip.tokenization_clip.CLIPTokenizer
 from compel import Compel, ReturnedEmbeddingsType
 from PIL.PngImagePlugin import PngInfo
 
@@ -262,6 +260,7 @@ print(f"Generating {len(key_dicts)} batches of {args.batch_size} images for {len
 filenum = 0
 if len(key_dicts) > 1: bar = tqdm.tqdm(desc="Images", total=len(key_dicts) * args.batch_size)
 for kwargs in key_dicts:
+    torch.cuda.empty_cache()
     meta = base_meta.copy()
     seed = kwargs.pop('seed')
     params = inspect.signature(pipe).parameters
