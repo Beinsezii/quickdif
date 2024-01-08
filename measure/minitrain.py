@@ -8,11 +8,10 @@ torch.set_default_dtype(torch.float32)
 torch.set_default_device('cuda')
 torch.set_grad_enabled(False)
 
-def evaluate(channel, latent, m, a):
+def evaluate(channel, latent, tensors, functions):
     l = latent.reshape([21, 21, 21, 4, 1])
     table = l.expand([21, 21, 21, 4, 4]).swapaxes(-1,-2).clone().mul(l)
-    table += a
-    table *= m
+    for tensor, function in zip(tensors, functions): table = function(table, tensor)
     adjusted = torch.sum(table, axis=[-1,-2])
     diff = (channel - adjusted)
     cumdev = torch.absolute(diff ** 2).sum()
@@ -20,46 +19,54 @@ def evaluate(channel, latent, m, a):
     return cumdev, meandev
 
 
-def train(channel, latent, steps, rate):
-    mul = torch.randn([4, 4])
-    add = torch.randn([4, 4])
+def train(channel, latent, tensors, functions, steps, rate):
+    dev, mean = evaluate(channel, latent, tensors, functions)
 
-    dev, mean = evaluate(channel, latent, mul, add)
-
-    mul_best = mul.clone()
-    add_best = add.clone()
+    tensors_best = [tensor.clone() for tensor in tensors]
     dev_best = dev.clone()
     mean_best = mean.clone()
 
     bar = tqdm(total=steps)
-    repeat = 0
+    update = 1000
     for i in range(steps):
-        if dev < dev_best: mul_best, add_best, dev_best, mean_best = mul.clone(), add.clone(), dev.clone(), mean.clone()
-        if repeat > 32:
-            mul = mul_best + torch.randn([4, 4]) * rate * 100
-            add = add_best + torch.randn([4, 4]) * rate * 100
-            dev, mean = evaluate(channel, latent, mul, add)
-        for tensor in [add, mul]:
-            for x in range(4):
-                for y in range(4):
-                    same = False
-                    tensor[x,y] += rate
-                    ndev, nmean = evaluate(channel, latent, mul, add)
-                    if ndev < dev:
-                        dev, mean = ndev, nmean
-                    else:
-                        tensor[x,y] += rate * -2
-                        ndev, nmean = evaluate(channel, latent, mul, add)
+        tensors = [tensor + torch.randn([4, 4]) * rate for tensor in tensors_best]
+        dev, mean = evaluate(channel, latent, tensors, functions)
+        if dev < dev_best: tensors_best, dev_best, mean_best = tensors, dev, mean
+        if (i+1) % update == 0:
+            bar.update(update)
+            bar.set_description(f"{dev_best:.4f} / {mean_best:.4f}")
+    return tensors_best, dev_best, mean_best
+
+def sharpen(channel, latent, tensors, functions):
+    rate = 10.0
+    dev, mean = evaluate(channel, latent, tensors, functions)
+    bar = tqdm()
+    for r in range(10):
+        while True:
+            change = False
+            for tensor in tensors:
+                for x in range(4):
+                    for y in range(4):
+                        tensor[x,y] += rate
+                        ndev, nmean = evaluate(channel, latent, tensors, functions)
                         if ndev < dev:
                             dev, mean = ndev, nmean
+                            change = True
+                            continue
                         else:
-                            tensor[x,y] += rate
-                            same = True
-                    if same: repeat += 1
-                    else: repeat = 0
-        bar.update()
-        bar.set_description(f"{dev_best} / {mean_best} | {dev} / {mean}")
-    return add_best, mul_best, dev_best, mean_best
+                            tensor[x,y] += rate * -2.0
+                        ndev, nmean = evaluate(channel, latent, tensors, functions)
+                        if ndev < dev:
+                            dev, mean = ndev, nmean
+                            change = True
+                            continue
+                        else: tensor[x,y] += rate
+            bar.update(4*4*len(tensors))
+            bar.set_description(f"{dev:.4f} / {mean:.4f}")
+            if not change: break
+        rate /= 10.0
+    return tensors, dev, mean
+
 
 
 parser = argparse.ArgumentParser(description='Map latent channels to CIELAB')
@@ -93,13 +100,20 @@ lab = torch.tensor(list(map(
 
 del data
 
-steps = 10000
-rate = 1e-3
+iterations = [
+    (int(1e+5), 1e-1),
+    (int(1e+5), 1e-2),
+    # (int(1e+6), 1e-3),
+]
 
-l_add, l_mul, l_dev, l_mean = train(lab[:,:,:,0], latent, steps, rate)
-a_add, a_mul, a_dev, a_mean = train(lab[:,:,:,1], latent, steps, rate)
-b_add, b_mul, b_dev, b_mean = train(lab[:,:,:,2], latent, steps, rate)
+functions = [torch.mul, torch.add, torch.mul]
 
-print(f"### L ###\n+ {l_add}\nX {l_mul}\n{l_dev} / {l_mean}\n### L ###")
-print(f"### A ###\n+ {a_add}\nX {a_mul}\n{a_dev} / {a_mean}\n### A ###")
-print(f"### B ###\n+ {b_add}\nX {b_mul}\n{b_dev} / {b_mean}\n### B ###")
+for (n, c) in enumerate(["L", "A", "B"]):
+    tensors = [torch.randn([4, 4]) for _ in range(len(functions))]
+
+    for (steps, rate) in iterations:
+        tensors, dev, mean = train(lab[:,:,:,n], latent, tensors, functions, steps, rate)
+
+    tensors, dev, mean = sharpen(lab[:,:,:,n], latent, tensors, functions)
+
+    print(f"### {c} ###\n{tensors}\n{dev:.8f} / {mean:.8f}\n### {c} ###")
