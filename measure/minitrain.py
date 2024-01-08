@@ -7,6 +7,7 @@ import argparse
 torch.set_default_dtype(torch.float32)
 torch.set_default_device('cuda')
 torch.set_grad_enabled(False)
+torch.set_printoptions(precision=4)
 
 def evaluate(channel, latent, tensors, functions):
     l = latent.clone()
@@ -37,7 +38,7 @@ def sharpen(channel, latent, tensors, functions):
     rate = 10.0
     dev = evaluate(channel, latent, tensors, functions)
     bar = tqdm()
-    for r in range(10):
+    for r in range(6):
         while True:
             change = False
             for tensor in tensors:
@@ -94,20 +95,31 @@ lab = torch.tensor(list(map(
     data['data']
     )))
 
+srgb = torch.tensor(list(map(
+    lambda L: list(map(
+        lambda A: list(map(
+            lambda B: B['SRGB'],
+            A
+            )),
+        L
+        )),
+    data['data']
+    )))
+
 del data
 
 iterations = [
-    (int(1e+5), 1e-1),
-    (int(2e+5), 1e-2),
-    (int(3e+5), 1e-3),
+    (int(1e+5), 1e-0),
+    (int(2e+5), 1e-1),
+    (int(3e+5), 1e-2),
+    (int(4e+5), 1e-3),
 ]
 
 functions = [torch.add, torch.matmul]
 tensors = [torch.randn([1,4]), torch.randn([4,3])]
 
 for (steps, rate) in iterations:
-    tensors, dev = train(lab, latent, tensors, functions, steps, rate)
+    tensors, dev = train(srgb, latent, tensors, functions, steps, rate)
+for _ in range(5): tensors, dev = sharpen(srgb, latent, tensors, functions)
 
-tensors, dev = sharpen(lab, latent, tensors, functions)
-
-print(f"###\n{tensors}\n{dev:.8f}\n###")
+print(f"###\n{tensors}\n###")
