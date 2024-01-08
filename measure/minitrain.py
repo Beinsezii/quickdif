@@ -18,6 +18,7 @@ def evaluate(channel, latent, tensors, functions):
 
 
 def train(channel, latent, tensors, functions, steps, rate):
+    steps = int(steps)
     dev = evaluate(channel, latent, tensors, functions)
 
     tensors_best = [tensor.clone() for tensor in tensors]
@@ -109,17 +110,15 @@ srgb = torch.tensor(list(map(
 del data
 
 iterations = [
-    (int(1e+5), 1e-0),
-    (int(2e+5), 1e-1),
-    (int(3e+5), 1e-2),
-    (int(4e+5), 1e-3),
+    (2e+5, 1e-1),
+    (2e+5, 1e-2),
+    (2e+5, 1e-3),
 ]
 
 functions = [torch.add, torch.matmul]
 tensors = [torch.randn([1,4]), torch.randn([4,3])]
 
-for (steps, rate) in iterations:
-    tensors, dev = train(srgb, latent, tensors, functions, steps, rate)
+for (steps, rate) in iterations: tensors, dev = train(srgb, latent, tensors, functions, steps, rate)
 for _ in range(5): tensors, dev = sharpen(srgb, latent, tensors, functions)
 
 print(f"###\n{tensors}\n###")
