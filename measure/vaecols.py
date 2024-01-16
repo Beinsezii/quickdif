@@ -32,13 +32,7 @@ for img in tqdm(iters):
 
     result |= {
         'latent_mean' : tensor.mean(dim=1).tolist(),
-        'latent_99' : tensor.quantile(0.99, dim=1).tolist(),
-        'latent_90' : tensor.quantile(0.90, dim=1).tolist(),
-        'latent_75' : tensor.quantile(0.75, dim=1).tolist(),
-        'latent_50' : tensor.quantile(0.50, dim=1).tolist(),
-        'latent_25' : tensor.quantile(0.25, dim=1).tolist(),
-        'latent_10' : tensor.quantile(0.10, dim=1).tolist(),
-        'latent_01' : tensor.quantile(0.01, dim=1).tolist(),
+        'latent_dist' : tensor.quantile(torch.linspace(0.01,0.99,99), dim=1).tolist(),
     }
 
     data.append(result)
