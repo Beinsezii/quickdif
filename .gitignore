@@ -1,5 +1,5 @@
-prompts.json
-models.json
+*.json
+*.png
 checkpoints
 
 # Byte-compiled / optimized / DLL files
