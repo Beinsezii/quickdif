@@ -96,7 +96,7 @@ color = lab
 
 shape = list(color.shape)
 color = color.reshape([1] + shape).expand([latent.shape[0]] + shape)
-color_scale = 100
+display_scale = 100
 
 iter = tqdm(range(int(1e+6)))
 deviations = torch.tensor([0.5, 0.75, 0.9, 0.99, 1.0])
@@ -106,14 +106,14 @@ try:
         optimizer.zero_grad()
         prediction = network(latent)
         loss = (prediction - color).absolute()
-        devs = loss.clone().quantile(deviations).mul(color_scale).tolist()
-        loss = (loss).sum()
+        devs = loss.clone().quantile(deviations).mul(display_scale)
+        loss = loss.mean()
         display_loss = loss.item()
         loss.backward()
         optimizer.step()
 
-        devs = ' '.join(map(lambda d: f"{d:.1f}", devs))
-        iter.desc = f"Loss {loss:.1f} Deviations {devs}"
+        devs = ' '.join(map(lambda d: f"{d:.2f}", devs))
+        iter.desc = f"Loss {loss.item()*display_scale:.4f} Deviations {devs}"
 
 except KeyboardInterrupt:
     print()
