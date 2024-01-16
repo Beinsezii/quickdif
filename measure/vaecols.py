@@ -17,7 +17,7 @@ torch.set_float32_matmul_precision('high')
 vae = diffusers.AutoencoderKL.from_pretrained(str(args.vae), use_safetensors=True, torch_dtype=dtype).to(device)
 processor = image_processor.VaeImageProcessor(2**(len(vae.config.block_out_channels) - 1))
 
-iters = torch.combinations(torch.linspace(0, 1, 26), r=3, with_replacement=True)
+iters = torch.combinations(torch.linspace(0, 1, 20), r=3, with_replacement=True)
 iters = iters.reshape([iters.shape[0], 1, 1, iters.shape[1]]
             ).expand([iters.shape[0], vae.config.sample_size, vae.config.sample_size, iters.shape[1]])
 
@@ -32,7 +32,7 @@ for img in tqdm(iters):
 
     result |= {
         'latent_mean' : tensor.mean(dim=1).tolist(),
-        'latent_dist' : tensor.quantile(torch.linspace(0.01,0.99,99), dim=1).tolist(),
+        'latent_dist' : tensor.quantile(torch.linspace(0,1,51), dim=1).tolist(),
     }
 
     data.append(result)
