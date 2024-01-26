@@ -52,6 +52,10 @@ import torch
 import json
 import argparse
 from tqdm import tqdm
+import safetensors.torch
+from PIL import Image
+from pathlib import Path
+import numpy as np
 
 torch.set_default_dtype(torch.float32)
 torch.set_default_device('cuda')
@@ -59,13 +63,22 @@ torch.set_printoptions(precision=4, linewidth=150)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('data', type=argparse.FileType(mode='r'))
+parser.add_argument('-l', '--latent', type=Path)
+parser.add_argument('-p', '--preview', type=Path, default='/tmp/minitrain_preview.png')
 args = parser.parse_args()
 
 data = json.load(args.data)
 
+if args.latent and args.preview:
+    latent_preview = safetensors.torch.load_file(args.latent)
+    latent_preview = latent_preview['latent_tensor'][0].permute(1,2,0)
+    preview_shape = list(latent_preview.shape)
+    preview_shape[-1] = 3
+
 latent_mean = []
 latent_dist = []
 rgb = []
+vae_factor = data['vae_factor']
 
 for col in data['data']:
     for (k, v) in col.items():
@@ -76,44 +89,61 @@ for (k, _) in data['data'][0].items():
 
 del data
 
-flat = rgb.clone().to('cpu').numpy().flatten()
-colcon.convert_space_ffi("srgb".encode(), "oklab".encode(), flat, len(flat))
-lab = torch.from_numpy(flat.reshape(rgb.shape)).to(rgb.device)
 
 latent_dist = latent_dist.permute(1,0,2)
 
 network = torch.nn.Sequential(
   torch.nn.Linear(4, 4),
   torch.nn.SiLU(),
+  torch.nn.Linear(4, 4),
+  torch.nn.SiLU(),
   torch.nn.Linear(4, 3),
 )
 
-optimizer = torch.optim.AdamW(network.parameters(), lr=1e-5)
+color_format = "oklab"
+color_scale = 100
 
-latent = latent_dist[5:45 +1]
-# color = rgb
-color = lab
+optimizer = torch.optim.AdamW(network.parameters(), lr=3e-5)
+
+# latent = latent_dist[5:45 +1]
+latent = latent_dist
+
+flat = rgb.clone().to('cpu').numpy().flatten()
+colcon.convert_space_ffi("srgb".encode(), color_format.encode(), flat, len(flat))
+color = torch.from_numpy(flat.reshape(rgb.shape)).to(rgb.device)
 
 shape = list(color.shape)
 color = color.reshape([1] + shape).expand([latent.shape[0]] + shape)
-display_scale = 100
 
 iter = tqdm(range(int(1e+6)))
 deviations = torch.tensor([0.5, 0.75, 0.9, 0.99, 1.0])
 
+preview = 1000
+
+outlier_weight = 0.01
+slope = 3
+loss_weight = (1.0 - ((torch.linspace(0.0,1.0,color.shape[0]) - 0.5) / (0.5 / (1.0 - outlier_weight ** slope))).abs()) ** (1/slope)
+loss_weight = loss_weight.reshape([color.shape[0], 1, 1]).expand(color.shape)
+
 try:
-    for epoch in iter:
+    for step in iter:
         optimizer.zero_grad()
         prediction = network(latent)
-        loss = (prediction - color).absolute()
-        devs = loss.clone().quantile(deviations).mul(display_scale)
-        loss = loss.mean()
+        loss = (prediction - color).absolute() * color_scale
+        devs = loss.clone().quantile(deviations)
+        loss = (loss * loss_weight).mean()
         display_loss = loss.item()
         loss.backward()
         optimizer.step()
 
-        devs = ' '.join(map(lambda d: f"{d:.2f}", devs))
-        iter.desc = f"Loss {loss.item()*display_scale:.4f} Deviations {devs}"
+        devs = ' '.join(map(lambda d: f"{d:.3f}", devs))
+        iter.desc = f"Loss {loss.item():.4f} Deviations {devs}"
+
+        if (step + 1) % preview == 0 and latent_preview is not None:
+            with torch.no_grad():
+                flat = network(latent_preview).cpu().numpy().flatten()
+                colcon.convert_space_ffi(color_format.encode(), "srgb".encode(), flat, len(flat))
+                Image.fromarray(np.uint8(flat.reshape(preview_shape).clip(0.0,1.0) * 255), mode="RGB").save(args.preview, compress_level=0)
 
 except KeyboardInterrupt:
     print()

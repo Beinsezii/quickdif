@@ -1,5 +1,6 @@
 *.json
 *.png
+*.latent
 checkpoints
 
 # Byte-compiled / optimized / DLL files
