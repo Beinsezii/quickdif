@@ -1,6 +1,5 @@
 torch >= 2.1
-diffusers >= 0.25
-# diffusers @ git+https://github.com/Beinsezii/diffusers.git@v0.24.0-release # has my euler ZSNR patch
+diffusers >= 0.26
 transformers
 accelerate
 omegaconf
