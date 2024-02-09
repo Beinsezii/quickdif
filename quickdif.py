@@ -217,7 +217,7 @@ if hasattr(pipe, "scheduler"):
     if args.sampler:
         pipe.scheduler = {
             "dpm": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", use_karras_sigmas=True),
-            "ddim": DDIMScheduler.from_config(pipe.scheduler.config),
+            "ddim": DDIMScheduler.from_config(pipe.scheduler.config, set_alpha_to_one=True),
             "euler": EulerDiscreteScheduler.from_config(pipe.scheduler.config),
             "eulerk": EulerDiscreteScheduler.from_config(pipe.scheduler.config, use_karras_sigmas=True),
             "eulera": EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config),
@@ -226,6 +226,7 @@ if hasattr(pipe, "scheduler"):
     # what most UIs use
     if not args.no_trail:
         pipe.scheduler.config.timestep_spacing = "trailing"
+        pipe.scheduler.config.steps_offset = 0
 # SCHEDULER }}}
 
 # INPUT TENSOR {{{
