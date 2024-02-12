@@ -28,7 +28,7 @@ from PIL import Image
 
 outdefault = "/tmp/" if os.path.exists("/tmp/") else "./output/"
 mdefault = "stabilityai/stable-diffusion-xl-base-1.0"
-samplers = ["dpm", "ddim", "euler", "eulerk", "eulera"]
+samplers = ["dpm", "ddim", "ddpm", "euler", "eulerk", "eulera"]
 dtypes = ["fp16", "bf16", "fp32"]
 offload = ["model", "sequential"]
 noise_types = ["cpu16", "cpu16b", "cpu32", "cuda16", "cuda16b", "cuda32"]
@@ -102,6 +102,7 @@ from diffusers import (
     AutoPipelineForText2Image,
     AutoPipelineForImage2Image,
     DDIMScheduler,
+    DDPMScheduler,
     # DiffusionPipeline, maybe re-add once multi-stage is manually implemented
     DPMSolverMultistepScheduler,
     EulerAncestralDiscreteScheduler,
@@ -218,6 +219,7 @@ if hasattr(pipe, "scheduler"):
         pipe.scheduler = {
             "dpm": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", use_karras_sigmas=True),
             "ddim": DDIMScheduler.from_config(pipe.scheduler.config, set_alpha_to_one=True),
+            "ddpm": DDPMScheduler.from_config(pipe.scheduler.config),
             "euler": EulerDiscreteScheduler.from_config(pipe.scheduler.config),
             "eulerk": EulerDiscreteScheduler.from_config(pipe.scheduler.config, use_karras_sigmas=True),
             "eulera": EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config),
