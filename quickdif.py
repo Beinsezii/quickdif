@@ -28,7 +28,7 @@ from PIL import Image
 
 outdefault = "/tmp/" if os.path.exists("/tmp/") else "./output/"
 mdefault = "stabilityai/stable-diffusion-xl-base-1.0"
-samplers = ["dpm", "ddim", "ddpm", "euler", "eulerk", "eulera"]
+samplers = ["dpm", "dpmk", "ddim", "ddpm", "euler", "eulerk", "eulera"]
 dtypes = ["fp16", "bf16", "fp32"]
 offload = ["model", "sequential"]
 noise_types = ["cpu16", "cpu16b", "cpu32", "cuda16", "cuda16b", "cuda32"]
@@ -217,7 +217,8 @@ if hasattr(pipe, "vae"):
 if hasattr(pipe, "scheduler"):
     if args.sampler:
         pipe.scheduler = {
-            "dpm": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", use_karras_sigmas=True),
+            "dpm": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", use_karras_sigmas=False),
+            "dpmk": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", use_karras_sigmas=True),
             "ddim": DDIMScheduler.from_config(pipe.scheduler.config, set_alpha_to_one=True),
             "ddpm": DDPMScheduler.from_config(pipe.scheduler.config),
             "euler": EulerDiscreteScheduler.from_config(pipe.scheduler.config),
