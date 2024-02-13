@@ -101,6 +101,9 @@ import torch, transformers, tqdm
 from diffusers import (
     AutoPipelineForText2Image,
     AutoPipelineForImage2Image,
+    StableCascadeCombinedPipeline,
+    StableCascadePriorPipeline,
+    StableCascadeDecoderPipeline,
     DDIMScheduler,
     DDPMScheduler,
     # DiffusionPipeline, maybe re-add once multi-stage is manually implemented
@@ -139,7 +142,22 @@ pipe_args = {
     "watermarker": None,
 }
 
-if args.model.endswith(".safetensors"):
+if 'cascade' in args.model:
+    prior = StableCascadePriorPipeline.from_pretrained("stabilityai/stable-cascade-prior", **pipe_args).to('cuda')
+    decoder = StableCascadeDecoderPipeline.from_pretrained("stabilityai/stable-cascade", **pipe_args).to('cuda')
+    pipe = StableCascadeCombinedPipeline(
+        decoder.tokenizer,
+        decoder.text_encoder,
+        decoder.decoder,
+        decoder.scheduler,
+        decoder.vqgan,
+        prior.prior,
+        prior.scheduler,
+        # prior.feature_extractor,
+        # prior.image_encoder,
+    )
+    del prior, decoder
+elif args.model.endswith(".safetensors"):
     if input_image is not None:
         pipe = StableDiffusionImg2ImgPipeline.from_single_file(args.model, **pipe_args)
     else:
@@ -287,7 +305,7 @@ key_dicts = [k | {"negative_prompt": n} for k in key_dicts for n in args.negativ
 if args.steps:
     key_dicts = [k | {"num_inference_steps": s} for k in key_dicts for s in args.steps]
 if args.cfg:
-    key_dicts = [k | {"guidance_scale": g, "prior_guidance_scale": g, "decoder_guidance_scale": g} for k in key_dicts for g in args.cfg]
+    key_dicts = [k | {"guidance_scale": g, "prior_guidance_scale": g, "decoder_guidance_scale": g if not isinstance(pipe, StableCascadeCombinedPipeline) else 0} for k in key_dicts for g in args.cfg]
 if args.rescale:
     key_dicts = [k | {"guidance_rescale": g} for k in key_dicts for g in args.rescale]
 # INPUT ARGS }}}
