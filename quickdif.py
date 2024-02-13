@@ -70,6 +70,7 @@ parser.add_argument(
     default="cpu32",
     help=f"Device/precision for random noise if supported by pipeline. Can be one of {noise_types}. Default 'cpu32'",
 )
+parser.add_argument("--prior-steps-ratio", type=float, default=2.0, help="Ratio for prior/decoder steps. Default 2")
 parser.add_argument("--offload", choices=offload, help=f"Set amount of CPU offload. Can be one of {offload}")
 parser.add_argument("--compile", action="store_true", help="Compile unet with torch.compile()")
 parser.add_argument("--no-trail", action="store_true", help="Do not force trailing timestep spacing. Changes seeds.")
@@ -142,9 +143,9 @@ pipe_args = {
     "watermarker": None,
 }
 
-if 'cascade' in args.model:
-    prior = StableCascadePriorPipeline.from_pretrained("stabilityai/stable-cascade-prior", **pipe_args).to('cuda')
-    decoder = StableCascadeDecoderPipeline.from_pretrained("stabilityai/stable-cascade", **pipe_args).to('cuda')
+if "cascade" in args.model:
+    prior = StableCascadePriorPipeline.from_pretrained("stabilityai/stable-cascade-prior", **pipe_args).to("cuda")
+    decoder = StableCascadeDecoderPipeline.from_pretrained("stabilityai/stable-cascade", **pipe_args).to("cuda")
     pipe = StableCascadeCombinedPipeline(
         decoder.tokenizer,
         decoder.text_encoder,
@@ -168,9 +169,10 @@ else:
     else:
         pipe = AutoPipelineForText2Image.from_pretrained(args.model, **pipe_args)
 
-
 XL = isinstance(pipe, StableDiffusionXLPipeline) or isinstance(pipe, StableDiffusionXLImg2ImgPipeline)
 SD = isinstance(pipe, StableDiffusionPipeline) or isinstance(pipe, StableDiffusionImg2ImgPipeline)
+
+pipe_params = inspect.signature(pipe).parameters
 
 pipe.safety_checker = None
 pipe.watermarker = None
@@ -303,9 +305,20 @@ key_dicts = [base_dict | {"seed": s + n * args.batch_size} for n in range(args.b
 key_dicts = [k | {"prompt": p} for k in key_dicts for p in args.prompts]
 key_dicts = [k | {"negative_prompt": n} for k in key_dicts for n in args.negative]
 if args.steps:
-    key_dicts = [k | {"num_inference_steps": s} for k in key_dicts for s in args.steps]
+    key_dicts = [
+        k | {"prior_num_inference_steps": s, "num_inference_steps": round(s // args.prior_steps_ratio)}
+        if "prior_num_inference_steps" in pipe_params
+        else {"num_inference_steps": s}
+        for k in key_dicts
+        for s in args.steps
+    ]
 if args.cfg:
-    key_dicts = [k | {"guidance_scale": g, "prior_guidance_scale": g, "decoder_guidance_scale": g if not isinstance(pipe, StableCascadeCombinedPipeline) else 0} for k in key_dicts for g in args.cfg]
+    key_dicts = [
+        k
+        | {"guidance_scale": g, "prior_guidance_scale": g, "decoder_guidance_scale": 0.0 if isinstance(pipe, StableCascadeCombinedPipeline) else g}
+        for k in key_dicts
+        for g in args.cfg
+    ]
 if args.rescale:
     key_dicts = [k | {"guidance_rescale": g} for k in key_dicts for g in args.rescale]
 # INPUT ARGS }}}
@@ -319,7 +332,6 @@ for kwargs in key_dicts:
     torch.cuda.empty_cache()
     meta = base_meta.copy()
     seed = kwargs.pop("seed")
-    params = inspect.signature(pipe).parameters
 
     # NOISE {{{
     if "latent_input" in locals():
@@ -360,7 +372,7 @@ for kwargs in key_dicts:
     if input_image is not None:
         kwargs["image"] = input_image
     for k in list(kwargs.keys()):
-        if k not in params:
+        if k not in pipe_params:
             del kwargs[k]
 
     if "num_inference_steps" in kwargs:
