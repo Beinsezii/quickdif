@@ -314,8 +314,7 @@ if args.steps:
     ]
 if args.cfg:
     key_dicts = [
-        k
-        | {"guidance_scale": g, "prior_guidance_scale": g, "decoder_guidance_scale": 0.0 if isinstance(pipe, StableCascadeCombinedPipeline) else g}
+        k | {"guidance_scale": g, "prior_guidance_scale": g, "decoder_guidance_scale": 0.0 if isinstance(pipe, StableCascadeCombinedPipeline) else g}
         for k in key_dicts
         for g in args.cfg
     ]
