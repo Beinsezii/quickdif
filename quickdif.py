@@ -24,67 +24,136 @@ COLS_FTMSE = {
 # CLI {{{
 import argparse, os, inspect
 from pathlib import Path
-from PIL import Image
+from PIL import Image, PngImagePlugin
 from math import ceil
 
-outdefault = "/tmp/" if os.path.exists("/tmp/") else "./output/"
-mdefault = "stabilityai/stable-diffusion-xl-base-1.0"
 samplers = ["dpm", "dpmk", "ddim", "ddpm", "euler", "eulerk", "eulera"]
 dtypes = ["fp16", "bf16", "fp32"]
 offload = ["model", "sequential"]
 noise_types = ["cpu16", "cpu16b", "cpu32", "cuda16", "cuda16b", "cuda32"]
 
+defaults = {
+    "prompts": [""],
+    "negative": ["blurry, noisy, cropped"],
+    "steps": [30],
+    "cfg": [6.0],
+    "rescale": [0.7],
+    "batch_count": 1,
+    "batch_size": 1,
+    "color": "black",
+    "color_scale": 0.0,
+    "model": "stabilityai/stable-diffusion-xl-base-1.0",
+    "lora_scale": 1.0,
+    "denoise": 1.0,
+    "out": Path("/tmp/quickdif/" if os.path.exists("/tmp/") else "./output/"),
+    "dtype": "fp16",
+    "noise_type": "cpu32",
+    "prior_steps_ratio": 2.0,
+}
+
 parser = argparse.ArgumentParser(
     description="Quick and easy inference for a variety of Diffusers models. Not all models support all options", add_help=False
 )
-parser.add_argument("prompts", nargs="+", type=str)
+parser.add_argument("prompts", nargs="*", type=str)
 parser.add_argument(
     "-n",
     "--negative",
     type=str,
     nargs="*",
-    default=["blurry, noisy, cropped"],
     help="Universal negative for all prompts. Default 'blurry, noisy, cropped'",
 )
 parser.add_argument("-w", "--width", type=int, help="Final output width. Default varies by model")
 parser.add_argument("-h", "--height", type=int, help="Final output height. Default varies by model")
-parser.add_argument("-s", "--steps", type=int, nargs="*", default=[30], help="Number of inference steps. Default 30. Can be unset")
-parser.add_argument("-g", "--cfg", type=float, nargs="*", default=[6], help="Guidance for conditioning. Default 6. Can be unset")
-parser.add_argument("-G", "--rescale", type=float, nargs="*", default=[0.7], help="Guidance rescale factor. Default 0.7. Can be unset")
-parser.add_argument("-b", "--batch-count", type=int, default=1, help="Amount of times to run each prompt sequentially. Default 1")
-parser.add_argument("-B", "--batch-size", type=int, default=1, help="Amount of times to run each prompt in parallel. Default 1")
+parser.add_argument("-s", "--steps", type=int, nargs="*", help="Number of inference steps. Default 30. Can be unset")
+parser.add_argument("-g", "--cfg", type=float, nargs="*", help="Guidance for conditioning. Default 6. Can be unset")
+parser.add_argument("-G", "--rescale", type=float, nargs="*", help="Guidance rescale factor. Default 0.7. Can be unset")
+parser.add_argument("-b", "--batch-count", type=int, help="Amount of times to run each prompt sequentially. Default 1")
+parser.add_argument("-B", "--batch-size", type=int, help="Amount of times to run each prompt in parallel. Default 1")
 parser.add_argument(
     "-C",
     "--color",
     choices=list(COLS_XL.keys()),
-    default="black",
     help=f"Color of input latent. Only supported with sd-ft-mse and sdxl VAEs. Default black, can be one of {list(COLS_XL.keys())}",
 )
-parser.add_argument("-c", "--color-scale", type=float, default=0.0, help="Alpha of colored latent. Default 0.0")
+parser.add_argument("-c", "--color-scale", type=float, help="Alpha of colored latent. Default 0.0")
 parser.add_argument(
-    "-m", "--model", type=str, default=mdefault, help=f"Huggingface model or Stable Diffusion safetensors checkpoint to load. Default {mdefault}"
+    "-m",
+    "--model",
+    type=str,
+    help=f"Huggingface model or Stable Diffusion safetensors checkpoint to load. Default {defaults['model']}",
 )
 parser.add_argument("-l", "--lora", type=str, help="Apply a Lora")
-parser.add_argument("-L", "--lora-scale", type=float, default=1.0, help="Strength of the lora. Default 1.0")
+parser.add_argument("-L", "--lora-scale", type=float, help="Strength of the lora. Default 1.0")
+parser.add_argument(
+    "-I",
+    "--include",
+    type=argparse.FileType(mode="rb"),
+    help="Include parameters from another image. Only works with quickdif images",
+)
 parser.add_argument("-i", "--input", type=argparse.FileType(mode="rb"), help="Input image")
-parser.add_argument("-d", "--denoise", type=float, default=1.0, help="Denoise amount. Default 1.0")
-parser.add_argument("-o", "--out", type=Path, default="/tmp/quickdif/", help=f"Output directory for images. Default {outdefault}")
-parser.add_argument("-D", "--dtype", choices=dtypes, default="fp16", help=f"Data format for inference. Default fp16, can be one of {dtypes}")
+parser.add_argument("-d", "--denoise", type=float, help="Denoise amount. Default 1.0")
+parser.add_argument("-o", "--out", type=Path, help=f"Output directory for images. Default {defaults['out']}")
+parser.add_argument("-D", "--dtype", choices=dtypes, help=f"Data format for inference. Default fp16, can be one of {dtypes}")
 parser.add_argument("--seed", type=int, nargs="*", help="Seed for deterministic outputs. If not set, will be random")
 parser.add_argument("-S", "--sampler", choices=samplers, help=f"Override model's default sampler. Can be one of {samplers}")
 parser.add_argument(
     "--noise-type",
     choices=noise_types,
-    default="cpu32",
     help=f"Device/precision for random noise if supported by pipeline. Can be one of {noise_types}. Default 'cpu32'",
 )
-parser.add_argument("--prior-steps-ratio", type=float, default=2.0, help="Ratio for prior/decoder steps. Default 2")
+parser.add_argument("--prior-steps-ratio", type=float, help="Ratio for prior/decoder steps. Default 2")
 parser.add_argument("--offload", choices=offload, help=f"Set amount of CPU offload. Can be one of {offload}")
 parser.add_argument("--compile", action="store_true", help="Compile unet with torch.compile()")
 parser.add_argument("--no-trail", action="store_true", help="Do not force trailing timestep spacing. Changes seeds.")
 parser.add_argument("--help", action="help")
 
 args = parser.parse_args()
+if len(args.prompts) == 0:  # positionals will always accumulate
+    args.prompts = None
+
+# include
+include = {}
+if args.include:
+    with Image.open(args.include) as meta_image:
+        include = {"width": meta_image.width, "height": meta_image.height}
+        for k, v in meta_image.text.items():
+            match k:
+                case "model":
+                    include["model"] = v
+                case "prompt":
+                    include["prompts"] = [v]
+                case "negative":
+                    include["negative"] = [v]
+                case "cfg":
+                    include["cfg"] = [float(v)]
+                case "rescale":
+                    include["rescale"] = [float(v)]
+                case "steps":
+                    include["steps"] = [int(v)]
+                case "seed":
+                    include["seed"] = [int(v)]
+                # it really shouldn't add batch for reproduction of a single image.
+                # case "batch_size": include["batch_size"] = int(v)
+                case "noise_type":
+                    include["noise_type"] = v
+                case "denoise":
+                    include["denoise"] = float(v)
+                case "sampler":
+                    include["sampler"] = v
+                case "color":
+                    include["color"] = v
+                case "color_scale":
+                    include["color_scale"] = float(v)
+                case "lora":
+                    include["lora"] = v
+                case "lora_scale":
+                    include["lora_scale"] = float(v)
+                case "prior_steps_ratio":
+                    include["prior_steps_ratio"] = float(v)
+
+for k, v in (defaults | include).items():
+    if getattr(args, k, None) is None:
+        setattr(args, k, v)
 
 if args.out.is_dir():
     pass
@@ -126,7 +195,6 @@ from diffusers import (
     StableDiffusionXLImg2ImgPipeline,
 )
 from compel import Compel, ReturnedEmbeddingsType
-from PIL.PngImagePlugin import PngInfo
 
 torch.set_grad_enabled(False)
 torch.set_float32_matmul_precision("high")
@@ -395,18 +463,26 @@ for kwargs in key_dicts:
         if k not in pipe_params:
             del kwargs[k]
 
-    if "num_inference_steps" in kwargs:
+    if "prior_num_inference_steps" in kwargs:
+        meta["steps"] = kwargs["prior_num_inference_steps"]
+        meta["prior_steps_ratio"] = args.prior_steps_ratio
+    elif "num_inference_steps" in kwargs:
         meta["steps"] = kwargs["num_inference_steps"]
-    if "guidance_scale" in kwargs:
+
+    if "prior_guidance_scale" in kwargs:
+        meta["cfg"] = kwargs["prior_guidance_scale"]
+    elif "guidance_scale" in kwargs:
         meta["cfg"] = kwargs["guidance_scale"]
+
     if "guidance_rescale" in kwargs:
         meta["rescale"] = kwargs["guidance_rescale"]
+
     for n, image in enumerate(pipe(**kwargs).images):
         p = args.out.joinpath(f"{filenum:05}.png")
         while p.exists():
             filenum += 1
             p = args.out.joinpath(f"{filenum:05}.png")
-        pnginfo = PngInfo()
+        pnginfo = PngImagePlugin.PngInfo()
         for k, v in meta.items():
             pnginfo.add_text(k, str(v))
         if "latents" in kwargs or n == 0:
