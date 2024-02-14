@@ -25,6 +25,7 @@ COLS_FTMSE = {
 import argparse, os, inspect
 from pathlib import Path
 from PIL import Image
+from math import ceil
 
 outdefault = "/tmp/" if os.path.exists("/tmp/") else "./output/"
 mdefault = "stabilityai/stable-diffusion-xl-base-1.0"
@@ -255,7 +256,7 @@ if hasattr(pipe, "scheduler"):
 # INPUT TENSOR {{{
 if hasattr(pipe, "vae") and weights and input_image is None:
     size = [
-        1,
+        args.batch_size,
         weights.config.in_channels,
         args.height // pipe.vae_scale_factor if args.height else weights.config.sample_size,
         args.width // pipe.vae_scale_factor if args.width else weights.config.sample_size,
@@ -282,7 +283,14 @@ if hasattr(pipe, "vae") and weights and input_image is None:
     else:
         latent_input = torch.zeros(size, dtype=dtype, device="cpu")
 
-    size[0] = args.batch_size
+if hasattr(pipe, "vqgan") and hasattr(pipe, "prior_pipe") and input_image is None:
+    size = [
+        args.batch_size,
+        pipe.prior_pipe.prior.config.c_in,
+        ceil(getattr(args, "height", 1024) / pipe.prior_pipe.resolution_multiple),
+        ceil(getattr(args, "width", 1024) / pipe.prior_pipe.resolution_multiple),
+    ]
+    latent_input = torch.zeros(size, dtype=dtype, device="cpu")
 # INPUT TENSOR }}}
 
 # INPUT ARGS {{{
@@ -306,15 +314,19 @@ key_dicts = [k | {"prompt": p} for k in key_dicts for p in args.prompts]
 key_dicts = [k | {"negative_prompt": n} for k in key_dicts for n in args.negative]
 if args.steps:
     key_dicts = [
-        k | {"prior_num_inference_steps": s, "num_inference_steps": round(s // args.prior_steps_ratio)}
-        if "prior_num_inference_steps" in pipe_params
-        else {"num_inference_steps": s}
+        k
+        | (
+            {"prior_num_inference_steps": s, "num_inference_steps": ceil(s // args.prior_steps_ratio)}
+            if "prior_num_inference_steps" in pipe_params
+            else {"num_inference_steps": s}
+        )
         for k in key_dicts
         for s in args.steps
     ]
 if args.cfg:
     key_dicts = [
-        k | {"guidance_scale": g, "prior_guidance_scale": g, "decoder_guidance_scale": 0.0 if isinstance(pipe, StableCascadeCombinedPipeline) else g}
+        k
+        | ({"guidance_scale": g, "prior_guidance_scale": g, "decoder_guidance_scale": 0.0 if isinstance(pipe, StableCascadeCombinedPipeline) else g})
         for k in key_dicts
         for g in args.cfg
     ]
@@ -333,20 +345,16 @@ for kwargs in key_dicts:
     seed = kwargs.pop("seed")
 
     # NOISE {{{
+    generators = [torch.Generator(noise_device).manual_seed(seed + n) for n in range(args.batch_size)]
+
     if "latent_input" in locals():
-        latents = latent_input.expand(size).clone()
-        seeds = []
-        for n, latent in enumerate(latents):
-            seeds.append(seed + n)
-            generator = torch.Generator(noise_device).manual_seed(seed + n)
+        latents = latent_input.clone()
+        for latent, generator in zip(latents, generators):
             latent += torch.randn(latents.shape[1:], generator=generator, dtype=noise_dtype, device=noise_device).to("cpu")
-            if n == 0:
-                kwargs["generator"] = generator
         kwargs["latents"] = latents
-        print("seeds:", " ".join(map(str, seeds)))
-    else:  # No input tensors for non-VAE pipe calls?
-        kwargs["generator"] = torch.Generator(noise_device).manual_seed(seed)
-        print("seed:", seed)
+
+    kwargs["generator"] = generators
+    print("seeds:", "".join([str(seed + n) for n in range(args.batch_size)]))
     # NOISE }}}
 
     # CONDITIONING {{{
