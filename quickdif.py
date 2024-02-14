@@ -38,7 +38,14 @@ parser = argparse.ArgumentParser(
     description="Quick and easy inference for a variety of Diffusers models. Not all models support all options", add_help=False
 )
 parser.add_argument("prompts", nargs="+", type=str)
-parser.add_argument("-n", "--negative", type=str, nargs="*", default=["blurry"], help="Universal negative for all prompts. Default 'blurry'")
+parser.add_argument(
+    "-n",
+    "--negative",
+    type=str,
+    nargs="*",
+    default=["blurry, noisy, cropped"],
+    help="Universal negative for all prompts. Default 'blurry, noisy, cropped'",
+)
 parser.add_argument("-w", "--width", type=int, help="Final output width. Default varies by model")
 parser.add_argument("-h", "--height", type=int, help="Final output height. Default varies by model")
 parser.add_argument("-s", "--steps", type=int, nargs="*", default=[30], help="Number of inference steps. Default 30. Can be unset")
