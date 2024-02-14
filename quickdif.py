@@ -291,8 +291,8 @@ elif hasattr(pipe, "vqgan") and hasattr(pipe, "prior_pipe") and input_image is N
     size = [
         args.batch_size,
         pipe.prior_pipe.prior.config.c_in,
-        ceil(args.height / pipe.prior_pipe.resolution_multiple),
-        ceil(args.width / pipe.prior_pipe.resolution_multiple),
+        ceil(args.height / pipe.prior_pipe.config.resolution_multiple),
+        ceil(args.width / pipe.prior_pipe.config.resolution_multiple),
     ]
     latent_input = torch.zeros(size, dtype=dtype, device="cpu")
 # INPUT TENSOR }}}
