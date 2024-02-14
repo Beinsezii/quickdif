@@ -2,7 +2,7 @@
 Quick and easy CLI inference that just works™ for a variety of Diffusers models
 
 ## Including
-  - Verified working with Stable Diffusion (1.5/2.1/XL Base), Wuerstchen, Kandinsky22, Pixart, DeepFloydIF (Stage 1 only)
+  - Verified working with Stable Diffusion (1.5/2.1/XL Base), Stable Cascade/Wuerstchen, Kandinsky22, Pixart
   - Supports many common settings found in GUIs
   - Iterate over parameters like prompt or CFG
   - Some more advanced tweaks like Lora and colored latents
@@ -12,7 +12,7 @@ Quick and easy CLI inference that just works™ for a variety of Diffusers model
 ## Not Including
   - ControlNet + other Stable Diffusion extensions
   - Other diffusion models may or may not work properly
-  - Multi-stage model control. DFIF Stage 2, SDXL Refiner, Wuerstchen/Kandinsky more precise controls
+  - Multi-stage models: DFIF Stage 2, SDXL Refiner
   - Server/API for a perpetual instance
   - Output as grid
   - 100% maximum optimization
