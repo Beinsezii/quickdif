@@ -125,6 +125,8 @@ torch.set_grad_enabled(False)
 torch.set_float32_matmul_precision("high")
 AMD = "AMD" in torch.cuda.get_device_name()
 dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[args.dtype]
+if "cascade" in args.model and dtype == torch.float16:
+    dtype = torch.bfloat16
 noise_dtype, noise_device = {
     "cpu16": (torch.float16, "cpu"),
     "cpu16b": (torch.bfloat16, "cpu"),
