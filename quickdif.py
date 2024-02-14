@@ -283,7 +283,7 @@ if hasattr(pipe, "vae") and weights and input_image is None:
     else:
         latent_input = torch.zeros(size, dtype=dtype, device="cpu")
 
-if hasattr(pipe, "vqgan") and hasattr(pipe, "prior_pipe") and input_image is None:
+elif hasattr(pipe, "vqgan") and hasattr(pipe, "prior_pipe") and input_image is None:
     size = [
         args.batch_size,
         pipe.prior_pipe.prior.config.c_in,
