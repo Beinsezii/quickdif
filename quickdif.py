@@ -284,11 +284,15 @@ if hasattr(pipe, "vae") and weights and input_image is None:
         latent_input = torch.zeros(size, dtype=dtype, device="cpu")
 
 elif hasattr(pipe, "vqgan") and hasattr(pipe, "prior_pipe") and input_image is None:
+    if not args.height:
+        args.height = 1024
+    if not args.width:
+        args.width = 1024
     size = [
         args.batch_size,
         pipe.prior_pipe.prior.config.c_in,
-        ceil(getattr(args, "height", 1024) / pipe.prior_pipe.resolution_multiple),
-        ceil(getattr(args, "width", 1024) / pipe.prior_pipe.resolution_multiple),
+        ceil(args.height / pipe.prior_pipe.resolution_multiple),
+        ceil(args.width / pipe.prior_pipe.resolution_multiple),
     ]
     latent_input = torch.zeros(size, dtype=dtype, device="cpu")
 # INPUT TENSOR }}}
@@ -354,7 +358,7 @@ for kwargs in key_dicts:
         kwargs["latents"] = latents
 
     kwargs["generator"] = generators
-    print("seeds:", "".join([str(seed + n) for n in range(args.batch_size)]))
+    print("seeds:", " ".join([str(seed + n) for n in range(args.batch_size)]))
     # NOISE }}}
 
     # CONDITIONING {{{
