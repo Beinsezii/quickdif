@@ -33,7 +33,7 @@ offload = ["model", "sequential"]
 noise_types = ["cpu16", "cpu16b", "cpu32", "cuda16", "cuda16b", "cuda32"]
 
 defaults = {
-    "prompts": [""],
+    "prompt": [""],
     "negative": ["blurry, noisy, cropped"],
     "steps": [30],
     "cfg": [6.0],
@@ -54,7 +54,7 @@ defaults = {
 parser = argparse.ArgumentParser(
     description="Quick and easy inference for a variety of Diffusers models. Not all models support all options", add_help=False
 )
-parser.add_argument("prompts", nargs="*", type=str)
+parser.add_argument("prompt", nargs="*", type=str)
 parser.add_argument(
     "-n",
     "--negative",
@@ -108,8 +108,8 @@ parser.add_argument("--no-trail", action="store_true", help="Do not force traili
 parser.add_argument("--help", action="help")
 
 args = parser.parse_args()
-if len(args.prompts) == 0:  # positionals will always accumulate
-    args.prompts = None
+if len(args.prompt) == 0:  # positionals will always accumulate
+    args.prompt = None
 
 # include
 include = {}
@@ -118,40 +118,23 @@ if args.include:
         include = {"width": meta_image.width, "height": meta_image.height}
         for k, v in meta_image.text.items():
             match k:
-                case "model":
-                    include["model"] = v
-                case "prompt":
-                    include["prompts"] = [v]
-                case "negative":
-                    include["negative"] = [v]
-                case "cfg":
-                    include["cfg"] = [float(v)]
-                case "rescale":
-                    include["rescale"] = [float(v)]
-                case "steps":
-                    include["steps"] = [int(v)]
-                case "seed":
-                    include["seed"] = [int(v)]
-                # it really shouldn't add batch for reproduction of a single image.
-                # case "batch_size": include["batch_size"] = int(v)
-                case "noise_type":
-                    include["noise_type"] = v
-                case "denoise":
-                    include["denoise"] = float(v)
-                case "sampler":
-                    include["sampler"] = v
-                case "color":
-                    include["color"] = v
-                case "color_scale":
-                    include["color_scale"] = float(v)
-                case "lora":
-                    include["lora"] = v
-                case "lora_scale":
-                    include["lora_scale"] = float(v)
-                case "prior_steps_ratio":
-                    include["prior_steps_ratio"] = float(v)
+                case "prompt" | "negative":
+                    include[k] = [v]
+                case "cfg" | "rescale":
+                    include[k] = [float(v)]
+                case "steps" | "seed":
+                    include[k] = [int(v)]
+                case "model" | "sampler" | "noise_type" | "color" | "lora":
+                    include[k] = v
+                case "denoise" | "color_scale" | "lora_scale" | "prior_steps_ratio":
+                    include[k] = float(v)
+                case "url" | "batch_size":
+                    pass
+                case other:
+                    print("Unknown key:", other)
 
 for k, v in (defaults | include).items():
+    assert hasattr(args, k)
     if getattr(args, k, None) is None:
         setattr(args, k, v)
 
@@ -391,7 +374,7 @@ if args.lora:
 i32max = 2**31 - 1
 seeds = [torch.randint(high=i32max, low=-i32max, size=(1,)).item()] if not args.seed else args.seed
 key_dicts = [base_dict | {"seed": s + n * args.batch_size} for n in range(args.batch_count) for s in seeds]
-key_dicts = [k | {"prompt": p} for k in key_dicts for p in args.prompts]
+key_dicts = [k | {"prompt": p} for k in key_dicts for p in args.prompt]
 key_dicts = [k | {"negative_prompt": n} for k in key_dicts for n in args.negative]
 if args.steps:
     key_dicts = [
