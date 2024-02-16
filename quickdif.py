@@ -169,7 +169,7 @@ if args.comment:
 # CLI }}}
 
 # TORCH {{{
-import torch, transformers, tqdm
+import torch, transformers, tqdm, signal
 from diffusers import (
     AutoPipelineForImage2Image,
     AutoPipelineForText2Image,
@@ -188,6 +188,23 @@ from diffusers import (
     StableDiffusionXLPipeline,
 )
 from compel import Compel, ReturnedEmbeddingsType
+
+
+# elegent solution from <https://stackoverflow.com/questions/842557/>
+class NoInterrupt:
+    def __enter__(self):
+        self.signal_received = False
+        self.old_handler = signal.signal(signal.SIGINT, self.handler)
+
+    def handler(self, sig, frame):
+        self.signal_received = (sig, frame)
+        print("SIGINT received, waiting for allocation to finish before exiting...")
+
+    def __exit__(self, type, value, traceback):
+        signal.signal(signal.SIGINT, self.old_handler)
+        if self.signal_received:
+            self.old_handler(*self.signal_received)
+
 
 torch.set_grad_enabled(False)
 torch.set_float32_matmul_precision("high")
@@ -214,31 +231,32 @@ pipe_args = {
     "watermarker": None,
 }
 
-if "cascade" in args.model:
-    prior = StableCascadePriorPipeline.from_pretrained("stabilityai/stable-cascade-prior", **pipe_args).to("cuda")
-    decoder = StableCascadeDecoderPipeline.from_pretrained("stabilityai/stable-cascade", **pipe_args).to("cuda")
-    pipe = StableCascadeCombinedPipeline(
-        decoder.tokenizer,
-        decoder.text_encoder,
-        decoder.decoder,
-        decoder.scheduler,
-        decoder.vqgan,
-        prior.prior,
-        prior.scheduler,
-        # prior.feature_extractor,
-        # prior.image_encoder,
-    )
-    del prior, decoder
-elif args.model.endswith(".safetensors"):
-    if input_image is not None:
-        pipe = StableDiffusionImg2ImgPipeline.from_single_file(args.model, **pipe_args)
+with NoInterrupt():
+    if "cascade" in args.model:
+        prior = StableCascadePriorPipeline.from_pretrained("stabilityai/stable-cascade-prior", **pipe_args).to("cuda")
+        decoder = StableCascadeDecoderPipeline.from_pretrained("stabilityai/stable-cascade", **pipe_args).to("cuda")
+        pipe = StableCascadeCombinedPipeline(
+            decoder.tokenizer,
+            decoder.text_encoder,
+            decoder.decoder,
+            decoder.scheduler,
+            decoder.vqgan,
+            prior.prior,
+            prior.scheduler,
+            # prior.feature_extractor,
+            # prior.image_encoder,
+        )
+        del prior, decoder
+    elif args.model.endswith(".safetensors"):
+        if input_image is not None:
+            pipe = StableDiffusionImg2ImgPipeline.from_single_file(args.model, **pipe_args)
+        else:
+            pipe = StableDiffusionPipeline.from_single_file(args.model, **pipe_args)
     else:
-        pipe = StableDiffusionPipeline.from_single_file(args.model, **pipe_args)
-else:
-    if input_image is not None:
-        pipe = AutoPipelineForImage2Image.from_pretrained(args.model, **pipe_args)
-    else:
-        pipe = AutoPipelineForText2Image.from_pretrained(args.model, **pipe_args)
+        if input_image is not None:
+            pipe = AutoPipelineForImage2Image.from_pretrained(args.model, **pipe_args)
+        else:
+            pipe = AutoPipelineForText2Image.from_pretrained(args.model, **pipe_args)
 
 XL = isinstance(pipe, StableDiffusionXLPipeline) or isinstance(pipe, StableDiffusionXLImg2ImgPipeline)
 SD = isinstance(pipe, StableDiffusionPipeline) or isinstance(pipe, StableDiffusionImg2ImgPipeline)
@@ -365,6 +383,9 @@ elif hasattr(pipe, "vqgan") and hasattr(pipe, "prior_pipe") and input_image is N
         ceil(args.width / pipe.prior_pipe.config.resolution_multiple),
     ]
     latent_input = torch.zeros(size, dtype=dtype, device="cpu")
+
+else:
+    print(f"Model {args.model} not able to use pre-noised latents.\nNoise type {args.noise_type} will not be respected.")
 # INPUT TENSOR }}}
 
 # INPUT ARGS {{{
