@@ -22,10 +22,13 @@ COLS_FTMSE = {
 # LATENT COLORS }}}
 
 # CLI {{{
-import argparse, os, inspect
-from pathlib import Path
-from PIL import Image, PngImagePlugin
+import argparse
+from inspect import signature
 from math import ceil
+from pathlib import Path
+from sys import exit
+
+from PIL import Image, PngImagePlugin
 
 samplers = ["dpm", "dpmk", "ddim", "ddpm", "euler", "eulerk", "eulera"]
 dtypes = ["fp16", "bf16", "fp32"]
@@ -45,7 +48,7 @@ defaults = {
     "model": "stabilityai/stable-diffusion-xl-base-1.0",
     "lora_scale": 1.0,
     "denoise": 1.0,
-    "out": Path("/tmp/quickdif/" if os.path.exists("/tmp/") else "./output/"),
+    "out": Path("/tmp/quickdif/" if Path("/tmp/").exists() else "./output/"),
     "dtype": "fp16",
     "noise_type": "cpu32",
     "prior_steps_ratio": 2.0,
@@ -103,8 +106,10 @@ parser.add_argument(
 )
 parser.add_argument("--prior-steps-ratio", type=float, help="Ratio for prior/decoder steps. Default 2")
 parser.add_argument("--offload", choices=offload, help=f"Set amount of CPU offload. Can be one of {offload}")
+parser.add_argument("--comment", type=str, help="Add a comment to the image.")
 parser.add_argument("--compile", action="store_true", help="Compile unet with torch.compile()")
 parser.add_argument("--no-trail", action="store_true", help="Do not force trailing timestep spacing. Changes seeds.")
+parser.add_argument("--print", action="store_true", help="Print out generation params and exit.")
 parser.add_argument("--help", action="help")
 
 args = parser.parse_args()
@@ -138,6 +143,10 @@ for k, v in (defaults | include).items():
     if getattr(args, k, None) is None:
         setattr(args, k, v)
 
+if args.print:
+    print("\n".join([f"{k}: {v}" for k, v in vars(args).items()]))
+    exit()
+
 if args.out.is_dir():
     pass
 elif not args.out.exists():
@@ -155,27 +164,28 @@ if args.batch_size > 1:
     base_meta["batch_size"] = args.batch_size
 if args.sampler:
     base_meta["sampler"] = args.sampler
+if args.comment:
+    base_meta["comment"] = args.comment
 # CLI }}}
 
 # TORCH {{{
 import torch, transformers, tqdm
 from diffusers import (
-    AutoPipelineForText2Image,
     AutoPipelineForImage2Image,
-    StableCascadeCombinedPipeline,
-    StableCascadePriorPipeline,
-    StableCascadeDecoderPipeline,
+    AutoPipelineForText2Image,
     DDIMScheduler,
     DDPMScheduler,
-    # DiffusionPipeline, maybe re-add once multi-stage is manually implemented
     DPMSolverMultistepScheduler,
     EulerAncestralDiscreteScheduler,
     EulerDiscreteScheduler,
     PixArtAlphaPipeline,
-    StableDiffusionPipeline,
+    StableCascadeCombinedPipeline,
+    StableCascadeDecoderPipeline,
+    StableCascadePriorPipeline,
     StableDiffusionImg2ImgPipeline,
-    StableDiffusionXLPipeline,
+    StableDiffusionPipeline,
     StableDiffusionXLImg2ImgPipeline,
+    StableDiffusionXLPipeline,
 )
 from compel import Compel, ReturnedEmbeddingsType
 
@@ -233,7 +243,7 @@ else:
 XL = isinstance(pipe, StableDiffusionXLPipeline) or isinstance(pipe, StableDiffusionXLImg2ImgPipeline)
 SD = isinstance(pipe, StableDiffusionPipeline) or isinstance(pipe, StableDiffusionImg2ImgPipeline)
 
-pipe_params = inspect.signature(pipe).parameters
+pipe_params = signature(pipe).parameters
 
 pipe.safety_checker = None
 pipe.watermarker = None
