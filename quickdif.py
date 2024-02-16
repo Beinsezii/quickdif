@@ -133,7 +133,7 @@ if args.include:
                     include[k] = v
                 case "denoise" | "color_scale" | "lora_scale" | "prior_steps_ratio":
                     include[k] = float(v)
-                case "url" | "batch_size":
+                case "url" | "batch_size" | "comment":
                     pass
                 case other:
                     print("Unknown key:", other)
@@ -191,19 +191,32 @@ from compel import Compel, ReturnedEmbeddingsType
 
 
 # elegent solution from <https://stackoverflow.com/questions/842557/>
-class NoInterrupt:
+class SmartSigint:
+    def __init__(self, num=1, job_name=None):
+        self.num = num
+        self.job_name = job_name if job_name is not None else "current job"
+
     def __enter__(self):
-        self.signal_received = False
+        self.count = 0
+        self.received = None
         self.old_handler = signal.signal(signal.SIGINT, self.handler)
 
     def handler(self, sig, frame):
-        self.signal_received = (sig, frame)
-        print("SIGINT received, waiting for allocation to finish before exiting...")
+        self.received = (sig, frame)
+        if self.count >= self.num:
+            print(f"\nSIGINT received {self.count+1} times, forcibly aborting {self.job_name}")
+            self.terminate()
+        else:
+            print(f"\nSIGINT received, waiting for {self.job_name} to complete before exiting.\nRequire {self.num - self.count} more to abort.")
+        self.count += 1
 
-    def __exit__(self, type, value, traceback):
+    def terminate(self):
         signal.signal(signal.SIGINT, self.old_handler)
-        if self.signal_received:
-            self.old_handler(*self.signal_received)
+        if self.received:
+            self.old_handler(*self.received)
+
+    def __exit__(self, _type, _value, _traceback):
+        self.terminate()
 
 
 torch.set_grad_enabled(False)
@@ -231,7 +244,7 @@ pipe_args = {
     "watermarker": None,
 }
 
-with NoInterrupt():
+with SmartSigint(num=2, job_name="model load"):
     if "cascade" in args.model:
         prior = StableCascadePriorPipeline.from_pretrained("stabilityai/stable-cascade-prior", **pipe_args).to("cuda")
         decoder = StableCascadeDecoderPipeline.from_pretrained("stabilityai/stable-cascade", **pipe_args).to("cuda")
@@ -435,76 +448,77 @@ filenum = 0
 if len(key_dicts) > 1:
     bar = tqdm.tqdm(desc="Images", total=len(key_dicts) * args.batch_size)
 for kwargs in key_dicts:
-    torch.cuda.empty_cache()
-    meta = base_meta.copy()
-    seed = kwargs.pop("seed")
+    with SmartSigint(job_name="current batch"):
+        torch.cuda.empty_cache()
+        meta = base_meta.copy()
+        seed = kwargs.pop("seed")
 
-    # NOISE {{{
-    generators = [torch.Generator(noise_device).manual_seed(seed + n) for n in range(args.batch_size)]
+        # NOISE {{{
+        generators = [torch.Generator(noise_device).manual_seed(seed + n) for n in range(args.batch_size)]
 
-    if "latent_input" in locals():
-        latents = latent_input.clone()
-        for latent, generator in zip(latents, generators):
-            latent += torch.randn(latents.shape[1:], generator=generator, dtype=noise_dtype, device=noise_device).to("cpu")
-        kwargs["latents"] = latents
+        if "latent_input" in locals():
+            latents = latent_input.clone()
+            for latent, generator in zip(latents, generators):
+                latent += torch.randn(latents.shape[1:], generator=generator, dtype=noise_dtype, device=noise_device).to("cpu")
+            kwargs["latents"] = latents
 
-    kwargs["generator"] = generators
-    print("seeds:", " ".join([str(seed + n) for n in range(args.batch_size)]))
-    # NOISE }}}
+        kwargs["generator"] = generators
+        print("seeds:", " ".join([str(seed + n) for n in range(args.batch_size)]))
+        # NOISE }}}
 
-    # CONDITIONING {{{
-    meta["prompt"] = kwargs["prompt"]
-    meta["negative"] = kwargs["negative_prompt"]
-    if "compel" in locals():
-        pos = kwargs.pop("prompt")
-        neg = kwargs.pop("negative_prompt")
-        if XL:
-            ncond, npool = compel.build_conditioning_tensor(neg)
-            pcond, ppool = compel.build_conditioning_tensor(pos)
-            kwargs = kwargs | {"pooled_prompt_embeds": ppool, "negative_pooled_prompt_embeds": npool}
-        else:
-            pcond = compel.build_conditioning_tensor(pos)
-            ncond = compel.build_conditioning_tensor(neg)
-        pcond, ncond = compel.pad_conditioning_tensors_to_same_length([pcond, ncond])
-        kwargs |= {"prompt_embeds": pcond, "negative_prompt_embeds": ncond}
-    # CONDITIONING }}}
+        # CONDITIONING {{{
+        meta["prompt"] = kwargs["prompt"]
+        meta["negative"] = kwargs["negative_prompt"]
+        if "compel" in locals():
+            pos = kwargs.pop("prompt")
+            neg = kwargs.pop("negative_prompt")
+            if XL:
+                ncond, npool = compel.build_conditioning_tensor(neg)
+                pcond, ppool = compel.build_conditioning_tensor(pos)
+                kwargs = kwargs | {"pooled_prompt_embeds": ppool, "negative_pooled_prompt_embeds": npool}
+            else:
+                pcond = compel.build_conditioning_tensor(pos)
+                ncond = compel.build_conditioning_tensor(neg)
+            pcond, ncond = compel.pad_conditioning_tensors_to_same_length([pcond, ncond])
+            kwargs |= {"prompt_embeds": pcond, "negative_prompt_embeds": ncond}
+        # CONDITIONING }}}
 
-    # PROCESS {{{
-    # make sure call doesnt err
-    if input_image is not None:
-        kwargs["image"] = input_image
-    for k in list(kwargs.keys()):
-        if k not in pipe_params:
-            del kwargs[k]
+        # PROCESS {{{
+        # make sure call doesnt err
+        if input_image is not None:
+            kwargs["image"] = input_image
+        for k in list(kwargs.keys()):
+            if k not in pipe_params:
+                del kwargs[k]
 
-    if "prior_num_inference_steps" in kwargs:
-        meta["steps"] = kwargs["prior_num_inference_steps"]
-        meta["prior_steps_ratio"] = args.prior_steps_ratio
-    elif "num_inference_steps" in kwargs:
-        meta["steps"] = kwargs["num_inference_steps"]
+        if "prior_num_inference_steps" in kwargs:
+            meta["steps"] = kwargs["prior_num_inference_steps"]
+            meta["prior_steps_ratio"] = args.prior_steps_ratio
+        elif "num_inference_steps" in kwargs:
+            meta["steps"] = kwargs["num_inference_steps"]
 
-    if "prior_guidance_scale" in kwargs:
-        meta["cfg"] = kwargs["prior_guidance_scale"]
-    elif "guidance_scale" in kwargs:
-        meta["cfg"] = kwargs["guidance_scale"]
+        if "prior_guidance_scale" in kwargs:
+            meta["cfg"] = kwargs["prior_guidance_scale"]
+        elif "guidance_scale" in kwargs:
+            meta["cfg"] = kwargs["guidance_scale"]
 
-    if "guidance_rescale" in kwargs:
-        meta["rescale"] = kwargs["guidance_rescale"]
+        if "guidance_rescale" in kwargs:
+            meta["rescale"] = kwargs["guidance_rescale"]
 
-    for n, image in enumerate(pipe(**kwargs).images):
-        p = args.out.joinpath(f"{filenum:05}.png")
-        while p.exists():
-            filenum += 1
+        for n, image in enumerate(pipe(**kwargs).images):
             p = args.out.joinpath(f"{filenum:05}.png")
-        pnginfo = PngImagePlugin.PngInfo()
-        for k, v in meta.items():
-            pnginfo.add_text(k, str(v))
-        if "latents" in kwargs or n == 0:
-            pnginfo.add_text("seed", str(seed + n))
-        else:
-            pnginfo.add_text("seed", f"{seed} + {n}")
-        image.save(p, format="PNG", pnginfo=pnginfo)
-    if len(key_dicts) > 1:
-        bar.update(args.batch_size)
-    # PROCESS }}}
+            while p.exists():
+                filenum += 1
+                p = args.out.joinpath(f"{filenum:05}.png")
+            pnginfo = PngImagePlugin.PngInfo()
+            for k, v in meta.items():
+                pnginfo.add_text(k, str(v))
+            if "latents" in kwargs or n == 0:
+                pnginfo.add_text("seed", str(seed + n))
+            else:
+                pnginfo.add_text("seed", f"{seed} + {n}")
+            image.save(p, format="PNG", pnginfo=pnginfo)
+        if len(key_dicts) > 1:
+            bar.update(args.batch_size)
+        # PROCESS }}}
 # INFERENCE }}}
