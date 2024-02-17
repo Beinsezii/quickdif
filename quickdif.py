@@ -21,17 +21,8 @@ COLS_FTMSE = {
 }
 # LATENT COLORS }}}
 
-# ALGORITHMS {{{
-import math
-
-decoder_algos = {
-    -1: lambda p: p / 4 + 10 - 10 / 4,  # Linear: P/R + I - I/R
-    -2: lambda p: math.sqrt(p * 10),  # Quadratic: √10P
-}
-# ALGORITHMS }}}
-
 # CLI {{{
-import argparse
+import argparse, math
 from inspect import signature
 from pathlib import Path
 from sys import exit
@@ -59,7 +50,7 @@ defaults = {
     "out": Path("/tmp/quickdif/" if Path("/tmp/").exists() else "./output/"),
     "dtype": "fp16",
     "noise_type": "cpu32",
-    "decoder_steps": -2,
+    "decoder_steps": -10,
 }
 
 parser = argparse.ArgumentParser(
@@ -113,18 +104,7 @@ parser.add_argument(
     help=f"Device/precision for random noise if supported by pipeline. Can be one of {noise_types}. Default 'cpu32'",
 )
 parser.add_argument(
-    "-ds",
-    "--decoder-steps",
-    type=int,
-    help="""\
-Amount of steps for decoders. Default -2.
-If set to negative, uses one of the following algorithms:
-  * -1: D = P/R + I - I/R
-    * Where R = 4 and I = 10
-    * Linear
-  * -2: D = √10P
-    * Quadratic
-Where P = prior steps and D = decoder steps.""",
+    "-ds", "--decoder-steps", type=int, help="Amount of steps for decoders. Default -10. If set to negative, uses quadratic slope √|s*ds|"
 )
 parser.add_argument("--offload", choices=offload, help=f"Set amount of CPU offload. Can be one of {offload}")
 parser.add_argument("--comment", type=str, help="Add a comment to the image.")
@@ -449,7 +429,7 @@ if args.steps:
         | (
             {
                 "prior_num_inference_steps": s,
-                "num_inference_steps": round(decoder_algos[args.decoder_steps](s)) if args.decoder_steps in decoder_algos else args.decoder_steps,
+                "num_inference_steps": round(math.sqrt(abs(s * args.decoder_steps))) if args.decoder_steps < 0 else args.decoder_steps,
             }
             if "prior_num_inference_steps" in pipe_params
             else {"num_inference_steps": s}
