@@ -51,7 +51,7 @@ defaults = {
     "out": Path("/tmp/quickdif/" if Path("/tmp/").exists() else "./output/"),
     "dtype": "fp16",
     "noise_type": "cpu32",
-    "prior_steps_ratio": 2.0,
+    "decoder_steps": 15,
 }
 
 parser = argparse.ArgumentParser(
@@ -104,7 +104,7 @@ parser.add_argument(
     choices=noise_types,
     help=f"Device/precision for random noise if supported by pipeline. Can be one of {noise_types}. Default 'cpu32'",
 )
-parser.add_argument("--prior-steps-ratio", type=float, help="Ratio for prior/decoder steps. Default 2")
+parser.add_argument("-ds", "--decoder-steps", type=int, help="Amount of steps for decoders. Default 15")
 parser.add_argument("--offload", choices=offload, help=f"Set amount of CPU offload. Can be one of {offload}")
 parser.add_argument("--comment", type=str, help="Add a comment to the image.")
 parser.add_argument("--compile", action="store_true", help="Compile unet with torch.compile()")
@@ -131,8 +131,10 @@ if args.include:
                     include[k] = [int(v)]
                 case "model" | "sampler" | "noise_type" | "color" | "lora":
                     include[k] = v
-                case "denoise" | "color_scale" | "lora_scale" | "prior_steps_ratio":
+                case "denoise" | "color_scale" | "lora_scale":
                     include[k] = float(v)
+                case "decoder_steps":
+                    include[k] = int(v)
                 case "url" | "batch_size" | "comment":
                     pass
                 case other:
@@ -424,7 +426,7 @@ if args.steps:
     key_dicts = [
         k
         | (
-            {"prior_num_inference_steps": s, "num_inference_steps": ceil(s // args.prior_steps_ratio)}
+            {"prior_num_inference_steps": s, "num_inference_steps": args.decoder_steps}
             if "prior_num_inference_steps" in pipe_params
             else {"num_inference_steps": s}
         )
@@ -493,7 +495,7 @@ for kwargs in key_dicts:
 
         if "prior_num_inference_steps" in kwargs:
             meta["steps"] = kwargs["prior_num_inference_steps"]
-            meta["prior_steps_ratio"] = args.prior_steps_ratio
+            meta["decoder_steps"] = kwargs["num_inference_steps"]
         elif "num_inference_steps" in kwargs:
             meta["steps"] = kwargs["num_inference_steps"]
 
