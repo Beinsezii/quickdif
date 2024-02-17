@@ -26,7 +26,7 @@ import math
 
 decoder_algos = {
     -1: lambda p: p / 4 + 10 - 10 / 4,  # Linear: P/R + I - I/R
-    -2: lambda p: math.sqrt(p) * 3,  # Quadratic: 3√P
+    -2: lambda p: math.sqrt(p * 10),  # Quadratic: √10P
 }
 # ALGORITHMS }}}
 
@@ -122,7 +122,7 @@ If set to negative, uses one of the following algorithms:
   * -1: D = P/R + I - I/R
     * Where R = 4 and I = 10
     * Linear
-  * -2: D = 3√P
+  * -2: D = √10P
     * Quadratic
 Where P = prior steps and D = decoder steps.""",
 )
@@ -447,7 +447,10 @@ if args.steps:
     key_dicts = [
         k
         | (
-            {"prior_num_inference_steps": s, "num_inference_steps": round(decoder_algos.get(args.decoder_steps, lambda x: x)(s))}
+            {
+                "prior_num_inference_steps": s,
+                "num_inference_steps": round(decoder_algos[args.decoder_steps](s)) if args.decoder_steps in decoder_algos else args.decoder_steps,
+            }
             if "prior_num_inference_steps" in pipe_params
             else {"num_inference_steps": s}
         )
@@ -516,7 +519,7 @@ for kwargs in key_dicts:
 
         if "prior_num_inference_steps" in kwargs:
             meta["steps"] = kwargs["prior_num_inference_steps"]
-            meta["decoder_steps"] = kwargs["num_inference_steps"]
+            meta["decoder_steps"] = args.decoder_steps
         elif "num_inference_steps" in kwargs:
             meta["steps"] = kwargs["num_inference_steps"]
 
