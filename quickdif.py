@@ -21,10 +21,18 @@ COLS_FTMSE = {
 }
 # LATENT COLORS }}}
 
+# ALGORITHMS {{{
+import math
+
+decoder_algos = {
+    -1: lambda p: p / 4 + 10 - 10 / 4,  # Linear: P/R + I - I/R
+    -2: lambda p: math.sqrt(p) * 3,  # Quadratic: 3√P
+}
+# ALGORITHMS }}}
+
 # CLI {{{
 import argparse
 from inspect import signature
-from math import ceil
 from pathlib import Path
 from sys import exit
 
@@ -51,7 +59,7 @@ defaults = {
     "out": Path("/tmp/quickdif/" if Path("/tmp/").exists() else "./output/"),
     "dtype": "fp16",
     "noise_type": "cpu32",
-    "decoder_steps": 15,
+    "decoder_steps": -2,
 }
 
 parser = argparse.ArgumentParser(
@@ -104,7 +112,20 @@ parser.add_argument(
     choices=noise_types,
     help=f"Device/precision for random noise if supported by pipeline. Can be one of {noise_types}. Default 'cpu32'",
 )
-parser.add_argument("-ds", "--decoder-steps", type=int, help="Amount of steps for decoders. Default 15")
+parser.add_argument(
+    "-ds",
+    "--decoder-steps",
+    type=int,
+    help="""\
+Amount of steps for decoders. Default -2.
+If set to negative, uses one of the following algorithms:
+  * -1: D = P/R + I - I/R
+    * Where R = 4 and I = 10
+    * Linear
+  * -2: D = 3√P
+    * Quadratic
+Where P = prior steps and D = decoder steps.""",
+)
 parser.add_argument("--offload", choices=offload, help=f"Set amount of CPU offload. Can be one of {offload}")
 parser.add_argument("--comment", type=str, help="Add a comment to the image.")
 parser.add_argument("--compile", action="store_true", help="Compile unet with torch.compile()")
@@ -394,8 +415,8 @@ elif hasattr(pipe, "vqgan") and hasattr(pipe, "prior_pipe") and input_image is N
     size = [
         args.batch_size,
         pipe.prior_pipe.prior.config.c_in,
-        ceil(args.height / pipe.prior_pipe.config.resolution_multiple),
-        ceil(args.width / pipe.prior_pipe.config.resolution_multiple),
+        math.ceil(args.height / pipe.prior_pipe.config.resolution_multiple),
+        math.ceil(args.width / pipe.prior_pipe.config.resolution_multiple),
     ]
     latent_input = torch.zeros(size, dtype=dtype, device="cpu")
 
@@ -426,7 +447,7 @@ if args.steps:
     key_dicts = [
         k
         | (
-            {"prior_num_inference_steps": s, "num_inference_steps": args.decoder_steps}
+            {"prior_num_inference_steps": s, "num_inference_steps": round(decoder_algos.get(args.decoder_steps, lambda x: x)(s))}
             if "prior_num_inference_steps" in pipe_params
             else {"num_inference_steps": s}
         )
