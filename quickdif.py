@@ -309,21 +309,22 @@ if AMD and not args.compile and weights and hasattr(weights, "set_default_attn_p
 # LORA {{{
 adapters = []
 
-for n, lora in enumerate(args.lora):
-    split = lora.rsplit(":::")
-    path = split[0]
-    scale = 1.0 if len(split) < 2 else float(split[1])
-    if scale == 0.0:
-        continue
-    name = f"LA{n}"
-    pipe.load_lora_weights(path, adapter_name=name)
-    adapters.append(
-        {
-            "name": name,
-            "path": path,
-            "scale": scale,
-        }
-    )
+if args.lora:
+    for n, lora in enumerate(args.lora):
+        split = lora.rsplit(":::")
+        path = split[0]
+        scale = 1.0 if len(split) < 2 else float(split[1])
+        if scale == 0.0:
+            continue
+        name = f"LA{n}"
+        pipe.load_lora_weights(path, adapter_name=name)
+        adapters.append(
+            {
+                "name": name,
+                "path": path,
+                "scale": scale,
+            }
+        )
 
 if adapters:
     pipe.set_adapters(list(map(lambda a: a["name"], adapters)), list(map(lambda a: a["scale"], adapters)))
