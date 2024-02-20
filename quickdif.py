@@ -45,7 +45,6 @@ defaults = {
     "color": "black",
     "color_scale": 0.0,
     "model": "stabilityai/stable-diffusion-xl-base-1.0",
-    "lora_scale": 1.0,
     "denoise": 1.0,
     "out": Path("/tmp/quickdif/" if Path("/tmp/").exists() else "./output/"),
     "dtype": "fp16",
@@ -84,8 +83,7 @@ parser.add_argument(
     type=str,
     help=f"Huggingface model or Stable Diffusion safetensors checkpoint to load. Default {defaults['model']}",
 )
-parser.add_argument("-l", "--lora", type=str, help="Apply a Lora")
-parser.add_argument("-L", "--lora-scale", type=float, help="Strength of the lora. Default 1.0")
+parser.add_argument("-l", "--lora", type=str, nargs="*", help="Apply Loras, ex. 'ms_paint.safetensors:::0.6'")
 parser.add_argument(
     "-I",
     "--include",
@@ -130,16 +128,18 @@ if args.include:
                     include[k] = [float(v)]
                 case "steps" | "seed":
                     include[k] = [int(v)]
-                case "model" | "sampler" | "noise_type" | "color" | "lora":
+                case "model" | "sampler" | "noise_type" | "color":
                     include[k] = v
-                case "denoise" | "color_scale" | "lora_scale":
+                case "denoise" | "color_scale":
                     include[k] = float(v)
                 case "decoder_steps":
                     include[k] = int(v)
+                case "lora":
+                    include[k] = v.split(";;;")
                 case "url" | "batch_size" | "comment":
                     pass
                 case other:
-                    print("Unknown key:", other)
+                    print(f'Unknown key "{other}: {v}"')
 
 for k, v in (defaults | include).items():
     assert hasattr(args, k)
@@ -307,12 +307,28 @@ if AMD and not args.compile and weights and hasattr(weights, "set_default_attn_p
 # MODEL }}}
 
 # LORA {{{
-if args.lora_scale == 0:
-    args.lora = None
-if args.lora:
-    pipe.load_lora_weights(args.lora)
-    base_meta["lora"] = args.lora
-    base_meta["lora_scale"] = args.lora_scale
+adapters = []
+
+for n, lora in enumerate(args.lora):
+    split = lora.rsplit(":::")
+    path = split[0]
+    scale = 1.0 if len(split) < 2 else float(split[1])
+    if scale == 0.0:
+        continue
+    name = f"LA{n}"
+    pipe.load_lora_weights(path, adapter_name=name)
+    adapters.append(
+        {
+            "name": name,
+            "path": path,
+            "scale": scale,
+        }
+    )
+
+if adapters:
+    pipe.set_adapters(list(map(lambda a: a["name"], adapters)), list(map(lambda a: a["scale"], adapters)))
+    # re-construct args without nulled loras
+    base_meta["lora"] = r";;;".join(map((lambda a: a["path"] if a["scale"] == 1.0 else f'{a["path"]}:::{a["scale"]}'), adapters))
 # LORA }}}
 
 # TOKENIZER/COMPEL {{{
@@ -416,8 +432,6 @@ if args.width:
     base_dict["width"] = args.width
 if args.height:
     base_dict["height"] = args.height
-if args.lora:
-    base_dict["cross_attention_kwargs"] = {"scale": args.lora_scale}
 i32max = 2**31 - 1
 seeds = [torch.randint(high=i32max, low=-i32max, size=(1,)).item()] if not args.seed else args.seed
 key_dicts = [base_dict | {"seed": s + n * args.batch_size} for n in range(args.batch_count) for s in seeds]

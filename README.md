@@ -5,7 +5,7 @@ Quick and easy CLI inference that just works™ for a variety of Diffusers model
   - Verified working with Stable Diffusion (1.5/2.1/XL Base), Stable Cascade/Wuerstchen, Kandinsky22, Pixart
   - Supports many common settings found in GUIs
   - Iterate over parameters like prompt or CFG
-  - Some more advanced tweaks like Lora and colored latents
+  - Some more advanced tweaks like multi-Lora and colored latents
   - Extremely small 1-shot script using `accelerate` for hot loading models
   - Just works™; not broken
 
