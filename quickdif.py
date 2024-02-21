@@ -135,7 +135,7 @@ if args.include:
                 case "decoder_steps":
                     include[k] = int(v)
                 case "lora":
-                    include[k] = v.split(";;;")
+                    include[k] = v.split("\x1f")
                 case "url" | "batch_size" | "comment":
                     pass
                 case other:
@@ -329,7 +329,7 @@ if args.lora:
 if adapters:
     pipe.set_adapters(list(map(lambda a: a["name"], adapters)), list(map(lambda a: a["scale"], adapters)))
     # re-construct args without nulled loras
-    base_meta["lora"] = r";;;".join(map((lambda a: a["path"] if a["scale"] == 1.0 else f'{a["path"]}:::{a["scale"]}'), adapters))
+    base_meta["lora"] = "\x1f".join(map((lambda a: a["path"] if a["scale"] == 1.0 else f'{a["path"]}:::{a["scale"]}'), adapters))
 # LORA }}}
 
 # TOKENIZER/COMPEL {{{
