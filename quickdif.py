@@ -29,7 +29,7 @@ from sys import exit
 
 from PIL import Image, PngImagePlugin
 
-samplers = ["dpm", "dpmk", "ddim", "ddpm", "euler", "eulerk", "eulera"]
+samplers = ["dpm", "dpmk", "sdpm1k", "ddim", "ddpm", "euler", "eulerk", "eulera"]
 dtypes = ["fp16", "bf16", "fp32"]
 offload = ["model", "sequential"]
 noise_types = ["cpu16", "cpu16b", "cpu32", "cuda16", "cuda16b", "cuda32"]
@@ -365,6 +365,9 @@ if hasattr(pipe, "scheduler"):
         pipe.scheduler = {
             "dpm": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", use_karras_sigmas=False),
             "dpmk": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", use_karras_sigmas=True),
+            "sdpm1k": DPMSolverMultistepScheduler.from_config(
+                pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=1, use_karras_sigmas=True
+            ),
             "ddim": DDIMScheduler.from_config(pipe.scheduler.config, set_alpha_to_one=True),
             "ddpm": DDPMScheduler.from_config(pipe.scheduler.config),
             "euler": EulerDiscreteScheduler.from_config(pipe.scheduler.config),
