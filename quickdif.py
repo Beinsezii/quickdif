@@ -113,7 +113,7 @@ parser.add_argument("-d", "--denoise", type=float, help="Denoise amount. Default
 parser.add_argument("-o", "--out", type=Path, help=f"Output directory for images. Default {defaults['out']}")
 parser.add_argument("-D", "--dtype", choices=dtypes, help=f"Data format for inference. Default fp16, can be one of {dtypes}")
 parser.add_argument("--seed", type=int, nargs="*", help="Seed for deterministic outputs. If not set, will be random")
-parser.add_argument("-S", "--sampler", choices=samplers, help=f"Override model's default sampler. Can be one of {samplers}")
+parser.add_argument("-S", "--sampler", choices=samplers, nargs="*", help=f"Override model's default sampler. Can be one of {samplers}")
 parser.add_argument(
     "--noise-type",
     choices=noise_types,
@@ -141,13 +141,13 @@ if args.include:
         include = {"width": meta_image.width, "height": meta_image.height}
         for k, v in meta_image.text.items():
             match k:
-                case "prompt" | "negative":
+                case "prompt" | "negative" | "sampler":
                     include[k] = [v]
                 case "cfg" | "rescale":
                     include[k] = [float(v)]
                 case "steps" | "seed":
                     include[k] = [int(v)]
-                case "model" | "sampler" | "noise_type" | "color":
+                case "model" | "noise_type" | "color":
                     include[k] = v
                 case "denoise" | "color_scale":
                     include[k] = float(v)
@@ -184,8 +184,6 @@ if args.input:
 base_meta = {"model": args.model, "noise_type": args.noise_type, "denoise": args.denoise, "url": "https://github.com/Beinsezii/quickdif"}
 if args.batch_size > 1:
     base_meta["batch_size"] = args.batch_size
-if args.sampler:
-    base_meta["sampler"] = args.sampler
 if args.comment:
     base_meta["comment"] = args.comment
 # CLI }}}
@@ -378,8 +376,9 @@ if hasattr(pipe, "vae"):
 # VAE }}}
 
 # SCHEDULER {{{
+schedulers = None
 if hasattr(pipe, "scheduler"):
-    schedulers = {
+    sampler_map = {
         "dpm": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=1, use_karras_sigmas=False),
         "dpmk": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=1, use_karras_sigmas=True),
         "sdpm": DPMSolverMultistepScheduler.from_config(
@@ -410,12 +409,23 @@ if hasattr(pipe, "scheduler"):
         "eulerk": EulerDiscreteScheduler.from_config(pipe.scheduler.config, use_karras_sigmas=True),
         "eulera": EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config),
     }
-    assert list(schedulers.keys()) == samplers
+    assert list(sampler_map.keys()) == samplers
     if args.sampler:
-        pipe.scheduler = schedulers[args.sampler]
+        schedulers = []
+        for s in args.sampler:
+            sampler = sampler_map[s]
+            if not args.no_trail:
+                sampler.config.timestep_spacing = "trailing"
+                sampler.config.steps_offset = 0
+            schedulers.append((s, sampler))
 
-    # what most UIs use
-    if not args.no_trail:
+    if schedulers:
+        if len(schedulers) == 1:  # consume single samplers
+            name, sched = schedulers[0]
+            pipe.scheduler = sched
+            base_meta["sampler"] = name
+            schedulers = None
+    elif not args.no_trail:
         pipe.scheduler.config.timestep_spacing = "trailing"
         pipe.scheduler.config.steps_offset = 0
 # SCHEDULER }}}
@@ -507,6 +517,10 @@ if args.cfg:
     ]
 if args.rescale:
     key_dicts = [k | {"guidance_rescale": g} for k in key_dicts for g in args.rescale]
+
+if schedulers:
+    key_dicts = [k | {"scheduler": s} for k in key_dicts for s in schedulers]
+
 # INPUT ARGS }}}
 
 # INFERENCE {{{
@@ -519,6 +533,11 @@ for kwargs in key_dicts:
         torch.cuda.empty_cache()
         meta = base_meta.copy()
         seed = kwargs.pop("seed")
+
+        if "scheduler" in kwargs:
+            name, sched = kwargs.pop("scheduler")
+            pipe.scheduler = sched
+            meta["sampler"] = name
 
         # NOISE {{{
         generators = [torch.Generator(noise_device).manual_seed(seed + n) for n in range(args.batch_size)]
