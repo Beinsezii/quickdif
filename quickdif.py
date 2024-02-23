@@ -267,8 +267,8 @@ pipe_args = {
 
 with SmartSigint(num=2, job_name="model load"):
     if "cascade" in args.model:
-        prior = StableCascadePriorPipeline.from_pretrained("stabilityai/stable-cascade-prior", **pipe_args).to("cuda")
-        decoder = StableCascadeDecoderPipeline.from_pretrained("stabilityai/stable-cascade", **pipe_args).to("cuda")
+        prior = StableCascadePriorPipeline.from_pretrained("stabilityai/stable-cascade-prior", **pipe_args)
+        decoder = StableCascadeDecoderPipeline.from_pretrained("stabilityai/stable-cascade", **pipe_args)
         pipe = StableCascadeCombinedPipeline(
             decoder.tokenizer,
             decoder.text_encoder,
