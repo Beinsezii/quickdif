@@ -29,7 +29,25 @@ from sys import exit
 
 from PIL import Image, PngImagePlugin
 
-samplers = ["dpm", "dpmk", "sdpm1k", "ddim", "ddpm", "euler", "eulerk", "eulera"]
+samplers = [
+    "dpm",
+    "dpmk",
+    "sdpm",
+    "sdpmk",
+    "dpm2",
+    "dpm2k",
+    "sdpm2",
+    "sdpm2k",
+    "dpm3",
+    "dpm3k",
+    "sdpm3",
+    "sdpm3k",
+    "ddim",
+    "ddpm",
+    "euler",
+    "eulerk",
+    "eulera",
+]
 dtypes = ["fp16", "bf16", "fp32"]
 offload = ["model", "sequential"]
 noise_types = ["cpu16", "cpu16b", "cpu32", "cuda16", "cuda16b", "cuda32"]
@@ -361,19 +379,40 @@ if hasattr(pipe, "vae"):
 
 # SCHEDULER {{{
 if hasattr(pipe, "scheduler"):
+    schedulers = {
+        "dpm": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=1, use_karras_sigmas=False),
+        "dpmk": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=1, use_karras_sigmas=True),
+        "sdpm": DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=1, use_karras_sigmas=False
+        ),
+        "sdpmk": DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=1, use_karras_sigmas=True
+        ),
+        "dpm2": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=2, use_karras_sigmas=False),
+        "dpm2k": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=2, use_karras_sigmas=True),
+        "sdpm2": DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=2, use_karras_sigmas=False
+        ),
+        "sdpm2k": DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=2, use_karras_sigmas=True
+        ),
+        "dpm3": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=3, use_karras_sigmas=False),
+        "dpm3k": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=3, use_karras_sigmas=True),
+        "sdpm3": DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=False
+        ),
+        "sdpm3k": DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=True
+        ),
+        "ddim": DDIMScheduler.from_config(pipe.scheduler.config, set_alpha_to_one=True),
+        "ddpm": DDPMScheduler.from_config(pipe.scheduler.config),
+        "euler": EulerDiscreteScheduler.from_config(pipe.scheduler.config),
+        "eulerk": EulerDiscreteScheduler.from_config(pipe.scheduler.config, use_karras_sigmas=True),
+        "eulera": EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config),
+    }
+    assert list(schedulers.keys()) == samplers
     if args.sampler:
-        pipe.scheduler = {
-            "dpm": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", use_karras_sigmas=False),
-            "dpmk": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", use_karras_sigmas=True),
-            "sdpm1k": DPMSolverMultistepScheduler.from_config(
-                pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=1, use_karras_sigmas=True
-            ),
-            "ddim": DDIMScheduler.from_config(pipe.scheduler.config, set_alpha_to_one=True),
-            "ddpm": DDPMScheduler.from_config(pipe.scheduler.config),
-            "euler": EulerDiscreteScheduler.from_config(pipe.scheduler.config),
-            "eulerk": EulerDiscreteScheduler.from_config(pipe.scheduler.config, use_karras_sigmas=True),
-            "eulera": EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config),
-        }[args.sampler]
+        pipe.scheduler = schedulers[args.sampler]
 
     # what most UIs use
     if not args.no_trail:
