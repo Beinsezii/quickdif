@@ -346,6 +346,7 @@ if args.lora:
 
 if adapters:
     pipe.set_adapters(list(map(lambda a: a["name"], adapters)), list(map(lambda a: a["scale"], adapters)))
+    pipe.fuse_lora(list(map(lambda a: a["name"], adapters)))
     # re-construct args without nulled loras
     base_meta["lora"] = "\x1f".join(map((lambda a: a["path"] if a["scale"] == 1.0 else f'{a["path"]}:::{a["scale"]}'), adapters))
 # LORA }}}
