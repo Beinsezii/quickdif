@@ -67,7 +67,7 @@ defaults = {
     "out": Path("/tmp/quickdif/" if Path("/tmp/").exists() else "./output/"),
     "dtype": "fp16",
     "noise_type": "cpu32",
-    "decoder_steps": -10,
+    "decoder_steps": -8,
 }
 
 parser = argparse.ArgumentParser(
@@ -120,7 +120,7 @@ parser.add_argument(
     help=f"Device/precision for random noise if supported by pipeline. Can be one of {noise_types}. Default 'cpu32'",
 )
 parser.add_argument(
-    "-ds", "--decoder-steps", type=int, help="Amount of steps for decoders. Default -10. If set to negative, uses quadratic slope √|s*ds|"
+    "-ds", "--decoder-steps", type=int, help="Amount of steps for decoders. Default -8. If set to negative, uses quadratic slope √|s*ds|"
 )
 parser.add_argument("--offload", choices=offload, help=f"Set amount of CPU offload. Can be one of {offload}")
 parser.add_argument("--comment", type=str, help="Add a comment to the image.")
