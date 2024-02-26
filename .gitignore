@@ -3,6 +3,7 @@
 *.latent
 checkpoints
 lora
+diffusers
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
