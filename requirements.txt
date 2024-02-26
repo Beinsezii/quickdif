@@ -1,6 +1,6 @@
 torch >= 2.1
 # diffusers >= 0.26
-diffusers @ git+https://github.com/kashif/diffusers.git@a3dc21385b7386beb3dab3a9845962ede6765887
+diffusers @ git+https://github.com/Beinsezii/diffusers.git@bsz_pr_and_cascade
 peft
 transformers
 accelerate
