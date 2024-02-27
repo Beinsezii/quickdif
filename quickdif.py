@@ -185,7 +185,11 @@ base_meta = {"model": args.model, "noise_type": args.noise_type, "denoise": args
 if args.batch_size > 1:
     base_meta["batch_size"] = args.batch_size
 if args.comment:
-    base_meta["comment"] = args.comment
+    try:
+        with open(args.comment, "r") as f:
+            base_meta["comment"] = f.read()
+    except Exception:
+        base_meta["comment"] = args.comment
 # CLI }}}
 
 # TORCH {{{

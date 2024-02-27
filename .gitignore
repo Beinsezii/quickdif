@@ -2,8 +2,9 @@
 *.png
 *.latent
 checkpoints
-lora
+comments
 diffusers
+lora
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
