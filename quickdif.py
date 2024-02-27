@@ -287,9 +287,15 @@ with SmartSigint(num=2, job_name="model load"):
         del prior, decoder
     elif args.model.endswith(".safetensors"):
         if input_image is not None:
-            pipe = StableDiffusionImg2ImgPipeline.from_single_file(args.model, **pipe_args)
+            try:
+                pipe = StableDiffusionXLImg2ImgPipeline.from_single_file(args.model, **pipe_args)
+            except:
+                pipe = StableDiffusionImg2ImgPipeline.from_single_file(args.model, **pipe_args)
         else:
-            pipe = StableDiffusionPipeline.from_single_file(args.model, **pipe_args)
+            try:
+                pipe = StableDiffusionXLPipeline.from_single_file(args.model, **pipe_args)
+            except:
+                pipe = StableDiffusionPipeline.from_single_file(args.model, **pipe_args)
     else:
         if input_image is not None:
             pipe = AutoPipelineForImage2Image.from_pretrained(args.model, **pipe_args)
