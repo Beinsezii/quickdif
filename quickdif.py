@@ -343,7 +343,7 @@ if not args.compile:
             "vqgan",
         ]
     ]:
-        if hasattr(item, "set_attn_processor") and processor is not None and (args.attn != "subquad" or XL or id != "vae"):
+        if hasattr(item, "set_attn_processor") and processor is not None:
             item.set_attn_processor(processor)
         elif hasattr(item, "set_default_attn_processor") and args.attn == "default":
             item.set_default_attn_processor()
