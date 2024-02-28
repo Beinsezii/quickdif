@@ -51,6 +51,7 @@ samplers = [
 dtypes = ["fp16", "bf16", "fp32"]
 offload = ["model", "sequential"]
 noise_types = ["cpu16", "cpu16b", "cpu32", "cuda16", "cuda16b", "cuda32"]
+attention = ["default", "sdp", "subquad"]
 
 defaults = {
     "prompt": [""],
@@ -123,8 +124,12 @@ parser.add_argument(
     "-ds", "--decoder-steps", type=int, help="Amount of steps for decoders. Default -8. If set to negative, uses quadratic slope √|s*ds|"
 )
 parser.add_argument("--offload", choices=offload, help=f"Set amount of CPU offload. Can be one of {offload}")
+parser.add_argument(
+    "--attn", choices=attention, help=f"Attention processor. Can be one of {attention}. Default is 'subquad' for ROCm and 'sdp' otherwise"
+)
 parser.add_argument("--comment", type=str, help="Add a comment to the image.")
 parser.add_argument("--compile", action="store_true", help="Compile unet with torch.compile()")
+parser.add_argument("--tile", action="store_true", help="Tile VAE")
 parser.add_argument("--no-trail", action="store_true", help="Do not force trailing timestep spacing. Changes seeds.")
 parser.add_argument("--no-xl-vae", action="store_true", help="Do not override the SDXL VAE.")
 parser.add_argument("--print", action="store_true", help="Print out generation params and exit.")
@@ -212,6 +217,8 @@ from diffusers import (
     StableDiffusionXLImg2ImgPipeline,
     StableDiffusionXLPipeline,
 )
+from diffusers.models.attention_processor import AttnProcessor2_0
+from attn_subquad import SubQuadraticCrossAttnProcessor
 from compel import Compel, ReturnedEmbeddingsType
 
 
@@ -317,6 +324,31 @@ else:
     pipe.to("cuda")
 # PIPE }}}
 
+# ATTENTION {{{
+if not args.compile:
+    processor = None
+    if args.attn == "subquad" or (args.attn is None and AMD):
+        processor = SubQuadraticCrossAttnProcessor(query_chunk_size=2**12, kv_chunk_size=2**15)
+    elif args.attn == "sdp":
+        processor = AttnProcessor2_0()
+
+    for item in [
+        pipe,
+        getattr(pipe, "unet", None),
+        getattr(pipe, "vae", None),
+        getattr(pipe, "transformer", None),
+        getattr(pipe, "prior", None),
+        getattr(pipe, "prior_prior", None),
+        getattr(pipe, "decoder", None),
+        getattr(pipe, "vqgan", None),
+    ]:
+        if hasattr(item, "set_attn_processor") and processor is not None:
+            item.set_attn_processor(processor)
+        elif hasattr(item, "set_default_attn_processor") and args.attn == "default":
+            item.set_default_attn_processor()
+
+# }}}
+
 # MODEL {{{
 weights = None
 
@@ -329,9 +361,6 @@ if hasattr(pipe, "transformer"):
     if args.compile:
         pipe.transformer = torch.compile(pipe.transformer)
     weights = pipe.transformer
-
-if AMD and not args.compile and weights and hasattr(weights, "set_default_attn_processor"):
-    weights.set_default_attn_processor()
 # MODEL }}}
 
 # LORA {{{
@@ -379,11 +408,12 @@ if hasattr(pipe, "tokenizer") and isinstance(pipe.tokenizer, transformers.models
 if hasattr(pipe, "vae"):
     if XL and not args.no_xl_vae:
         pipe.vae = AutoencoderKL.from_pretrained("stabilityai/sdxl-vae", torch_dtype=pipe.vae.dtype, use_safetensors=True).to(pipe.vae.device)
-    pipe.vae.enable_slicing()
+    if args.tile:
+        pipe.vae.enable_tiling()
+    else:
+        pipe.vae.enable_slicing()
     if dtype != torch.float16:
         pipe.vae.force_upcast = False
-    if AMD:
-        pipe.vae.set_default_attn_processor()
 # VAE }}}
 
 # SCHEDULER {{{
