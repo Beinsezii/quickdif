@@ -47,6 +47,7 @@ samplers = [
     "euler",
     "eulerk",
     "eulera",
+    "eulere",
 ]
 dtypes = ["fp16", "bf16", "fp32"]
 offload = ["model", "sequential"]
@@ -208,6 +209,7 @@ from diffusers import (
     DPMSolverMultistepScheduler,
     EulerAncestralDiscreteScheduler,
     EulerDiscreteScheduler,
+    EDMEulerScheduler,
     PixArtAlphaPipeline,
     StableCascadeCombinedPipeline,
     StableCascadeDecoderPipeline,
@@ -462,6 +464,7 @@ if hasattr(pipe, "scheduler"):
         "euler": EulerDiscreteScheduler.from_config(pipe.scheduler.config),
         "eulerk": EulerDiscreteScheduler.from_config(pipe.scheduler.config, use_karras_sigmas=True),
         "eulera": EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config),
+        "eulere": EDMEulerScheduler.from_config(pipe.scheduler.config),
     }
     assert list(sampler_map.keys()) == samplers
     if args.sampler:
