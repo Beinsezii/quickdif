@@ -332,17 +332,19 @@ if not args.compile:
     elif args.attn == "sdp":
         processor = AttnProcessor2_0()
 
-    for item in [
-        pipe,
-        getattr(pipe, "unet", None),
-        getattr(pipe, "vae", None),
-        getattr(pipe, "transformer", None),
-        getattr(pipe, "prior", None),
-        getattr(pipe, "prior_prior", None),
-        getattr(pipe, "decoder", None),
-        getattr(pipe, "vqgan", None),
+    for id, item in [("pipe", pipe)] + [
+        (id, getattr(pipe, id, None))
+        for id in [
+            "unet",
+            "vae",
+            "transformer",
+            "prior",
+            "prior_prior",
+            "decoder",
+            "vqgan",
+        ]
     ]:
-        if hasattr(item, "set_attn_processor") and processor is not None:
+        if hasattr(item, "set_attn_processor") and processor is not None and (args.attn != "subquad" or XL or id != "vae"):
             item.set_attn_processor(processor)
         elif hasattr(item, "set_default_attn_processor") and args.attn == "default":
             item.set_default_attn_processor()
