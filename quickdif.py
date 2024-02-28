@@ -421,29 +421,41 @@ if hasattr(pipe, "vae"):
 schedulers = None
 if hasattr(pipe, "scheduler"):
     sampler_map = {
-        "dpm": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=1, use_karras_sigmas=False),
-        "dpmk": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=1, use_karras_sigmas=True),
+        "dpm": DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="dpmsolver++", solver_order=1, use_karras_sigmas=False
+        ),
+        "dpmk": DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="dpmsolver++", solver_order=1, use_karras_sigmas=True
+        ),
         "sdpm": DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=1, use_karras_sigmas=False
+            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=1, use_karras_sigmas=False
         ),
         "sdpmk": DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=1, use_karras_sigmas=True
+            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=1, use_karras_sigmas=True
         ),
-        "dpm2": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=2, use_karras_sigmas=False),
-        "dpm2k": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=2, use_karras_sigmas=True),
+        "dpm2": DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="dpmsolver++", solver_order=2, use_karras_sigmas=False
+        ),
+        "dpm2k": DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="dpmsolver++", solver_order=2, use_karras_sigmas=True
+        ),
         "sdpm2": DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=2, use_karras_sigmas=False
+            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=2, use_karras_sigmas=False
         ),
         "sdpm2k": DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=2, use_karras_sigmas=True
+            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=2, use_karras_sigmas=True
         ),
-        "dpm3": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=3, use_karras_sigmas=False),
-        "dpm3k": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=3, use_karras_sigmas=True),
+        "dpm3": DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="dpmsolver++", solver_order=3, use_karras_sigmas=False
+        ),
+        "dpm3k": DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="dpmsolver++", solver_order=3, use_karras_sigmas=True
+        ),
         # "sdpm3": DPMSolverMultistepScheduler.from_config(
-        #     pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=False
+        #     pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=False
         # ),
         # "sdpm3k": DPMSolverMultistepScheduler.from_config(
-        #     pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=True
+        #     pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=True
         # ),
         "ddim": DDIMScheduler.from_config(pipe.scheduler.config, set_alpha_to_one=True),
         "ddpm": DDPMScheduler.from_config(pipe.scheduler.config),
