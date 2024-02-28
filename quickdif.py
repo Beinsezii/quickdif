@@ -217,8 +217,7 @@ from diffusers import (
     StableDiffusionXLImg2ImgPipeline,
     StableDiffusionXLPipeline,
 )
-from diffusers.models.attention_processor import AttnProcessor2_0
-from attn_subquad import SubQuadraticCrossAttnProcessor
+from diffusers.models.attention_processor import AttnProcessor2_0, SubQuadraticCrossAttnProcessor
 from compel import Compel, ReturnedEmbeddingsType
 
 
