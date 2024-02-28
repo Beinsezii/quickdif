@@ -413,7 +413,7 @@ if hasattr(pipe, "vae"):
     else:
         pipe.vae.enable_slicing()
     if dtype != torch.float16:
-        pipe.vae.force_upcast = False
+        pipe.vae.config.force_upcast = False
 # VAE }}}
 
 # SCHEDULER {{{
