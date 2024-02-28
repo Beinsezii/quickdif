@@ -40,8 +40,8 @@ samplers = [
     "sdpm2k",
     "dpm3",
     "dpm3k",
-    "sdpm3",
-    "sdpm3k",
+    # "sdpm3",
+    # "sdpm3k",
     "ddim",
     "ddpm",
     "euler",
@@ -439,12 +439,12 @@ if hasattr(pipe, "scheduler"):
         ),
         "dpm3": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=3, use_karras_sigmas=False),
         "dpm3k": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=3, use_karras_sigmas=True),
-        "sdpm3": DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=False
-        ),
-        "sdpm3k": DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=True
-        ),
+        # "sdpm3": DPMSolverMultistepScheduler.from_config(
+        #     pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=False
+        # ),
+        # "sdpm3k": DPMSolverMultistepScheduler.from_config(
+        #     pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=True
+        # ),
         "ddim": DDIMScheduler.from_config(pipe.scheduler.config, set_alpha_to_one=True),
         "ddpm": DDPMScheduler.from_config(pipe.scheduler.config),
         "euler": EulerDiscreteScheduler.from_config(pipe.scheduler.config),
