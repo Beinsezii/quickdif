@@ -132,7 +132,7 @@ parser.add_argument("--comment", type=str, help="Add a comment to the image.")
 parser.add_argument("--compile", action="store_true", help="Compile unet with torch.compile()")
 parser.add_argument("--tile", action="store_true", help="Tile VAE")
 parser.add_argument("--no-trail", action="store_true", help="Do not force trailing timestep spacing. Changes seeds.")
-parser.add_argument("--no-xl-vae", action="store_true", help="Do not override the SDXL VAE.")
+parser.add_argument("--xl-vae", action="store_true", help="Override the SDXL VAE. Useful for models with broken vae.")
 parser.add_argument("--print", action="store_true", help="Print out generation params and exit.")
 parser.add_argument("--help", action="help")
 
@@ -409,7 +409,7 @@ if hasattr(pipe, "tokenizer") and isinstance(pipe.tokenizer, transformers.models
 
 # VAE {{{
 if hasattr(pipe, "vae"):
-    if XL and not args.no_xl_vae:
+    if XL and args.xl_vae:
         pipe.vae = AutoencoderKL.from_pretrained("stabilityai/sdxl-vae", torch_dtype=pipe.vae.dtype, use_safetensors=True).to(pipe.vae.device)
     if args.tile:
         pipe.vae.enable_tiling()
