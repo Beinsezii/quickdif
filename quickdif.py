@@ -59,7 +59,7 @@ defaults = {
     "negative": ["blurry, noisy, cropped"],
     "steps": [30],
     "cfg": [6.0],
-    "rescale": [0.7],
+    "rescale": [0.0],
     "batch_count": 1,
     "batch_size": 1,
     "color": "black",
@@ -87,7 +87,7 @@ parser.add_argument("-w", "--width", type=int, help="Final output width. Default
 parser.add_argument("-h", "--height", type=int, help="Final output height. Default varies by model")
 parser.add_argument("-s", "--steps", type=int, nargs="*", help="Number of inference steps. Default 30. Can be unset")
 parser.add_argument("-g", "--cfg", type=float, nargs="*", help="Guidance for conditioning. Default 6. Can be unset")
-parser.add_argument("-G", "--rescale", type=float, nargs="*", help="Guidance rescale factor. Default 0.7. Can be unset")
+parser.add_argument("-G", "--rescale", type=float, nargs="*", help="Guidance rescale factor. Default 0. Can be unset")
 parser.add_argument("-b", "--batch-count", type=int, help="Amount of times to run each prompt sequentially. Default 1")
 parser.add_argument("-B", "--batch-size", type=int, help="Amount of times to run each prompt in parallel. Default 1")
 parser.add_argument(
