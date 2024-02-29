@@ -30,6 +30,7 @@ from sys import exit
 from PIL import Image, PngImagePlugin
 
 samplers = [
+    "default",
     "dpm",
     "dpmk",
     "sdpm",
@@ -426,6 +427,7 @@ if hasattr(pipe, "vae"):
 schedulers = None
 if hasattr(pipe, "scheduler"):
     sampler_map = {
+        "default": pipe.scheduler,
         "dpm": DPMSolverMultistepScheduler.from_config(
             pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="dpmsolver++", solver_order=1, use_karras_sigmas=False
         ),
