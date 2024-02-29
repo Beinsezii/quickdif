@@ -217,7 +217,12 @@ from diffusers import (
     StableDiffusionXLImg2ImgPipeline,
     StableDiffusionXLPipeline,
 )
-from diffusers.models.attention_processor import AttnProcessor2_0, SubQuadraticCrossAttnProcessor
+from diffusers.models.attention_processor import AttnProcessor2_0
+
+try:
+    from diffusers.models.attention_processor import SubQuadraticCrossAttnProcessor as subquad_processor
+except ImportError:
+    subquad_processor = None
 from compel import Compel, ReturnedEmbeddingsType
 
 
@@ -326,8 +331,8 @@ else:
 # ATTENTION {{{
 if not args.compile:
     processor = None
-    if args.attn == "subquad" or (args.attn is None and AMD):
-        processor = SubQuadraticCrossAttnProcessor(query_chunk_size=2**12, kv_chunk_size=2**15)
+    if subquad_processor is not None and (args.attn == "subquad" or (args.attn is None and AMD)):
+        processor = subquad_processor(query_chunk_size=2**12, kv_chunk_size=2**15)
     elif args.attn == "sdp":
         processor = AttnProcessor2_0()
 
