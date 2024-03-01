@@ -133,6 +133,7 @@ parser.add_argument("--compile", action="store_true", help="Compile unet with to
 parser.add_argument("--tile", action="store_true", help="Tile VAE")
 parser.add_argument("--no-trail", action="store_true", help="Do not force trailing timestep spacing. Changes seeds.")
 parser.add_argument("--xl-vae", action="store_true", help="Override the SDXL VAE. Useful for models with broken vae.")
+parser.add_argument("--no-sdpa-hijack", action="store_true", help="Do not monkey patch the torch SDPA function on AMD cards.")
 parser.add_argument("--print", action="store_true", help="Print out generation params and exit.")
 parser.add_argument("--help", action="help")
 
@@ -201,9 +202,10 @@ if args.comment:
 # TORCH {{{
 import torch, transformers, tqdm, signal
 
-if "AMD" in torch.cuda.get_device_name():
+if "AMD" in torch.cuda.get_device_name() and not args.no_sdpa_hijack:
     try:
         from flash_attn import flash_attn_func
+
         sdpa = torch.nn.functional.scaled_dot_product_attention
 
         def sdpa_hijack(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None):
