@@ -52,7 +52,7 @@ samplers = [
 dtypes = ["fp16", "bf16", "fp32"]
 offload = ["model", "sequential"]
 noise_types = ["cpu16", "cpu16b", "cpu32", "cuda16", "cuda16b", "cuda32"]
-attention = ["default", "sdp", "subquad"]
+attention = ["default", "sdp", "subquad", "rocm_flash"]
 
 defaults = {
     "prompt": [""],
@@ -126,7 +126,7 @@ parser.add_argument(
 )
 parser.add_argument("--offload", choices=offload, help=f"Set amount of CPU offload. Can be one of {offload}")
 parser.add_argument(
-    "--attn", choices=attention, help=f"Attention processor. Can be one of {attention}. Default is 'subquad' for ROCm and 'sdp' otherwise"
+    "--attn", choices=attention, help=f"Attention processor. Can be one of {attention}. Default is 'rocm_flash' for AMD and 'sdp' otherwise"
 )
 parser.add_argument("--comment", type=str, help="Add a comment to the image.")
 parser.add_argument("--compile", action="store_true", help="Compile unet with torch.compile()")
@@ -224,6 +224,10 @@ try:
     from diffusers.models.attention_processor import SubQuadraticCrossAttnProcessor as subquad_processor
 except ImportError:
     subquad_processor = None
+try:
+    from flash_attn_rocm import FlashAttnProcessor as rocm_flash_processor
+except ImportError:
+    rocm_flash_processor = None
 from compel import Compel, ReturnedEmbeddingsType
 
 
@@ -332,7 +336,9 @@ else:
 # ATTENTION {{{
 if not args.compile:
     processor = None
-    if subquad_processor is not None and (args.attn == "subquad" or (args.attn is None and AMD)):
+    if rocm_flash_processor is not None and (args.attn == "rocm_flash" or (args.attn is None and AMD)):
+        processor = rocm_flash_processor()
+    elif subquad_processor is not None and args.attn == "subquad":
         processor = subquad_processor(query_chunk_size=2**12, kv_chunk_size=2**15)
     elif args.attn == "sdp":
         processor = AttnProcessor2_0()
