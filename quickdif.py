@@ -52,7 +52,7 @@ samplers = [
 dtypes = ["fp16", "bf16", "fp32"]
 offload = ["model", "sequential"]
 noise_types = ["cpu16", "cpu16b", "cpu32", "cuda16", "cuda16b", "cuda32"]
-attention = ["default", "sdp", "subquad", "rocm_flash"]
+attention = ["default", "sdp", "subquad"]
 
 defaults = {
     "prompt": [""],
@@ -126,7 +126,7 @@ parser.add_argument(
 )
 parser.add_argument("--offload", choices=offload, help=f"Set amount of CPU offload. Can be one of {offload}")
 parser.add_argument(
-    "--attn", choices=attention, help=f"Attention processor. Can be one of {attention}. Default is 'rocm_flash' for AMD and 'sdp' otherwise"
+    "--attn", choices=attention, help=f"Attention processor. Can be one of {attention}. Default is 'sdp' on Torch 2 and 'default' otherwise"
 )
 parser.add_argument("--comment", type=str, help="Add a comment to the image.")
 parser.add_argument("--compile", action="store_true", help="Compile unet with torch.compile()")
@@ -200,6 +200,30 @@ if args.comment:
 
 # TORCH {{{
 import torch, transformers, tqdm, signal
+
+if "AMD" in torch.cuda.get_device_name():
+    try:
+        from flash_attn import flash_attn_func
+        sdpa = torch.nn.functional.scaled_dot_product_attention
+
+        def sdpa_hijack(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None):
+            if query.shape[3] <= 128 and attn_mask is None:
+                hidden_states = flash_attn_func(
+                    q=query.transpose(1, 2),
+                    k=key.transpose(1, 2),
+                    v=value.transpose(1, 2),
+                    dropout_p=dropout_p,
+                    causal=is_causal,
+                    softmax_scale=scale,
+                ).transpose(1, 2)
+            else:
+                hidden_states = sdpa(query=query, key=key, value=value, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal, scale=scale)
+            return hidden_states
+
+        torch.nn.functional.scaled_dot_product_attention = sdpa_hijack
+    except ImportError:
+        pass
+
 from diffusers import (
     AutoencoderKL,
     AutoPipelineForImage2Image,
@@ -224,10 +248,6 @@ try:
     from diffusers.models.attention_processor import SubQuadraticCrossAttnProcessor as subquad_processor
 except ImportError:
     subquad_processor = None
-try:
-    from flash_attn_rocm import FlashAttnProcessor as rocm_flash_processor
-except ImportError:
-    rocm_flash_processor = None
 from compel import Compel, ReturnedEmbeddingsType
 
 
@@ -262,7 +282,6 @@ class SmartSigint:
 
 torch.set_grad_enabled(False)
 torch.set_float32_matmul_precision("high")
-AMD = "AMD" in torch.cuda.get_device_name()
 dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[args.dtype]
 if "cascade" in args.model and dtype == torch.float16:
     dtype = torch.bfloat16
@@ -336,9 +355,7 @@ else:
 # ATTENTION {{{
 if not args.compile:
     processor = None
-    if rocm_flash_processor is not None and (args.attn == "rocm_flash" or (args.attn is None and AMD)):
-        processor = rocm_flash_processor()
-    elif subquad_processor is not None and args.attn == "subquad":
+    if subquad_processor is not None and args.attn == "subquad":
         processor = subquad_processor(query_chunk_size=2**12, kv_chunk_size=2**15)
     elif args.attn == "sdp":
         processor = AttnProcessor2_0()
