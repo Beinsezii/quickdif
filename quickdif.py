@@ -202,7 +202,7 @@ if args.comment:
 # TORCH {{{
 import torch, transformers, tqdm, signal
 
-if "AMD" in torch.cuda.get_device_name() and not args.no_sdpa_hijack:
+if "AMD" in torch.cuda.get_device_name() or "Radeon" in torch.cuda.get_device_name():
     try:
         from flash_attn import flash_attn_func
 
@@ -219,12 +219,23 @@ if "AMD" in torch.cuda.get_device_name() and not args.no_sdpa_hijack:
                     softmax_scale=scale,
                 ).transpose(1, 2)
             else:
-                hidden_states = sdpa(query=query, key=key, value=value, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal, scale=scale)
+                hidden_states = sdpa(
+                    query=query,
+                    key=key,
+                    value=value,
+                    attn_mask=attn_mask,
+                    dropout_p=dropout_p,
+                    is_causal=is_causal,
+                    scale=scale,
+                )
             return hidden_states
 
         torch.nn.functional.scaled_dot_product_attention = sdpa_hijack
-    except ImportError:
-        pass
+        print("# # #\nHijacked SDPA with ROCm Flash Attention\n# # #")
+    except ImportError as e:
+        print(f"# # #\nCould not load Flash Attention for hijack:\n{e}\n# # #")
+else:
+    print(f"# # #\nCould not detect AMD GPU from:\n{torch.cuda.get_device_name()}\n# # #")
 
 from diffusers import (
     AutoencoderKL,
