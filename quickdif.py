@@ -49,6 +49,7 @@ samplers = [
     "eulerk",
     "eulera",
 ]
+spacings = ["leading", "trailing", "linspace"]
 dtypes = ["fp16", "bf16", "fp32"]
 offload = ["model", "sequential"]
 noise_types = ["cpu16", "cpu16b", "cpu32", "cuda16", "cuda16b", "cuda32"]
@@ -68,6 +69,7 @@ defaults = {
     "denoise": 1.0,
     "out": Path("/tmp/quickdif/" if Path("/tmp/").exists() else "./output/"),
     "dtype": "fp16",
+    "spacing": ["trailing"],
     "noise_type": "cpu32",
     "decoder_steps": -8,
 }
@@ -116,6 +118,7 @@ parser.add_argument("-o", "--out", type=Path, help=f"Output directory for images
 parser.add_argument("-D", "--dtype", choices=dtypes, help=f"Data format for inference. Default fp16, can be one of {dtypes}")
 parser.add_argument("--seed", type=int, nargs="*", help="Seed for deterministic outputs. If not set, will be random")
 parser.add_argument("-S", "--sampler", choices=samplers, nargs="*", help=f"Override model's default sampler. Can be one of {samplers}")
+parser.add_argument("--spacing", choices=spacings, nargs="*", help=f"Set sampler timestep spacing. Can be one of {spacings}. Default 'trailing'")
 parser.add_argument(
     "--noise-type",
     choices=noise_types,
@@ -131,7 +134,6 @@ parser.add_argument(
 parser.add_argument("--comment", type=str, help="Add a comment to the image.")
 parser.add_argument("--compile", action="store_true", help="Compile unet with torch.compile()")
 parser.add_argument("--tile", action="store_true", help="Tile VAE")
-parser.add_argument("--no-trail", action="store_true", help="Do not force trailing timestep spacing. Changes seeds.")
 parser.add_argument("--xl-vae", action="store_true", help="Override the SDXL VAE. Useful for models with broken vae.")
 parser.add_argument("--no-sdpa-hijack", action="store_true", help="Do not monkey patch the torch SDPA function on AMD cards.")
 parser.add_argument("--print", action="store_true", help="Print out generation params and exit.")
@@ -148,7 +150,7 @@ if args.include:
         include = {"width": meta_image.width, "height": meta_image.height}
         for k, v in meta_image.text.items():
             match k:
-                case "prompt" | "negative" | "sampler":
+                case "prompt" | "negative" | "sampler" | "spacing":
                     include[k] = [v]
                 case "cfg" | "rescale":
                     include[k] = [float(v)]
@@ -464,43 +466,31 @@ schedulers = None
 if hasattr(pipe, "scheduler"):
     sampler_map = {
         "default": pipe.scheduler,
-        "dpm": DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="dpmsolver++", solver_order=1, use_karras_sigmas=False
-        ),
-        "dpmk": DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="dpmsolver++", solver_order=1, use_karras_sigmas=True
-        ),
+        "dpm": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=1, use_karras_sigmas=False),
+        "dpmk": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=1, use_karras_sigmas=True),
         "sdpm": DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=1, use_karras_sigmas=False
+            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=1, use_karras_sigmas=False
         ),
         "sdpmk": DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=1, use_karras_sigmas=True
+            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=1, use_karras_sigmas=True
         ),
-        "dpm2": DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="dpmsolver++", solver_order=2, use_karras_sigmas=False
-        ),
-        "dpm2k": DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="dpmsolver++", solver_order=2, use_karras_sigmas=True
-        ),
+        "dpm2": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=2, use_karras_sigmas=False),
+        "dpm2k": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=2, use_karras_sigmas=True),
         "sdpm2": DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=2, use_karras_sigmas=False
+            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=2, use_karras_sigmas=False
         ),
         "sdpm2k": DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=2, use_karras_sigmas=True
+            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=2, use_karras_sigmas=True
         ),
-        "dpm3": DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="dpmsolver++", solver_order=3, use_karras_sigmas=False
-        ),
-        "dpm3k": DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="dpmsolver++", solver_order=3, use_karras_sigmas=True
-        ),
+        "dpm3": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=3, use_karras_sigmas=False),
+        "dpm3k": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=3, use_karras_sigmas=True),
         # "sdpm3": DPMSolverMultistepScheduler.from_config(
         #     pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=False
         # ),
         # "sdpm3k": DPMSolverMultistepScheduler.from_config(
         #     pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=True
         # ),
-        "ddim": DDIMScheduler.from_config(pipe.scheduler.config, set_alpha_to_one=True),
+        "ddim": DDIMScheduler.from_config(pipe.scheduler.config),
         "ddpm": DDPMScheduler.from_config(pipe.scheduler.config),
         "euler": EulerDiscreteScheduler.from_config(pipe.scheduler.config),
         "eulerk": EulerDiscreteScheduler.from_config(pipe.scheduler.config, use_karras_sigmas=True),
@@ -511,20 +501,32 @@ if hasattr(pipe, "scheduler"):
         schedulers = []
         for s in args.sampler:
             sampler = sampler_map[s]
-            if not args.no_trail:
-                sampler.config.timestep_spacing = "trailing"
-                sampler.config.steps_offset = 0
             schedulers.append((s, sampler))
 
-    if schedulers:
-        if len(schedulers) == 1:  # consume single samplers
-            name, sched = schedulers[0]
-            pipe.scheduler = sched
-            base_meta["sampler"] = name
-            schedulers = None
-    elif not args.no_trail:
-        pipe.scheduler.config.timestep_spacing = "trailing"
-        pipe.scheduler.config.steps_offset = 0
+    if args.spacing:
+        schedulers = [
+            (
+                name,
+                sched.from_config(
+                    sched.config,
+                    timestep_spacing=space,
+                    steps_offset=0,
+                    set_alpha_to_one=True,
+                    final_sigmas_type="zero",
+                ),
+            )
+            for name, sched in (schedulers if schedulers else [("default", pipe.scheduler)])
+            for space in args.spacing
+        ]
+
+    # consume single samplers
+    if len(schedulers) == 1:
+        name, sched = schedulers[0]
+        base_meta["sampler"] = name
+        if args.spacing:
+            base_meta["spacing"] = sched.config.timestep_spacing
+        pipe.scheduler = sched
+        schedulers = None
 # SCHEDULER }}}
 
 # INPUT TENSOR {{{
@@ -635,6 +637,8 @@ for kwargs in key_dicts:
             name, sched = kwargs.pop("scheduler")
             pipe.scheduler = sched
             meta["sampler"] = name
+            if args.spacing:
+                meta["spacing"] = sched.config.timestep_spacing
 
         # NOISE {{{
         generators = [torch.Generator(noise_device).manual_seed(seed + n) for n in range(args.batch_size)]
