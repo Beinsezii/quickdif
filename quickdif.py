@@ -53,7 +53,7 @@ spacings = ["leading", "trailing", "linspace"]
 dtypes = ["fp16", "bf16", "fp32"]
 offload = ["model", "sequential"]
 noise_types = ["cpu16", "cpu16b", "cpu32", "cuda16", "cuda16b", "cuda32"]
-attention = ["default", "sdp", "subquad"]
+attention = ["default", "sdp", "subquad", "rocm_flash"]
 
 defaults = {
     "prompt": [""],
@@ -259,6 +259,11 @@ from diffusers import (
 )
 from diffusers.models.attention_processor import AttnProcessor2_0
 from attn_custom import SubQuadraticCrossAttnProcessor as subquad_processor
+
+try:
+    from attn_custom import FlashAttnProcessor as rocm_flash_processor
+except ImportError:
+    rocm_flash_processor = None
 from compel import Compel, ReturnedEmbeddingsType
 
 
@@ -368,6 +373,8 @@ if not args.compile:
     processor = None
     if subquad_processor is not None and args.attn == "subquad":
         processor = subquad_processor(query_chunk_size=2**12, kv_chunk_size=2**15)
+    elif rocm_flash_processor is not None and args.attn == "rocm_flash":
+        processor = rocm_flash_processor()
     elif args.attn == "sdp":
         processor = AttnProcessor2_0()
 
