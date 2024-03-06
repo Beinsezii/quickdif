@@ -258,11 +258,7 @@ from diffusers import (
     StableDiffusionXLPipeline,
 )
 from diffusers.models.attention_processor import AttnProcessor2_0
-
-try:
-    from diffusers.models.attention_processor import SubQuadraticCrossAttnProcessor as subquad_processor
-except ImportError:
-    subquad_processor = None
+from attn_custom import SubQuadraticCrossAttnProcessor as subquad_processor
 from compel import Compel, ReturnedEmbeddingsType
 
 

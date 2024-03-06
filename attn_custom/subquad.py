@@ -1,6 +1,11 @@
 from typing import Optional
-from diffusers.models.attention_processor import Attention, USE_PEFT_BACKEND
+
 import torch
+
+from diffusers.models.attention_processor import USE_PEFT_BACKEND, Attention
+
+from .sub_quadratic_attention import efficient_dot_product_attention
+
 
 class SubQuadraticCrossAttnProcessor:
     query_chunk_size: int
@@ -46,9 +51,7 @@ class SubQuadraticCrossAttnProcessor:
             batch_size, channel, height, width = hidden_states.shape
             hidden_states = hidden_states.view(batch_size, channel, height * width).transpose(1, 2)
 
-        batch_size, key_tokens, _ = (
-            hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
-        )
+        batch_size, key_tokens, _ = hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
 
         attention_mask = attn.prepare_attention_mask(attention_mask, key_tokens, batch_size)
         if attention_mask is not None:
@@ -78,7 +81,7 @@ class SubQuadraticCrossAttnProcessor:
         key = attn.head_to_batch_dim(key).swapaxes(1, 2).contiguous()
         value = attn.head_to_batch_dim(value).contiguous()
 
-        hidden_states = attn_subquad(
+        hidden_states = efficient_dot_product_attention(
             query=query,
             key_t=key,
             value=value,
@@ -106,4 +109,3 @@ class SubQuadraticCrossAttnProcessor:
         hidden_states = hidden_states / attn.rescale_output_factor
 
         return hidden_states
-
