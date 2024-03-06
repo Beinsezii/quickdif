@@ -526,7 +526,7 @@ if hasattr(pipe, "scheduler"):
     if len(schedulers) == 1:
         name, sched = schedulers[0]
         base_meta["sampler"] = name
-        if args.spacing:
+        if args.spacing and hasattr(sched.config, "timestep_spacing"):
             base_meta["spacing"] = sched.config.timestep_spacing
         pipe.scheduler = sched
         schedulers = None
@@ -640,7 +640,7 @@ for kwargs in key_dicts:
             name, sched = kwargs.pop("scheduler")
             pipe.scheduler = sched
             meta["sampler"] = name
-            if args.spacing:
+            if args.spacing and hasattr(sched.config, "timestep_spacing"):
                 meta["spacing"] = sched.config.timestep_spacing
 
         # NOISE {{{
