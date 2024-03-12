@@ -547,7 +547,7 @@ if hasattr(pipe, "vae") and weights and input_image is None:
         cols = COLS_XL
     elif SD or isinstance(pipe, PixArtAlphaPipeline):
         cols = COLS_FTMSE
-    if args.color_scale > 0 and cols:
+    if args.color_scale != 0 and cols:
         sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config, timestep_spacing="trailing").init_noise_sigma
         latent_input = (
             torch.tensor(cols[args.color], dtype=dtype, device="cpu")
