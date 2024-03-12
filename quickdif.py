@@ -628,8 +628,8 @@ if schedulers:
 # INFERENCE {{{
 print(f"Generating {len(key_dicts)} batches of {args.batch_size} images for {len(key_dicts) * args.batch_size} total...")
 filenum = 0
-if len(key_dicts) > 1:
-    bar = tqdm.tqdm(desc="Images", total=len(key_dicts) * args.batch_size)
+total = len(key_dicts) * args.batch_size
+bar = tqdm.tqdm(desc="Images", total=total) if total > 1 else None
 for kwargs in key_dicts:
     with SmartSigint(job_name="current batch"):
         torch.cuda.empty_cache()
@@ -707,8 +707,8 @@ for kwargs in key_dicts:
                 pnginfo.add_text("seed", str(seed + n))
             else:
                 pnginfo.add_text("seed", f"{seed} + {n}")
-            image.save(p, format="PNG", pnginfo=pnginfo)
-        if len(key_dicts) > 1:
+            image.save(p, format="PNG", pnginfo=pnginfo, compress_level=4)
+        if bar:
             bar.update(args.batch_size)
         # PROCESS }}}
 # INFERENCE }}}
