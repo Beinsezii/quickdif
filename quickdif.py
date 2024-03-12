@@ -71,6 +71,7 @@ defaults = {
     "dtype": "fp16",
     "spacing": ["trailing"],
     "noise_type": "cpu32",
+    "noise_magnitude": 1.0,
     "decoder_steps": -8,
 }
 
@@ -120,9 +121,16 @@ parser.add_argument("--seed", type=int, nargs="*", help="Seed for deterministic 
 parser.add_argument("-S", "--sampler", choices=samplers, nargs="*", help=f"Override model's default sampler. Can be one of {samplers}")
 parser.add_argument("--spacing", choices=spacings, nargs="*", help=f"Set sampler timestep spacing. Can be one of {spacings}. Default 'trailing'")
 parser.add_argument(
+    "-nt",
     "--noise-type",
     choices=noise_types,
     help=f"Device/precision for random noise if supported by pipeline. Can be one of {noise_types}. Default 'cpu32'",
+)
+parser.add_argument(
+    "-nm",
+    "--noise-magnitude",
+    type=float,
+    help="Magnitude of initial noise added to latent if supported by model. Default 1.0",
 )
 parser.add_argument(
     "-ds", "--decoder-steps", type=int, help="Amount of steps for decoders. Default -8. If set to negative, uses quadratic slope √|s*ds|"
@@ -158,7 +166,7 @@ if args.include:
                     include[k] = [int(v)]
                 case "model" | "noise_type" | "color":
                     include[k] = v
-                case "denoise" | "color_scale":
+                case "denoise" | "color_scale" | "noise_magnitude":
                     include[k] = float(v)
                 case "decoder_steps":
                     include[k] = int(v)
@@ -576,7 +584,8 @@ elif hasattr(pipe, "vqgan") and hasattr(pipe, "prior_pipe") and input_image is N
     latent_input = torch.zeros(size, dtype=dtype, device="cpu")
 
 else:
-    print(f"Model {args.model} not able to use pre-noised latents.\nNoise type {args.noise_type} will not be respected.")
+    latent_input = None
+    print(f"\nModel {args.model} not able to use pre-noised latents.\nNoise options will not be respected.\n")
 # INPUT TENSOR }}}
 
 # INPUT ARGS {{{
@@ -646,10 +655,12 @@ for kwargs in key_dicts:
         # NOISE {{{
         generators = [torch.Generator(noise_device).manual_seed(seed + n) for n in range(args.batch_size)]
 
-        if "latent_input" in locals():
+        if latent_input is not None:
             latents = latent_input.clone()
             for latent, generator in zip(latents, generators):
-                latent += torch.randn(latents.shape[1:], generator=generator, dtype=noise_dtype, device=noise_device).to("cpu")
+                latent += (
+                    torch.randn(latents.shape[1:], generator=generator, dtype=noise_dtype, device=noise_device).mul(args.noise_magnitude).to("cpu")
+                )
             kwargs["latents"] = latents
 
         kwargs["generator"] = generators
