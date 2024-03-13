@@ -5,7 +5,7 @@ Quick and easy CLI inference that just works™ for a variety of Diffusers model
   - Verified working with Stable Diffusion (1.5/2.1/XL Base), Stable Cascade/Wuerstchen, Kandinsky22, Pixart
   - Supports many common settings found in GUIs
   - Iterate over parameters like prompt or CFG
-  - Some more advanced tweaks like multi-Lora and colored latents
+  - Some more advanced tweaks like multi-Lora, colored latents, and variance masks
   - Extremely small 1-shot script using `accelerate` for hot loading models
   - Just works™; not broken
 
@@ -19,7 +19,7 @@ Quick and easy CLI inference that just works™ for a variety of Diffusers model
   - 1-click installer
 
 ## Installation
-You must have a recent Python version installed, likely at least 3.10+. In essence you just need to install `requirements.txt` for your environment of choice.
+You must have a recent Python version installed, at least 3.10+. In essence you just need to install `requirements.txt` for your environment of choice.
 
 #### Basic setup
 ```sh
