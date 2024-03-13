@@ -72,6 +72,8 @@ defaults = {
     "spacing": ["trailing"],
     "noise_type": "cpu32",
     "noise_magnitude": 1.0,
+    "variance_scale": 2,
+    "variance_magnitude": 0.0,
     "decoder_steps": -8,
 }
 
@@ -132,6 +134,8 @@ parser.add_argument(
     type=float,
     help="Magnitude of initial noise added to latent if supported by model. Default 1.0",
 )
+parser.add_argument("-vs", "--variance-scale", type=int, help="Scale of variance patterns. Default 2")
+parser.add_argument("-vm", "--variance-magnitude", type=float, help="Magnitude of variance patterns. Default 0.0")
 parser.add_argument(
     "-ds", "--decoder-steps", type=int, help="Amount of steps for decoders. Default -8. If set to negative, uses quadratic slope √|s*ds|"
 )
@@ -548,28 +552,6 @@ if hasattr(pipe, "vae") and weights and input_image is None:
         args.height // pipe.vae_scale_factor if args.height else weights.config.sample_size,
         args.width // pipe.vae_scale_factor if args.width else weights.config.sample_size,
     ]
-
-    # colored latents
-    cols = None
-    if XL:
-        cols = COLS_XL
-    elif SD or isinstance(pipe, PixArtAlphaPipeline):
-        cols = COLS_FTMSE
-    if args.color_scale != 0 and cols:
-        sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config, timestep_spacing="trailing").init_noise_sigma
-        latent_input = (
-            torch.tensor(cols[args.color], dtype=dtype, device="cpu")
-            .mul(args.color_scale)
-            .div(sigma)
-            .expand([size[0], size[2], size[3], size[1]])
-            .permute((0, 3, 1, 2))
-            .clone()
-        )
-        base_meta["color"] = args.color
-        base_meta["color_scale"] = args.color_scale
-    else:
-        latent_input = torch.zeros(size, dtype=dtype, device="cpu")
-
 elif hasattr(pipe, "vqgan") and hasattr(pipe, "prior_pipe") and input_image is None:
     if not args.height:
         args.height = 1024
@@ -581,11 +563,10 @@ elif hasattr(pipe, "vqgan") and hasattr(pipe, "prior_pipe") and input_image is N
         math.ceil(args.height / pipe.prior_pipe.config.resolution_multiple),
         math.ceil(args.width / pipe.prior_pipe.config.resolution_multiple),
     ]
-    latent_input = torch.zeros(size, dtype=dtype, device="cpu")
-
 else:
-    latent_input = None
+    size = None
     print(f"\nModel {args.model} not able to use pre-noised latents.\nNoise options will not be respected.\n")
+
 # INPUT TENSOR }}}
 
 # INPUT ARGS {{{
@@ -655,12 +636,40 @@ for kwargs in key_dicts:
         # NOISE {{{
         generators = [torch.Generator(noise_device).manual_seed(seed + n) for n in range(args.batch_size)]
 
-        if latent_input is not None:
-            latents = latent_input.clone()
+        if size is not None:
+            latents = torch.zeros(size, dtype=dtype, device="cpu")
             for latent, generator in zip(latents, generators):
-                latent += (
-                    torch.randn(latents.shape[1:], generator=generator, dtype=noise_dtype, device=noise_device).mul(args.noise_magnitude).to("cpu")
+                # Variance
+                if args.variance_magnitude != 0:
+                    # save state so init noise seeds are the same with/without
+                    state = generator.get_state()
+                    variance = torch.randn(
+                        [1, size[1], args.variance_scale, args.variance_scale], generator=generator, dtype=noise_dtype, device=noise_device
+                    )
+                    latent += torch.nn.UpsamplingBilinear2d([size[2], size[3]])(variance).mul(args.variance_magnitude)[0]
+                    generator.set_state(state)
+                # Init noise
+                latent += torch.randn(latents.shape[1:], generator=generator, dtype=noise_dtype, device=noise_device).mul(args.noise_magnitude)
+
+            # Colored latents
+            if XL:
+                cols = COLS_XL
+            elif SD or isinstance(pipe, PixArtAlphaPipeline):
+                cols = COLS_FTMSE
+            else:
+                cols = None
+            if cols and args.color_scale != 0:
+                sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config).init_noise_sigma
+                latents += (
+                    torch.tensor(cols[args.color], dtype=dtype, device="cpu")
+                    .mul(args.color_scale)
+                    .div(sigma)
+                    .expand([size[0], size[2], size[3], size[1]])
+                    .permute((0, 3, 1, 2))
                 )
+                base_meta["color"] = args.color
+                base_meta["color_scale"] = args.color_scale
+
             kwargs["latents"] = latents
 
         kwargs["generator"] = generators
