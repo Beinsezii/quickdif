@@ -1,3 +1,14 @@
+import argparse
+import math
+import signal
+from inspect import signature
+from pathlib import Path
+from sys import exit
+from typing import Any
+
+import tqdm
+from PIL import Image, PngImagePlugin
+
 # LATENT COLORS {{{
 COLS_XL = {
     "black": [-2.8232, 0.5033, 0.3139, 0.3359],
@@ -21,14 +32,7 @@ COLS_FTMSE = {
 }
 # LATENT COLORS }}}
 
-# CLI {{{
-import argparse, math
-from inspect import signature
-from pathlib import Path
-from sys import exit
-
-from PIL import Image, PngImagePlugin
-
+# QDPARAMS {{{
 samplers = [
     "default",
     "dpm",
@@ -54,94 +58,129 @@ dtypes = ["fp16", "bf16", "fp32"]
 offload = ["model", "sequential"]
 noise_types = ["cpu16", "cpu16b", "cpu32", "cuda16", "cuda16b", "cuda32"]
 attention = ["default", "sdp", "subquad", "rocm_flash"]
+out = Path("/tmp/quickdif/" if Path("/tmp/").exists() else "./output/")
 
-defaults = {
-    "prompt": [""],
-    "negative": ["blurry, noisy, cropped"],
-    "steps": [30],
-    "cfg": [5.0],
-    "rescale": [0.0],
-    "batch_count": 1,
-    "batch_size": 1,
-    "color": "black",
-    "color_scale": 0.0,
-    "model": "stabilityai/stable-diffusion-xl-base-1.0",
-    "denoise": 1.0,
-    "out": Path("/tmp/quickdif/" if Path("/tmp/").exists() else "./output/"),
-    "dtype": "fp16",
-    "spacing": ["trailing"],
-    "noise_type": "cpu32",
-    "noise_magnitude": 1.0,
-    "variance_scale": 2,
-    "variance_magnitude": 0.0,
-    "decoder_steps": -8,
-}
 
+class QDParam:
+    def __init__(
+        self,
+        name: str,
+        typing: type,
+        value: Any = None,
+        short: str | None = None,
+        long: str | None = None,
+        help: str | None = None,
+        multi: bool = False,
+        choices: list | None = None,
+        meta: bool = False,
+    ):
+        self.name = name
+        self.typing = typing
+        self.help = help
+        self.short = short
+        self.long = long
+        self.multi = multi
+        self.choices = choices
+        self.meta = meta
+
+        self.value = value
+
+        # I was originally gonna automate the assigning using setattr but that confuses the LSP
+        for k, _ in locals().items():
+            if k != "self" and k not in self.__dict__ and k != "value":
+                raise ValueError(f"Value '{k}' unset in QDParam")
+
+    @property
+    def value(self) -> Any:
+        return self._value
+
+    @value.setter
+    def value(self, new):
+        if isinstance(new, list):
+            if len(new) == 0:
+                new = None
+        if (
+            isinstance(new, self.typing)
+            or new is None
+            or (isinstance(new, list) and all([isinstance(x, self.typing) for x in new]) and self.multi is True)
+        ):
+            if self.multi and not isinstance(new, list) and new is not None:
+                self._value = [new]
+            else:
+                self._value = new
+        else:
+            raise ValueError(f'Cannot assign value "{new}" of type "{type(new)}" to param "{self.name}" of type "{self.typing}"')
+
+
+params = [
+    ### Batching
+    QDParam("prompt", str, multi=True, meta=True),
+    QDParam("negative", str, short="-n", long="--negative", value="blurry, noisy, cropped", multi=True, meta=True),
+    QDParam("seed", int, short="-e", long="--seed", multi=True, meta=True),
+    QDParam("steps", int, short="-s", long="--steps", value=30, multi=True, meta=True),
+    QDParam("decoder_steps", int, short="-ds", long="--decoder-steps", value=-8, multi=True, meta=True),
+    QDParam("cfg", float, short="-g", long="--cfg", value=5.0, multi=True, meta=True),
+    QDParam("rescale", float, short="-G", long="--rescale", value=0.0, multi=True, meta=True),
+    QDParam("denoise", float, short="-d", long="--denoise", multi=True, meta=True),
+    QDParam("noise_type", str, short="-nt", long="--noise-type", choices=noise_types, value="cpu32", multi=True, meta=True),
+    QDParam("noise_power", str, short="-np", long="--noise-power", multi=True, meta=True),
+    QDParam("color", str, short="-C", long="--color", value="black", choices=list(COLS_XL.keys()), multi=True, meta=True),
+    QDParam("color_power", float, short="-c", long="--color-power", multi=True, meta=True),
+    QDParam("variance_scale", int, short="-vs", long="--variance-scale", value=2, multi=True, meta=True),
+    QDParam("variance_power", float, short="-vp", long="--variance-power", multi=True, meta=True),
+    QDParam("sampler", str, short="-S", long="--sampler", choices=samplers, value="default", multi=True, meta=True),
+    QDParam("spacing", str, long="--spacing", choices=spacings, value="trailing", multi=True, meta=True),
+    ### Global
+    QDParam("width", int, short="-w", long="--width"),
+    QDParam("height", int, short="-h", long="--height"),
+    QDParam("model", str, short="-m", long="--model", value="stabilityai/stable-diffusion-xl-base-1.0", meta=True),
+    QDParam("lora", str, short="-l", long="--lora", help='Apply Loras, ex. "ms_paint.safetensors:::0.6"', meta=True, multi=True),
+    QDParam("batch_count", int, short="-b", long="--batch-count", value=1),
+    QDParam("batch_size", int, short="-B", long="--batch-size", value=1),
+]
+params = {param.name: param for param in params}
+# QDPARAMS }}}
+
+# CLI {{{
 parser = argparse.ArgumentParser(
     description="Quick and easy inference for a variety of Diffusers models. Not all models support all options", add_help=False
 )
-parser.add_argument("prompt", nargs="*", type=str)
-parser.add_argument(
-    "-n",
-    "--negative",
-    type=str,
-    nargs="*",
-    help="Universal negative for all prompts. Default 'blurry, noisy, cropped'",
-)
-parser.add_argument("-w", "--width", type=int, help="Final output width. Default varies by model")
-parser.add_argument("-h", "--height", type=int, help="Final output height. Default varies by model")
-parser.add_argument("-s", "--steps", type=int, nargs="*", help="Number of inference steps. Default 30. Can be unset")
-parser.add_argument("-g", "--cfg", type=float, nargs="*", help="Guidance for conditioning. Default 5. Can be unset")
-parser.add_argument("-G", "--rescale", type=float, nargs="*", help="Guidance rescale factor. Default 0. Can be unset")
-parser.add_argument("-b", "--batch-count", type=int, help="Amount of times to run each prompt sequentially. Default 1")
-parser.add_argument("-B", "--batch-size", type=int, help="Amount of times to run each prompt in parallel. Default 1")
-parser.add_argument(
-    "-C",
-    "--color",
-    choices=list(COLS_XL.keys()),
-    help=f"Color of input latent. Only supported with sd-ft-mse and sdxl VAEs. Default black, can be one of {list(COLS_XL.keys())}",
-)
-parser.add_argument("-c", "--color-scale", type=float, help="Alpha of colored latent. Default 0.0")
-parser.add_argument(
-    "-m",
-    "--model",
-    type=str,
-    help=f"Huggingface model or Stable Diffusion safetensors checkpoint to load. Default {defaults['model']}",
-)
-parser.add_argument("-l", "--lora", type=str, nargs="*", help="Apply Loras, ex. 'ms_paint.safetensors:::0.6'")
-parser.add_argument(
-    "-I",
-    "--include",
-    type=argparse.FileType(mode="rb"),
-    help="Include parameters from another image. Only works with quickdif images",
-)
+for param in params.values():
+    args = [param.short] if param.short else []
+    args.append(param.long if param.long else param.name)
+
+    kwargs = {
+        "type": param.typing,
+        "help": ". ".join(
+            [
+                h
+                for h in [
+                    param.help,
+                    # f"Can be one of {param.choices}" if param.choices else None,
+                    f'Default "{param.value}"' if param.value else None,
+                ]
+                if h is not None
+            ]
+        ),
+    }
+    if param.choices is not None:
+        kwargs["choices"] = param.choices
+    if param.multi:
+        kwargs["nargs"] = "*"
+    else:
+        kwargs["nargs"] = "?"
+
+    parser.add_argument(*args, **kwargs)
+
 parser.add_argument("-i", "--input", type=argparse.FileType(mode="rb"), help="Input image")
-parser.add_argument("-d", "--denoise", type=float, help="Denoise amount. Default 1.0")
-parser.add_argument("-o", "--out", type=Path, help=f"Output directory for images. Default {defaults['out']}")
-parser.add_argument("-D", "--dtype", choices=dtypes, help=f"Data format for inference. Default fp16, can be one of {dtypes}")
-parser.add_argument("--seed", type=int, nargs="*", help="Seed for deterministic outputs. If not set, will be random")
-parser.add_argument("-S", "--sampler", choices=samplers, nargs="*", help=f"Override model's default sampler. Can be one of {samplers}")
-parser.add_argument("--spacing", choices=spacings, nargs="*", help=f"Set sampler timestep spacing. Can be one of {spacings}. Default 'trailing'")
+parser.add_argument("-o", "--output", type=Path, default=out, help=f"Output directory for images. Default {out}")
 parser.add_argument(
-    "-nt",
-    "--noise-type",
-    choices=noise_types,
-    help=f"Device/precision for random noise if supported by pipeline. Can be one of {noise_types}. Default 'cpu32'",
+    "-I", "--include", type=argparse.FileType(mode="rb"), help="Include parameters from another image. Only works with quickdif images"
 )
+parser.add_argument("-D", "--dtype", choices=dtypes, default="fp16", help=f"Data format for inference. Default fp16, can be one of {dtypes}")
+parser.add_argument("-ol", "--offload", choices=offload, help=f"Set amount of CPU offload. Can be one of {offload}")
 parser.add_argument(
-    "-nm",
-    "--noise-magnitude",
-    type=float,
-    help="Magnitude of initial noise added to latent if supported by model. Default 1.0",
-)
-parser.add_argument("-vs", "--variance-scale", type=int, help="Scale of variance patterns. Default 2")
-parser.add_argument("-vm", "--variance-magnitude", type=float, help="Magnitude of variance patterns. Default 0.0")
-parser.add_argument(
-    "-ds", "--decoder-steps", type=int, help="Amount of steps for decoders. Default -8. If set to negative, uses quadratic slope √|s*ds|"
-)
-parser.add_argument("--offload", choices=offload, help=f"Set amount of CPU offload. Can be one of {offload}")
-parser.add_argument(
-    "--attn", choices=attention, help=f"Attention processor. Can be one of {attention}. Default is 'sdp' on Torch 2 and 'default' otherwise"
+    "--attention", choices=attention, help=f"Attention processor. Can be one of {attention}. Default is 'sdp' on Torch 2 and 'default' otherwise"
 )
 parser.add_argument("--comment", type=str, help="Add a comment to the image.")
 parser.add_argument("--compile", action="store_true", help="Compile unet with torch.compile()")
@@ -151,70 +190,61 @@ parser.add_argument("--no-sdpa-hijack", action="store_true", help="Do not monkey
 parser.add_argument("--print", action="store_true", help="Print out generation params and exit.")
 parser.add_argument("--help", action="help")
 
-args = parser.parse_args()
-if len(args.prompt) == 0:  # positionals will always accumulate
-    args.prompt = None
+args = vars(parser.parse_args())
 
-# include
-include = {}
-if args.include:
-    with Image.open(args.include) as meta_image:
-        include = {"width": meta_image.width, "height": meta_image.height}
-        for k, v in meta_image.text.items():
-            match k:
-                case "prompt" | "negative" | "sampler" | "spacing":
-                    include[k] = [v]
-                case "cfg" | "rescale":
-                    include[k] = [float(v)]
-                case "steps" | "seed":
-                    include[k] = [int(v)]
-                case "model" | "noise_type" | "color":
-                    include[k] = v
-                case "denoise" | "color_scale" | "noise_magnitude":
-                    include[k] = float(v)
-                case "decoder_steps":
-                    include[k] = int(v)
-                case "lora":
-                    include[k] = v.split("\x1f")
-                case "url" | "batch_size" | "comment":
-                    pass
-                case other:
-                    print(f'Unknown key "{other}: {v}"')
+if "include" in args:
+    if args["include"]:
+        with Image.open(args["include"]) as meta_image:
+            params["width"].value = meta_image.width
+            params["height"].value = meta_image.height
+            for k, v in meta_image.text.items():
+                if k in params:
+                    if k == "lora":
+                        params[k].value = v.split("\x1f")
+                    elif params[k].meta:
+                        params[k].value = params[k].typing(v)
+    del args["include"]
 
-for k, v in (defaults | include).items():
-    assert hasattr(args, k)
-    if getattr(args, k, None) is None:
-        setattr(args, k, v)
+for id, val in args.items():
+    match id:
+        # TODO: most of these could probably be QD Params
+        case "help" | "print" | "comment" | "compile" | "tile" | "xl_vae" | "no_sdpa_hijack" | "input" | "output" | "dtype" | "offload" | "attention":
+            pass
+        case id:
+            if id in params:
+                if val is not None and not (isinstance(val, list) and len(val) == 0 and params[id].long is None and params[id].short is None):
+                    params[id].value = val
+            else:
+                raise ValueError(f'Argument id "{id}" not in params')
 
-if args.print:
-    print("\n".join([f"{k}: {v}" for k, v in vars(args).items()]))
+if args.get("print", False):
+    print("\n".join([f"{p.name}: {p.value}" for p in params.values()]))
     exit()
 
-if args.out.is_dir():
+if args["output"].is_dir():
     pass
-elif not args.out.exists():
-    args.out.mkdir()
+elif not args["output"].exists():
+    args["output"].mkdir()
 else:
     raise ValueError("out must be directory")
 
 input_image = None
-if args.input:
-    input_image = Image.open(args.input)
+if args["input"]:
+    input_image = Image.open(args["input"])
 
-# start meta
-base_meta = {"model": args.model, "noise_type": args.noise_type, "denoise": args.denoise, "url": "https://github.com/Beinsezii/quickdif"}
-if args.batch_size > 1:
-    base_meta["batch_size"] = args.batch_size
-if args.comment:
+base_meta = {"model": params["model"].value, "url": "https://github.com/Beinsezii/quickdif"}
+
+if args.get("comment", ""):
     try:
-        with open(args.comment, "r") as f:
+        with open(args["comment"], "r") as f:
             base_meta["comment"] = f.read()
     except Exception:
-        base_meta["comment"] = args.comment
+        base_meta["comment"] = args["comment"]
 # CLI }}}
 
 # TORCH {{{
-import torch, transformers, tqdm, signal
+# Load Torch and libs that depend on it after the CLI cause it's laggy.
+import torch  # noqa: E402
 
 if "AMD" in torch.cuda.get_device_name() or "Radeon" in torch.cuda.get_device_name():
     try:
@@ -224,14 +254,15 @@ if "AMD" in torch.cuda.get_device_name() or "Radeon" in torch.cuda.get_device_na
 
         def sdpa_hijack(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None):
             if query.shape[3] <= 128 and attn_mask is None:
-                hidden_states = flash_attn_func(
+                result = flash_attn_func(
                     q=query.transpose(1, 2),
                     k=key.transpose(1, 2),
                     v=value.transpose(1, 2),
                     dropout_p=dropout_p,
                     causal=is_causal,
                     softmax_scale=scale,
-                ).transpose(1, 2)
+                )
+                hidden_states = result.transpose(1, 2) if result is not None else None
             else:
                 hidden_states = sdpa(
                     query=query,
@@ -251,7 +282,10 @@ if "AMD" in torch.cuda.get_device_name() or "Radeon" in torch.cuda.get_device_na
 else:
     print(f"# # #\nCould not detect AMD GPU from:\n{torch.cuda.get_device_name()}\n# # #")
 
-from diffusers import (
+import transformers  # noqa: E402
+
+from attn_custom import SubQuadraticCrossAttnProcessor as subquad_processor  # noqa: E402
+from diffusers import (  # noqa: E402
     AutoencoderKL,
     AutoPipelineForImage2Image,
     AutoPipelineForText2Image,
@@ -269,14 +303,13 @@ from diffusers import (
     StableDiffusionXLImg2ImgPipeline,
     StableDiffusionXLPipeline,
 )
-from diffusers.models.attention_processor import AttnProcessor2_0
-from attn_custom import SubQuadraticCrossAttnProcessor as subquad_processor
+from diffusers.models.attention_processor import AttnProcessor2_0  # noqa: E402
 
 try:
     from attn_custom import FlashAttnProcessor as rocm_flash_processor
 except ImportError:
     rocm_flash_processor = None
-from compel import Compel, ReturnedEmbeddingsType
+from compel import Compel, ReturnedEmbeddingsType  # noqa: E402
 
 
 # elegent solution from <https://stackoverflow.com/questions/842557/>
@@ -301,7 +334,7 @@ class SmartSigint:
 
     def terminate(self):
         signal.signal(signal.SIGINT, self.old_handler)
-        if self.received:
+        if self.received and callable(self.old_handler):
             self.old_handler(*self.received)
 
     def __exit__(self, _type, _value, _traceback):
@@ -310,17 +343,9 @@ class SmartSigint:
 
 torch.set_grad_enabled(False)
 torch.set_float32_matmul_precision("high")
-dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[args.dtype]
-if "cascade" in args.model and dtype == torch.float16:
+dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[args["dtype"]]
+if "cascade" in params["model"].value and dtype == torch.float16:
     dtype = torch.bfloat16
-noise_dtype, noise_device = {
-    "cpu16": (torch.float16, "cpu"),
-    "cpu16b": (torch.bfloat16, "cpu"),
-    "cpu32": (torch.float32, "cpu"),
-    "cuda16": (torch.float16, "cuda"),
-    "cuda16b": (torch.bfloat16, "cuda"),
-    "cuda32": (torch.float32, "cuda"),
-}[args.noise_type]
 # TORCH }}}
 
 # PIPE {{{
@@ -333,7 +358,7 @@ pipe_args = {
 }
 
 with SmartSigint(num=2, job_name="model load"):
-    if "cascade" in args.model:
+    if "cascade" in params["model"].value:
         prior = StableCascadePriorPipeline.from_pretrained("stabilityai/stable-cascade-prior", **pipe_args)
         decoder = StableCascadeDecoderPipeline.from_pretrained("stabilityai/stable-cascade", **pipe_args)
         pipe = StableCascadeCombinedPipeline(
@@ -348,22 +373,22 @@ with SmartSigint(num=2, job_name="model load"):
             # prior.image_encoder,
         )
         del prior, decoder
-    elif args.model.endswith(".safetensors"):
+    elif params["model"].value.endswith(".safetensors"):
         if input_image is not None:
             try:
-                pipe = StableDiffusionXLImg2ImgPipeline.from_single_file(args.model, **pipe_args)
+                pipe = StableDiffusionXLImg2ImgPipeline.from_single_file(params["model"].value, **pipe_args)
             except:
-                pipe = StableDiffusionImg2ImgPipeline.from_single_file(args.model, **pipe_args)
+                pipe = StableDiffusionImg2ImgPipeline.from_single_file(params["model"].value, **pipe_args)
         else:
             try:
-                pipe = StableDiffusionXLPipeline.from_single_file(args.model, **pipe_args)
+                pipe = StableDiffusionXLPipeline.from_single_file(params["model"].value, **pipe_args)
             except:
-                pipe = StableDiffusionPipeline.from_single_file(args.model, **pipe_args)
+                pipe = StableDiffusionPipeline.from_single_file(params["model"].value, **pipe_args)
     else:
         if input_image is not None:
-            pipe = AutoPipelineForImage2Image.from_pretrained(args.model, **pipe_args)
+            pipe = AutoPipelineForImage2Image.from_pretrained(params["model"].value, **pipe_args)
         else:
-            pipe = AutoPipelineForText2Image.from_pretrained(args.model, **pipe_args)
+            pipe = AutoPipelineForText2Image.from_pretrained(params["model"].value, **pipe_args)
 
 XL = isinstance(pipe, StableDiffusionXLPipeline) or isinstance(pipe, StableDiffusionXLImg2ImgPipeline)
 SD = isinstance(pipe, StableDiffusionPipeline) or isinstance(pipe, StableDiffusionImg2ImgPipeline)
@@ -372,22 +397,22 @@ pipe_params = signature(pipe).parameters
 
 pipe.safety_checker = None
 pipe.watermarker = None
-if args.offload == "model":
+if args["offload"] == "model":
     pipe.enable_model_cpu_offload()
-elif args.offload == "sequential":
+elif args["offload"] == "sequential":
     pipe.enable_sequential_cpu_offload()
 else:
     pipe.to("cuda")
 # PIPE }}}
 
 # ATTENTION {{{
-if not args.compile:
+if not args.get("compile", False):
     processor = None
-    if subquad_processor is not None and args.attn == "subquad":
+    if subquad_processor is not None and args["attention"] == "subquad":
         processor = subquad_processor(query_chunk_size=2**12, kv_chunk_size=2**15)
-    elif rocm_flash_processor is not None and args.attn == "rocm_flash":
+    elif rocm_flash_processor is not None and args["attention"] == "rocm_flash":
         processor = rocm_flash_processor()
-    elif args.attn == "sdp":
+    elif args["attention"] == "sdp":
         processor = AttnProcessor2_0()
 
     for id, item in [("pipe", pipe)] + [
@@ -404,7 +429,7 @@ if not args.compile:
     ]:
         if hasattr(item, "set_attn_processor") and processor is not None:
             item.set_attn_processor(processor)
-        elif hasattr(item, "set_default_attn_processor") and args.attn == "default":
+        elif hasattr(item, "set_default_attn_processor") and args["attention"] == "default":
             item.set_default_attn_processor()
 
 # }}}
@@ -413,12 +438,12 @@ if not args.compile:
 weights = None
 
 if hasattr(pipe, "unet"):
-    if args.compile:
+    if args.get("compile", False):
         pipe.unet = torch.compile(pipe.unet)
     weights = pipe.unet
 
 if hasattr(pipe, "transformer"):
-    if args.compile:
+    if args.get("compile", False):
         pipe.transformer = torch.compile(pipe.transformer)
     weights = pipe.transformer
 # MODEL }}}
@@ -426,8 +451,8 @@ if hasattr(pipe, "transformer"):
 # LORA {{{
 adapters = []
 
-if args.lora:
-    for n, lora in enumerate(args.lora):
+if params["lora"].value:
+    for n, lora in enumerate(params["lora"].value):
         split = lora.rsplit(":::")
         path = split[0]
         scale = 1.0 if len(split) < 2 else float(split[1])
@@ -462,13 +487,15 @@ if hasattr(pipe, "tokenizer") and isinstance(pipe.tokenizer, transformers.models
         )
     else:
         compel = Compel(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder, truncate_long_prompts=False)
+else:
+    compel = None
 # TOKENIZER/COMPEL }}}
 
 # VAE {{{
 if hasattr(pipe, "vae"):
-    if XL and args.xl_vae:
+    if XL and args.get("xl_vae", False):
         pipe.vae = AutoencoderKL.from_pretrained("stabilityai/sdxl-vae", torch_dtype=pipe.vae.dtype, use_safetensors=True).to(pipe.vae.device)
-    if args.tile:
+    if args.get("tile", False):
         pipe.vae.enable_tiling()
     else:
         pipe.vae.enable_slicing()
@@ -512,13 +539,13 @@ if hasattr(pipe, "scheduler"):
         "eulera": EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config),
     }
     assert list(sampler_map.keys()) == samplers
-    if args.sampler:
+    if params["sampler"].value:
         schedulers = []
-        for s in args.sampler:
+        for s in params["sampler"].value:
             sampler = sampler_map[s]
             schedulers.append((s, sampler))
 
-    if args.spacing:
+    if params["spacing"].value:
         schedulers = [
             (
                 name,
@@ -531,14 +558,14 @@ if hasattr(pipe, "scheduler"):
                 ),
             )
             for name, sched in (schedulers if schedulers else [("default", pipe.scheduler)])
-            for space in args.spacing
+            for space in params["spacing"].value
         ]
 
     # consume single samplers
     if len(schedulers) == 1:
         name, sched = schedulers[0]
         base_meta["sampler"] = name
-        if args.spacing and hasattr(sched.config, "timestep_spacing"):
+        if params["spacing"].value and hasattr(sched.config, "timestep_spacing"):
             base_meta["spacing"] = sched.config.timestep_spacing
         pipe.scheduler = sched
         schedulers = None
@@ -547,109 +574,118 @@ if hasattr(pipe, "scheduler"):
 # INPUT TENSOR {{{
 if hasattr(pipe, "vae") and weights and input_image is None:
     size = [
-        args.batch_size,
+        params["batch_size"].value,
         weights.config.in_channels,
-        args.height // pipe.vae_scale_factor if args.height else weights.config.sample_size,
-        args.width // pipe.vae_scale_factor if args.width else weights.config.sample_size,
+        params["height"].value // pipe.vae_scale_factor if params["height"].value else weights.config.sample_size,
+        params["width"].value // pipe.vae_scale_factor if params["width"].value else weights.config.sample_size,
     ]
 elif hasattr(pipe, "vqgan") and hasattr(pipe, "prior_pipe") and input_image is None:
-    if not args.height:
-        args.height = 1024
-    if not args.width:
-        args.width = 1024
+    if not params["height"].value:
+        params["height"].value = 1024
+    if not params["width"].value:
+        params["width"].value = 1024
     size = [
-        args.batch_size,
+        params["batch_size"].value,
         pipe.prior_pipe.prior.config.c_in,
-        math.ceil(args.height / pipe.prior_pipe.config.resolution_multiple),
-        math.ceil(args.width / pipe.prior_pipe.config.resolution_multiple),
+        math.ceil(params["height"].value / pipe.prior_pipe.config.resolution_multiple),
+        math.ceil(params["width"].value / pipe.prior_pipe.config.resolution_multiple),
     ]
 else:
     size = None
-    print(f"\nModel {args.model} not able to use pre-noised latents.\nNoise options will not be respected.\n")
+    print(f'\nModel {params["model"].value} not able to use pre-noised latents.\nNoise options will not be respected.\n')
 
 # INPUT TENSOR }}}
 
 # INPUT ARGS {{{
-base_dict = {
-    "num_images_per_prompt": args.batch_size,
+jobs = {
+    "num_images_per_prompt": params["batch_size"].value,
     "clean_caption": False,  # stop IF nag. what does this even do
-    "strength": args.denoise,
 }
-if not args.negative:
-    args.negative = [""]
-if args.width:
-    base_dict["width"] = args.width
-if args.height:
-    base_dict["height"] = args.height
+
+if not params["negative"].value:
+    params["negative"].value = [""]
+if params["width"].value:
+    jobs["width"] = params["width"].value
+if params["height"].value:
+    jobs["height"] = params["height"].value
+
 i32max = 2**31 - 1
-seeds = [torch.randint(high=i32max, low=-i32max, size=(1,)).item()] if not args.seed else args.seed
-key_dicts = [base_dict | {"seed": s + n * args.batch_size} for n in range(args.batch_count) for s in seeds]
-key_dicts = [k | {"prompt": p} for k in key_dicts for p in args.prompt]
-key_dicts = [k | {"negative_prompt": n} for k in key_dicts for n in args.negative]
-if args.steps:
-    key_dicts = [
-        k
-        | (
-            {
-                "prior_num_inference_steps": s,
-                "num_inference_steps": round(math.sqrt(abs(s * args.decoder_steps))) if args.decoder_steps < 0 else args.decoder_steps,
-            }
-            if "prior_num_inference_steps" in pipe_params
-            else {"num_inference_steps": s}
-        )
-        for k in key_dicts
-        for s in args.steps
-    ]
-if args.cfg:
-    key_dicts = [
-        k
-        | ({"guidance_scale": g, "prior_guidance_scale": g, "decoder_guidance_scale": 0.0 if isinstance(pipe, StableCascadeCombinedPipeline) else g})
-        for k in key_dicts
-        for g in args.cfg
-    ]
-if args.rescale:
-    key_dicts = [k | {"guidance_rescale": g} for k in key_dicts for g in args.rescale]
+seeds = [torch.randint(high=i32max, low=-i32max, size=(1,)).item()] if not params["seed"].value else params["seed"].value
+jobs = [jobs | {"seed": s + n * params["batch_size"].value} for n in range(params["batch_count"].value) for s in seeds]
+
+for param in params.values():
+    if param.multi:
+        match param.name:
+            case "seed" | "sampler" | "spacing" | "lora":
+                pass
+            case other:
+                if param.value:
+                    jobs = [j | {param.name: v} for j in jobs for v in param.value]
 
 if schedulers:
-    key_dicts = [k | {"scheduler": s} for k in key_dicts for s in schedulers]
+    jobs = [j | {"scheduler": s} for j in jobs for s in schedulers]
 
 # INPUT ARGS }}}
 
 # INFERENCE {{{
-print(f"Generating {len(key_dicts)} batches of {args.batch_size} images for {len(key_dicts) * args.batch_size} total...")
+print(f'Generating {len(jobs)} batches of {params["batch_size"].value} images for {len(jobs) * params["batch_size"].value} total...')
 filenum = 0
-total = len(key_dicts) * args.batch_size
+total = len(jobs) * params["batch_size"].value
 bar = tqdm.tqdm(desc="Images", total=total) if total > 1 else None
-for kwargs in key_dicts:
+for kwargs in jobs:
     with SmartSigint(job_name="current batch"):
         torch.cuda.empty_cache()
         meta = base_meta.copy()
         seed = kwargs.pop("seed")
 
+        for param in params.values():
+            if param.name in kwargs and param.meta:
+                meta[param.name] = kwargs[param.name]
+
+        noise_power = kwargs.pop("noise_power") if "noise_power" in kwargs else None
+        variance_power = kwargs.pop("variance_power") if "variance_power" in kwargs else None
+        variance_scale = kwargs.pop("variance_scale") if "variance_scale" in kwargs else None
+        color = kwargs.pop("color") if "color" in kwargs else None
+        color_power = kwargs.pop("color_power") if "color_power" in kwargs else None
+
+        if "noise_type" in kwargs:
+            noise_type = kwargs.pop("noise_type")
+            noise_dtype, noise_device = {
+                "cpu16": (torch.float16, "cpu"),
+                "cpu16b": (torch.bfloat16, "cpu"),
+                "cpu32": (torch.float32, "cpu"),
+                "cuda16": (torch.float16, "cuda"),
+                "cuda16b": (torch.bfloat16, "cuda"),
+                "cuda32": (torch.float32, "cuda"),
+            }[noise_type]
+        else:
+            noise_dtype, noise_device = None, None
+
         if "scheduler" in kwargs:
             name, sched = kwargs.pop("scheduler")
             pipe.scheduler = sched
             meta["sampler"] = name
-            if args.spacing and hasattr(sched.config, "timestep_spacing"):
+            if params["spacing"].value and hasattr(sched.config, "timestep_spacing"):
                 meta["spacing"] = sched.config.timestep_spacing
 
         # NOISE {{{
-        generators = [torch.Generator(noise_device).manual_seed(seed + n) for n in range(args.batch_size)]
+        generators = [torch.Generator(noise_device).manual_seed(seed + n) for n in range(params["batch_size"].value)]
 
         if size is not None:
             latents = torch.zeros(size, dtype=dtype, device="cpu")
             for latent, generator in zip(latents, generators):
                 # Variance
-                if args.variance_magnitude != 0:
+                if variance_power is not None and variance_scale is not None and variance_power != 0:
                     # save state so init noise seeds are the same with/without
                     state = generator.get_state()
-                    variance = torch.randn(
-                        [1, size[1], args.variance_scale, args.variance_scale], generator=generator, dtype=noise_dtype, device=noise_device
-                    )
-                    latent += torch.nn.UpsamplingBilinear2d([size[2], size[3]])(variance).mul(args.variance_magnitude)[0]
+                    variance = torch.randn([1, size[1], variance_scale, variance_scale], generator=generator, dtype=noise_dtype, device=noise_device)
+                    latent += torch.nn.UpsamplingBilinear2d((size[2], size[3]))(variance).mul(variance_power)[0]
                     generator.set_state(state)
                 # Init noise
-                latent += torch.randn(latents.shape[1:], generator=generator, dtype=noise_dtype, device=noise_device).mul(args.noise_magnitude)
+                noise = torch.randn(latents.shape[1:], generator=generator, dtype=noise_dtype, device=noise_device).to("cpu")
+                if noise_power is not None:
+                    noise *= noise_power
+                latent += noise
 
             # Colored latents
             if XL:
@@ -658,30 +694,26 @@ for kwargs in key_dicts:
                 cols = COLS_FTMSE
             else:
                 cols = None
-            if cols and args.color_scale != 0:
+            if cols and color_power is not None and color is not None and color_power != 0:
                 sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config).init_noise_sigma
                 latents += (
-                    torch.tensor(cols[args.color], dtype=dtype, device="cpu")
-                    .mul(args.color_scale)
+                    torch.tensor(cols[color], dtype=dtype, device="cpu")
+                    .mul(color_power)
                     .div(sigma)
                     .expand([size[0], size[2], size[3], size[1]])
                     .permute((0, 3, 1, 2))
                 )
-                base_meta["color"] = args.color
-                base_meta["color_scale"] = args.color_scale
 
             kwargs["latents"] = latents
 
         kwargs["generator"] = generators
-        print("seeds:", " ".join([str(seed + n) for n in range(args.batch_size)]))
+        print("seeds:", " ".join([str(seed + n) for n in range(params["batch_size"].value)]))
         # NOISE }}}
 
         # CONDITIONING {{{
-        meta["prompt"] = kwargs["prompt"]
-        meta["negative"] = kwargs["negative_prompt"]
-        if "compel" in locals():
-            pos = kwargs.pop("prompt")
-            neg = kwargs.pop("negative_prompt")
+        if compel is not None:
+            pos = kwargs.pop("prompt") if "prompt" in kwargs else ""
+            neg = kwargs.pop("negative") if "negative" in kwargs else ""
             if XL:
                 ncond, npool = compel.build_conditioning_tensor(neg)
                 pcond, ppool = compel.build_conditioning_tensor(pos)
@@ -694,32 +726,38 @@ for kwargs in key_dicts:
         # CONDITIONING }}}
 
         # PROCESS {{{
-        # make sure call doesnt err
         if input_image is not None:
             kwargs["image"] = input_image
+
+        if "prior_num_inference_steps" in pipe_params and "steps" in kwargs:
+            steps = kwargs.pop("steps")
+            kwargs["prior_num_inference_steps"] = steps
+            if "decoder_steps" in kwargs:
+                decoder_steps = kwargs.pop("decoder_steps")
+                kwargs["num_inference_steps"] = round(math.sqrt(abs(steps * decoder_steps))) if decoder_steps < 0 else decoder_steps
+
+        for f, t in [
+            ("steps", ["num_inference_steps"]),
+            ("denoise", ["strength"]),
+            ("negative", ["negative_prompt"]),
+            ("cfg", ["guidance_scale", "prior_guidance_scale"]),
+            ("rescale", ["guidance_rescale"]),
+        ]:
+            if f in kwargs:
+                for to in t:
+                    kwargs[to] = kwargs[f]
+                del kwargs[f]
+
+        # make sure call doesnt err
         for k in list(kwargs.keys()):
             if k not in pipe_params:
                 del kwargs[k]
 
-        if "prior_num_inference_steps" in kwargs:
-            meta["steps"] = kwargs["prior_num_inference_steps"]
-            meta["decoder_steps"] = args.decoder_steps
-        elif "num_inference_steps" in kwargs:
-            meta["steps"] = kwargs["num_inference_steps"]
-
-        if "prior_guidance_scale" in kwargs:
-            meta["cfg"] = kwargs["prior_guidance_scale"]
-        elif "guidance_scale" in kwargs:
-            meta["cfg"] = kwargs["guidance_scale"]
-
-        if "guidance_rescale" in kwargs:
-            meta["rescale"] = kwargs["guidance_rescale"]
-
         for n, image in enumerate(pipe(**kwargs).images):
-            p = args.out.joinpath(f"{filenum:05}.png")
+            p = args["output"].joinpath(f"{filenum:05}.png")
             while p.exists():
                 filenum += 1
-                p = args.out.joinpath(f"{filenum:05}.png")
+                p = args["output"].joinpath(f"{filenum:05}.png")
             pnginfo = PngImagePlugin.PngInfo()
             for k, v in meta.items():
                 pnginfo.add_text(k, str(v))
@@ -729,6 +767,6 @@ for kwargs in key_dicts:
                 pnginfo.add_text("seed", f"{seed} + {n}")
             image.save(p, format="PNG", pnginfo=pnginfo, compress_level=4)
         if bar:
-            bar.update(args.batch_size)
+            bar.update(params["batch_size"].value)
         # PROCESS }}}
 # INFERENCE }}}
