@@ -197,7 +197,7 @@ if "include" in args:
         with Image.open(args["include"]) as meta_image:
             params["width"].value = meta_image.width
             params["height"].value = meta_image.height
-            for k, v in meta_image.text.items():
+            for k, v in getattr(meta_image, "text", {}).items():
                 if k in params:
                     if k == "lora":
                         params[k].value = v.split("\x1f")
@@ -362,27 +362,27 @@ with SmartSigint(num=2, job_name="model load"):
         prior = StableCascadePriorPipeline.from_pretrained("stabilityai/stable-cascade-prior", **pipe_args)
         decoder = StableCascadeDecoderPipeline.from_pretrained("stabilityai/stable-cascade", **pipe_args)
         pipe = StableCascadeCombinedPipeline(
-            decoder.tokenizer,
-            decoder.text_encoder,
-            decoder.decoder,
-            decoder.scheduler,
-            decoder.vqgan,
-            prior.prior,
-            prior.scheduler,
-            # prior.feature_extractor,
-            # prior.image_encoder,
+            tokenizer=decoder.tokenizer,
+            text_encoder=decoder.text_encoder,
+            decoder=decoder.decoder,
+            scheduler=decoder.scheduler,
+            vqgan=decoder.vqgan,
+            prior_prior=prior.prior,
+            prior_scheduler=prior.scheduler,
+            feature_extractor=prior.feature_extractor,
+            image_encoder=prior.image_encoder,
         )
         del prior, decoder
     elif params["model"].value.endswith(".safetensors"):
         if input_image is not None:
             try:
                 pipe = StableDiffusionXLImg2ImgPipeline.from_single_file(params["model"].value, **pipe_args)
-            except:
+            except:  # noqa: E722
                 pipe = StableDiffusionImg2ImgPipeline.from_single_file(params["model"].value, **pipe_args)
         else:
             try:
                 pipe = StableDiffusionXLPipeline.from_single_file(params["model"].value, **pipe_args)
-            except:
+            except:  # noqa: E722
                 pipe = StableDiffusionPipeline.from_single_file(params["model"].value, **pipe_args)
     else:
         if input_image is not None:
@@ -393,6 +393,7 @@ with SmartSigint(num=2, job_name="model load"):
 XL = isinstance(pipe, StableDiffusionXLPipeline) or isinstance(pipe, StableDiffusionXLImg2ImgPipeline)
 SD = isinstance(pipe, StableDiffusionPipeline) or isinstance(pipe, StableDiffusionImg2ImgPipeline)
 
+assert callable(pipe)
 pipe_params = signature(pipe).parameters
 
 pipe.safety_checker = None
@@ -427,26 +428,21 @@ if not args.get("compile", False):
             "vqgan",
         ]
     ]:
-        if hasattr(item, "set_attn_processor") and processor is not None:
-            item.set_attn_processor(processor)
-        elif hasattr(item, "set_default_attn_processor") and args["attention"] == "default":
-            item.set_default_attn_processor()
+        if item is not None:
+            if hasattr(item, "set_attn_processor") and processor is not None:
+                item.set_attn_processor(processor)
+            elif hasattr(item, "set_default_attn_processor") and args["attention"] == "default":
+                item.set_default_attn_processor()
 
 # }}}
 
-# MODEL {{{
-weights = None
-
-if hasattr(pipe, "unet"):
-    if args.get("compile", False):
-        pipe.unet = torch.compile(pipe.unet)
-    weights = pipe.unet
-
-if hasattr(pipe, "transformer"):
-    if args.get("compile", False):
-        pipe.transformer = torch.compile(pipe.transformer)
-    weights = pipe.transformer
-# MODEL }}}
+# COMPILE {{{
+if args.get("compile", False):
+    if hasattr(pipe, "unet"):
+            pipe.unet = torch.compile(pipe.unet)
+    if hasattr(pipe, "transformer"):
+            pipe.transformer = torch.compile(pipe.transformer)
+# COMPILE }}}
 
 # LORA {{{
 adapters = []
@@ -562,7 +558,7 @@ if hasattr(pipe, "scheduler"):
         ]
 
     # consume single samplers
-    if len(schedulers) == 1:
+    if schedulers and len(schedulers) == 1:
         name, sched = schedulers[0]
         base_meta["sampler"] = name
         if params["spacing"].value and hasattr(sched.config, "timestep_spacing"):
@@ -572,27 +568,38 @@ if hasattr(pipe, "scheduler"):
 # SCHEDULER }}}
 
 # INPUT TENSOR {{{
-if hasattr(pipe, "vae") and weights and input_image is None:
-    size = [
-        params["batch_size"].value,
-        weights.config.in_channels,
-        params["height"].value // pipe.vae_scale_factor if params["height"].value else weights.config.sample_size,
-        params["width"].value // pipe.vae_scale_factor if params["width"].value else weights.config.sample_size,
-    ]
-elif hasattr(pipe, "vqgan") and hasattr(pipe, "prior_pipe") and input_image is None:
-    if not params["height"].value:
+size = None
+if input_image is None:
+    factor: float | None = None
+    channels: int | None = None
+    default_size: int | None = None
+
+    if hasattr(pipe, "vae_scale_factor"):
+        factor = pipe.vae_scale_factor
+    if hasattr(pipe, "unet"):
+        channels = pipe.unet.config.in_channels
+        default_size = pipe.unet.config.sample_size
+    if hasattr(pipe, "transformer"):
+        channels = pipe.transformer.config.in_channels
+        default_size = pipe.transformer.config.sample_size
+    if hasattr(pipe, "prior_pipe"):
+        factor = pipe.prior_pipe.config.resolution_multiple
+        channels = pipe.prior_pipe.prior.config.c_in
+
+    if factor is not None and default_size is None:
         params["height"].value = 1024
-    if not params["width"].value:
         params["width"].value = 1024
-    size = [
-        params["batch_size"].value,
-        pipe.prior_pipe.prior.config.c_in,
-        math.ceil(params["height"].value / pipe.prior_pipe.config.resolution_multiple),
-        math.ceil(params["width"].value / pipe.prior_pipe.config.resolution_multiple),
-    ]
-else:
-    size = None
-    print(f'\nModel {params["model"].value} not able to use pre-noised latents.\nNoise options will not be respected.\n')
+        default_size = math.ceil(1024 / factor)
+
+    if factor is not None and channels is not None and default_size is not None:
+        size = [
+            params["batch_size"].value,
+            channels,
+            math.ceil(params["height"].value / factor) if params["height"].value else default_size,
+            math.ceil(params["width"].value / factor) if params["width"].value else default_size,
+        ]
+    else:
+        print(f'\nModel {params["model"].value} not able to use pre-noised latents.\nNoise options will not be respected.\n')
 
 # INPUT TENSOR }}}
 
@@ -679,13 +686,13 @@ for kwargs in jobs:
                     # save state so init noise seeds are the same with/without
                     state = generator.get_state()
                     variance = torch.randn([1, size[1], variance_scale, variance_scale], generator=generator, dtype=noise_dtype, device=noise_device)
-                    latent += torch.nn.UpsamplingBilinear2d((size[2], size[3]))(variance).mul(variance_power)[0]
+                    latent += torch.nn.UpsamplingBilinear2d((size[2], size[3]))(variance).mul(variance_power)[0].to("cpu")
                     generator.set_state(state)
                 # Init noise
-                noise = torch.randn(latents.shape[1:], generator=generator, dtype=noise_dtype, device=noise_device).to("cpu")
+                noise = torch.randn(latents.shape[1:], generator=generator, dtype=noise_dtype, device=noise_device)
                 if noise_power is not None:
                     noise *= noise_power
-                latent += noise
+                latent += noise.to("cpu")
 
             # Colored latents
             if XL:
