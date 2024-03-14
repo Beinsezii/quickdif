@@ -359,8 +359,12 @@ pipe_args = {
 
 with SmartSigint(num=2, job_name="model load"):
     if "cascade" in params["model"].value:
-        prior = StableCascadePriorPipeline.from_pretrained("stabilityai/stable-cascade-prior", **pipe_args)
-        decoder = StableCascadeDecoderPipeline.from_pretrained("stabilityai/stable-cascade", **pipe_args)
+        prior = StableCascadePriorPipeline.from_pretrained(
+            "stabilityai/stable-cascade-prior", revision="621fc2ddab5500e57079e716c15358a25b649090", **pipe_args
+        )
+        decoder = StableCascadeDecoderPipeline.from_pretrained(
+            "stabilityai/stable-cascade", revision="e3aee2fd11a00865f5c085d3e741f2e51aef12d3", **pipe_args
+        )
         pipe = StableCascadeCombinedPipeline(
             tokenizer=decoder.tokenizer,
             text_encoder=decoder.text_encoder,
@@ -439,9 +443,9 @@ if not args.get("compile", False):
 # COMPILE {{{
 if args.get("compile", False):
     if hasattr(pipe, "unet"):
-            pipe.unet = torch.compile(pipe.unet)
+        pipe.unet = torch.compile(pipe.unet)
     if hasattr(pipe, "transformer"):
-            pipe.transformer = torch.compile(pipe.transformer)
+        pipe.transformer = torch.compile(pipe.transformer)
 # COMPILE }}}
 
 # LORA {{{
