@@ -591,8 +591,10 @@ if input_image is None:
         channels = pipe.prior_pipe.prior.config.c_in
 
     if factor is not None and default_size is None:
-        params["height"].value = 1024
-        params["width"].value = 1024
+        if params["height"].value is None:
+            params["height"].value = 1024
+        if params["width"].value is None:
+            params["width"].value = 1024
         default_size = math.ceil(1024 / factor)
 
     if factor is not None and channels is not None and default_size is not None:
