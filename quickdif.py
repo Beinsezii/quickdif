@@ -407,7 +407,7 @@ if args["offload"] == "model":
 elif args["offload"] == "sequential":
     pipe.enable_sequential_cpu_offload()
 else:
-    pipe.to("cuda")
+    pipe = pipe.to("cuda")
 # PIPE }}}
 
 # ATTENTION {{{
