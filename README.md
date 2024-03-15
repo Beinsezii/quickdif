@@ -8,6 +8,7 @@ Quick and easy CLI inference that just works™ for a variety of Diffusers model
   - Some more advanced tweaks like multi-Lora, colored latents, and variance masks
   - Extremely small 1-shot script using `accelerate` for hot loading models
   - Just works™; not broken
+  - Save and load config files for easy reuse of prompts, settings, seeds, models, etc.
 
 ## Not Including
   - ControlNet + other Stable Diffusion extensions
@@ -63,6 +64,24 @@ You must have a recent Python version installed, at least 3.10+. In essence you 
 # Compile for a long job
 > ./quickdif.sh $(cat prompts.txt) --compile
 ```
+
+#### Using config files to save prompts and settings
+It's possible to save the prompt and all settings into a config file for future use. 
+Examples on how to use config files:
+- Create an initial config file, the prompt and all settings will be saved into myconfig.json then the script will run
+  - `python quickdif.py --prompt "high resolution dslr photograph of pink roses in the misty rain" --model "ptx0/terminus-xl-gamma-v1" --save_config_json myconfig.json`
+
+
+- Run the script with the saved config file
+  - `python quickdif.py --load_config_json myconfig.json`
+
+- You can override settings in the config file by passing them as arguments
+  - `python quickdif.py --load_config_json myconfig.json --seed 1234`
+
+- If you save config file with any overridden settings, the new settings will be saved into the config file 
+  - `python quickdif.py --load_config_json myconfig.json --seed 1234 --save_config_json myconfig_with_seed1234.json`
+
+
 
 ## F.A.Q.
 Question|Answer
