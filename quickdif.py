@@ -188,6 +188,7 @@ parser.add_argument("--tile", action="store_true", help="Tile VAE")
 parser.add_argument("--xl-vae", action="store_true", help="Override the SDXL VAE. Useful for models with broken vae.")
 parser.add_argument("--no-sdpa-hijack", action="store_true", help="Do not monkey patch the torch SDPA function on AMD cards.")
 parser.add_argument("--print", action="store_true", help="Print out generation params and exit.")
+parser.add_argument("--from_config", type=str, help="Print out generation params and exit.")
 parser.add_argument("--help", action="help")
 
 args = vars(parser.parse_args())
@@ -208,7 +209,7 @@ if "include" in args:
 for id, val in args.items():
     match id:
         # TODO: most of these could probably be QD Params
-        case "help" | "print" | "comment" | "compile" | "tile" | "xl_vae" | "no_sdpa_hijack" | "input" | "output" | "dtype" | "offload" | "attention":
+        case "from_config" | "help" | "print" | "comment" | "compile" | "tile" | "xl_vae" | "no_sdpa_hijack" | "input" | "output" | "dtype" | "offload" | "attention":
             pass
         case id:
             if id in params:
