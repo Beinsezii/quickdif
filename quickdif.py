@@ -188,8 +188,23 @@ parser.add_argument("--tile", action="store_true", help="Tile VAE")
 parser.add_argument("--xl-vae", action="store_true", help="Override the SDXL VAE. Useful for models with broken vae.")
 parser.add_argument("--no-sdpa-hijack", action="store_true", help="Do not monkey patch the torch SDPA function on AMD cards.")
 parser.add_argument("--print", action="store_true", help="Print out generation params and exit.")
-parser.add_argument("--from_config", type=str, help="Print out generation params and exit.")
+parser.add_argument("--config_json", type=str, help="Load default config from this json file. If any cli options are also set, they have precedence. ")
+parser.add_argument("--save_config_json", type=str, help="Save the loaded config with arguments and any loaded config json to this file.")
 parser.add_argument("--help", action="help")
+
+
+
+# if --from_config is set, load the config from a json file if the json exists, then set any arguments from commandline
+if "config_json" in parser.parse_known_args()[0]:
+    print("Loading config from", parser.parse_known_args()[0].config_json)
+    from json import load
+
+    with open(parser.parse_known_args()[0].config_json, "r") as f:
+        config = load(f)
+    for k, v in config.items():
+        if k in params:
+            params[k].value = v
+    parser.set_defaults(**config)
 
 args = vars(parser.parse_args())
 
@@ -209,7 +224,7 @@ if "include" in args:
 for id, val in args.items():
     match id:
         # TODO: most of these could probably be QD Params
-        case "from_config" | "help" | "print" | "comment" | "compile" | "tile" | "xl_vae" | "no_sdpa_hijack" | "input" | "output" | "dtype" | "offload" | "attention":
+        case "save_config_json" | "config_json" | "help" | "print" | "comment" | "compile" | "tile" | "xl_vae" | "no_sdpa_hijack" | "input" | "output" | "dtype" | "offload" | "attention":
             pass
         case id:
             if id in params:
@@ -217,6 +232,11 @@ for id, val in args.items():
                     params[id].value = val
             else:
                 raise ValueError(f'Argument id "{id}" not in params')
+
+if args.get("save_config_json", False):
+    with open(args["save_config_json"], "w") as f:
+        from json import dump
+        dump({k: v.value for k, v in params.items()}, f)
 
 if args.get("print", False):
     print("\n".join([f"{p.name}: {p.value}" for p in params.values()]))
