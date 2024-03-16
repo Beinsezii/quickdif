@@ -359,12 +359,8 @@ pipe_args = {
 
 with SmartSigint(num=2, job_name="model load"):
     if "cascade" in params["model"].value:
-        prior = StableCascadePriorPipeline.from_pretrained(
-            "stabilityai/stable-cascade-prior", revision="621fc2ddab5500e57079e716c15358a25b649090", **pipe_args
-        )
-        decoder = StableCascadeDecoderPipeline.from_pretrained(
-            "stabilityai/stable-cascade", revision="e3aee2fd11a00865f5c085d3e741f2e51aef12d3", **pipe_args
-        )
+        prior = StableCascadePriorPipeline.from_pretrained("stabilityai/stable-cascade-prior", **pipe_args)
+        decoder = StableCascadeDecoderPipeline.from_pretrained("stabilityai/stable-cascade", **pipe_args)
         pipe = StableCascadeCombinedPipeline(
             tokenizer=decoder.tokenizer,
             text_encoder=decoder.text_encoder,
@@ -372,9 +368,11 @@ with SmartSigint(num=2, job_name="model load"):
             scheduler=decoder.scheduler,
             vqgan=decoder.vqgan,
             prior_prior=prior.prior,
+            prior_text_encoder=prior.text_encoder,
+            prior_tokenizer=prior.tokenizer,
             prior_scheduler=prior.scheduler,
-            feature_extractor=prior.feature_extractor,
-            image_encoder=prior.image_encoder,
+            prior_feature_extractor=prior.feature_extractor,
+            prior_image_encoder=prior.image_encoder,
         )
         del prior, decoder
     elif params["model"].value.endswith(".safetensors"):
@@ -415,8 +413,11 @@ if not args.get("compile", False):
     processor = None
     if subquad_processor is not None and args["attention"] == "subquad":
         processor = subquad_processor(query_chunk_size=2**12, kv_chunk_size=2**15)
-    elif rocm_flash_processor is not None and args["attention"] == "rocm_flash":
-        processor = rocm_flash_processor()
+    elif args["attention"] == "rocm_flash":
+        if rocm_flash_processor is not None:
+            processor = rocm_flash_processor()
+        else:
+            print('\n Attention Processor "rocm_flash" not available.\n')
     elif args["attention"] == "sdp":
         processor = AttnProcessor2_0()
 
