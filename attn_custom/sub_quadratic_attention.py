@@ -16,7 +16,6 @@ import torch
 from torch import Tensor
 from torch.utils.checkpoint import checkpoint
 
-
 try:
     from typing import List, NamedTuple, Optional, Protocol
 except ImportError:
@@ -37,8 +36,7 @@ class SummarizeChunk(Protocol):
         query: Tensor,
         key_t: Tensor,
         value: Tensor,
-    ) -> AttnChunk:
-        ...
+    ) -> AttnChunk: ...
 
 
 class ComputeQueryChunkAttn(Protocol):
@@ -47,8 +45,7 @@ class ComputeQueryChunkAttn(Protocol):
         query: Tensor,
         key_t: Tensor,
         value: Tensor,
-    ) -> Tensor:
-        ...
+    ) -> Tensor: ...
 
 
 def _dynamic_slice(
@@ -216,9 +213,7 @@ def efficient_dot_product_attention(
         mask = mask.unsqueeze(0)
 
     def get_query_chunk(chunk_idx: int) -> Tensor:
-        return _dynamic_slice(
-            query, (0, chunk_idx, 0), (batch_x_heads, min(query_chunk_size, q_tokens), q_channels_per_head)
-        )
+        return _dynamic_slice(query, (0, chunk_idx, 0), (batch_x_heads, min(query_chunk_size, q_tokens), q_channels_per_head))
 
     def get_mask_chunk(chunk_idx: int) -> Tensor:
         if mask is None:

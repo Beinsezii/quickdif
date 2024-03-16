@@ -2,7 +2,8 @@ from typing import Optional
 
 import torch
 
-from diffusers.models.attention_processor import USE_PEFT_BACKEND, Attention
+from diffusers.models.attention_processor import Attention
+from diffusers.utils import deprecate
 
 from .sub_quadratic_attention import efficient_dot_product_attention
 
@@ -36,11 +37,14 @@ class SubQuadraticCrossAttnProcessor:
         encoder_hidden_states: Optional[torch.FloatTensor] = None,
         attention_mask: Optional[torch.FloatTensor] = None,
         temb: Optional[torch.FloatTensor] = None,
-        scale: float = 1.0,
+        *args,
+        **kwargs,
     ) -> torch.FloatTensor:
-        residual = hidden_states
+        if len(args) > 0 or kwargs.get("scale", None) is not None:
+            deprecation_message = "The `scale` argument is deprecated and will be ignored. Please remove it, as passing it will raise an error in the future. `scale` should directly be passed while calling the underlying pipeline component i.e., via `cross_attention_kwargs`."
+            deprecate("scale", "1.0.0", deprecation_message)
 
-        args = () if USE_PEFT_BACKEND else (scale,)
+        residual = hidden_states
 
         if attn.spatial_norm is not None:
             hidden_states = attn.spatial_norm(hidden_states, temb)
@@ -67,18 +71,18 @@ class SubQuadraticCrossAttnProcessor:
         if attn.group_norm is not None:
             hidden_states = attn.group_norm(hidden_states.transpose(1, 2)).transpose(1, 2)
 
-        query = attn.to_q(hidden_states, *args)
+        query = attn.to_q(hidden_states)
 
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
         elif attn.norm_cross:
             encoder_hidden_states = attn.norm_encoder_hidden_states(encoder_hidden_states)
 
-        key = attn.to_k(encoder_hidden_states, *args)
-        value = attn.to_v(encoder_hidden_states, *args)
+        key = attn.to_k(encoder_hidden_states)
+        value = attn.to_v(encoder_hidden_states)
 
         query = attn.head_to_batch_dim(query).contiguous()
-        key = attn.head_to_batch_dim(key).swapaxes(1, 2).contiguous()
+        key = attn.head_to_batch_dim(key).transpose(1, 2).contiguous()
         value = attn.head_to_batch_dim(value).contiguous()
 
         hidden_states = efficient_dot_product_attention(
@@ -96,7 +100,7 @@ class SubQuadraticCrossAttnProcessor:
         hidden_states = attn.batch_to_head_dim(hidden_states)
 
         # linear proj
-        hidden_states = attn.to_out[0](hidden_states, *args)
+        hidden_states = attn.to_out[0](hidden_states)
         # dropout
         hidden_states = attn.to_out[1](hidden_states)
 
