@@ -589,7 +589,7 @@ if input_image is None:
         default_size = pipe.transformer.config.sample_size
     if hasattr(pipe, "prior_pipe"):
         factor = pipe.prior_pipe.config.resolution_multiple
-        channels = pipe.prior_pipe.prior.config.c_in
+        channels = pipe.prior_pipe.prior.config.in_channels
 
     if factor is not None and default_size is None:
         if params["height"].value is None:
