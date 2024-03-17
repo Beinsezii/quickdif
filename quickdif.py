@@ -246,41 +246,42 @@ if args.get("comment", ""):
 # Load Torch and libs that depend on it after the CLI cause it's laggy.
 import torch  # noqa: E402
 
-if "AMD" in torch.cuda.get_device_name() or "Radeon" in torch.cuda.get_device_name():
-    try:
-        from flash_attn import flash_attn_func
+if not args.get("no_sdpa_hijack", False):
+    if "AMD" in torch.cuda.get_device_name() or "Radeon" in torch.cuda.get_device_name():
+        try:
+            from flash_attn import flash_attn_func
 
-        sdpa = torch.nn.functional.scaled_dot_product_attention
+            sdpa = torch.nn.functional.scaled_dot_product_attention
 
-        def sdpa_hijack(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None):
-            if query.shape[3] <= 128 and attn_mask is None:
-                result = flash_attn_func(
-                    q=query.transpose(1, 2),
-                    k=key.transpose(1, 2),
-                    v=value.transpose(1, 2),
-                    dropout_p=dropout_p,
-                    causal=is_causal,
-                    softmax_scale=scale,
-                )
-                hidden_states = result.transpose(1, 2) if result is not None else None
-            else:
-                hidden_states = sdpa(
-                    query=query,
-                    key=key,
-                    value=value,
-                    attn_mask=attn_mask,
-                    dropout_p=dropout_p,
-                    is_causal=is_causal,
-                    scale=scale,
-                )
-            return hidden_states
+            def sdpa_hijack(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None):
+                if query.shape[3] <= 128 and attn_mask is None:
+                    result = flash_attn_func(
+                        q=query.transpose(1, 2),
+                        k=key.transpose(1, 2),
+                        v=value.transpose(1, 2),
+                        dropout_p=dropout_p,
+                        causal=is_causal,
+                        softmax_scale=scale,
+                    )
+                    hidden_states = result.transpose(1, 2) if result is not None else None
+                else:
+                    hidden_states = sdpa(
+                        query=query,
+                        key=key,
+                        value=value,
+                        attn_mask=attn_mask,
+                        dropout_p=dropout_p,
+                        is_causal=is_causal,
+                        scale=scale,
+                    )
+                return hidden_states
 
-        torch.nn.functional.scaled_dot_product_attention = sdpa_hijack
-        print("# # #\nHijacked SDPA with ROCm Flash Attention\n# # #")
-    except ImportError as e:
-        print(f"# # #\nCould not load Flash Attention for hijack:\n{e}\n# # #")
-else:
-    print(f"# # #\nCould not detect AMD GPU from:\n{torch.cuda.get_device_name()}\n# # #")
+            torch.nn.functional.scaled_dot_product_attention = sdpa_hijack
+            print("# # #\nHijacked SDPA with ROCm Flash Attention\n# # #")
+        except ImportError as e:
+            print(f"# # #\nCould not load Flash Attention for hijack:\n{e}\n# # #")
+    else:
+        print(f"# # #\nCould not detect AMD GPU from:\n{torch.cuda.get_device_name()}\n# # #")
 
 import transformers  # noqa: E402
 
@@ -296,8 +297,6 @@ from diffusers import (  # noqa: E402
     EulerDiscreteScheduler,
     PixArtAlphaPipeline,
     StableCascadeCombinedPipeline,
-    StableCascadeDecoderPipeline,
-    StableCascadePriorPipeline,
     StableDiffusionImg2ImgPipeline,
     StableDiffusionPipeline,
     StableDiffusionXLImg2ImgPipeline,
@@ -358,23 +357,8 @@ pipe_args = {
 }
 
 with SmartSigint(num=2, job_name="model load"):
-    if "cascade" in params["model"].value:
-        prior = StableCascadePriorPipeline.from_pretrained("stabilityai/stable-cascade-prior", **pipe_args)
-        decoder = StableCascadeDecoderPipeline.from_pretrained("stabilityai/stable-cascade", **pipe_args)
-        pipe = StableCascadeCombinedPipeline(
-            tokenizer=decoder.tokenizer,
-            text_encoder=decoder.text_encoder,
-            decoder=decoder.decoder,
-            scheduler=decoder.scheduler,
-            vqgan=decoder.vqgan,
-            prior_prior=prior.prior,
-            prior_text_encoder=prior.text_encoder,
-            prior_tokenizer=prior.tokenizer,
-            prior_scheduler=prior.scheduler,
-            prior_feature_extractor=prior.feature_extractor,
-            prior_image_encoder=prior.image_encoder,
-        )
-        del prior, decoder
+    if "stabilityai/stable-cascade" in params["model"].value:
+        pipe = StableCascadeCombinedPipeline.from_pretrained(params["model"].value, **pipe_args)
     elif params["model"].value.endswith(".safetensors"):
         if input_image is not None:
             try:
