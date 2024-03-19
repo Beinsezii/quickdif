@@ -1,11 +1,15 @@
 import argparse
+import json
 import math
 import signal
+from copy import copy
 from inspect import signature
+from io import BytesIO
 from pathlib import Path
 from sys import exit
 from typing import Any
 
+import tomllib
 import tqdm
 from PIL import Image, PngImagePlugin
 
@@ -84,6 +88,7 @@ class QDParam:
         self.meta = meta
 
         self.value = value
+        self.default = copy(self.value)
 
         # I was originally gonna automate the assigning using setattr but that confuses the LSP
         for k, _ in locals().items():
@@ -115,11 +120,11 @@ class QDParam:
 params = [
     ### Batching
     QDParam("prompt", str, multi=True, meta=True),
-    QDParam("negative", str, short="-n", long="--negative", value="blurry, noisy, cropped", multi=True, meta=True),
+    QDParam("negative", str, short="-n", long="--negative", multi=True, meta=True),
     QDParam("seed", int, short="-e", long="--seed", multi=True, meta=True),
     QDParam("steps", int, short="-s", long="--steps", value=30, multi=True, meta=True),
     QDParam("decoder_steps", int, short="-ds", long="--decoder-steps", value=-8, multi=True, meta=True),
-    QDParam("cfg", float, short="-g", long="--cfg", value=5.0, multi=True, meta=True),
+    QDParam("guidance", float, short="-g", long="--guidance", value=5.0, multi=True, meta=True),
     QDParam("rescale", float, short="-G", long="--rescale", value=0.0, multi=True, meta=True),
     QDParam("denoise", float, short="-d", long="--denoise", multi=True, meta=True),
     QDParam("noise_type", str, short="-nt", long="--noise-type", choices=noise_types, value="cpu32", multi=True, meta=True),
@@ -146,7 +151,7 @@ params = [
         short="-ol",
         long="--offload",
         choices=offload,
-        help="Set amount of CPU offload. Model is equivalent to most other apps' --med-vram, while sequential is equivalent to --low-vram",
+        help="Set amount of CPU offload. In most UIs, 'model' is equivalent to --med-vram while 'sequential' is equivalent to --low-vram",
     ),
     QDParam("attention", str, long="--attention", choices=attention),
     QDParam("compile", bool, long="--compile", help="Compile unet with torch.compile()"),
@@ -168,7 +173,7 @@ for param in params.values():
     kwargs = {}
 
     help = [param.help]
-    if param.value is list and len(param.value) == 1:
+    if isinstance(param.value, list) and len(param.value) == 1:
         help += [f'Default "{param.value[0]}"']
     elif param.value is not None:
         help += [f'Default "{param.value}"']
@@ -194,36 +199,75 @@ for param in params.values():
 
 parser.add_argument("-i", "--input", type=argparse.FileType(mode="rb"), help="Input image")
 parser.add_argument(
-    "-I", "--include", type=argparse.FileType(mode="rb"), help="Include parameters from another image. Only works with quickdif images"
+    "-I", "--include", type=argparse.FileType(mode="rb"), nargs="*", help="Include parameters from another image. Only works with quickdif images"
 )
+parser.add_argument("--json", type=argparse.FileType(mode="wb"), help="Output settings to JSON")
+# parser.add_argument("--toml", type=argparse.FileType(mode="wb"), help="Output settings to TOML")
 parser.add_argument("--comment", type=str, help="Add a comment to the image.")
 parser.add_argument("--print", action="store_true", help="Print out generation params and exit.")
 parser.add_argument("--help", action="help")
 
 args = vars(parser.parse_args())
 
-if "include" in args:
-    if args["include"]:
-        with Image.open(args["include"]) as meta_image:
-            params["width"].value = meta_image.width
-            params["height"].value = meta_image.height
-            for k, v in getattr(meta_image, "text", {}).items():
-                if k in params:
-                    if k == "lora":
-                        params[k].value = v.split("\x1f")
-                    elif params[k].meta:
-                        params[k].value = params[k].typing(v)
+for ext in "json", "toml":
+    default = Path(__file__).parent.joinpath(Path(f"quickdif.{ext}"))
+    if default.exists():
+        reader = default.open(mode="rb")
+        if args["include"] is None:
+            args["include"] = [reader]
+        else:
+            args["include"].insert(0, reader)
+
+if args["include"]:
+    for reader in args["include"]:
+        data = reader.read()
+        try:
+            data = data.decode()
+            for f, e in [
+                (tomllib.loads, tomllib.TOMLDecodeError),
+                (json.loads, json.JSONDecodeError),
+            ]:
+                try:
+                    for k, v in f(data).items():
+                        if k in params:
+                            if isinstance(v, list):
+                                v = [params[k].typing(x) for x in v]
+                            elif v is not None:
+                                v = params[k].typing(v)
+                            params[k].value = v
+                        else:
+                            print(f'Unknown key in serial config "{k}"')
+                    break
+                except e:
+                    pass
+        except UnicodeDecodeError:
+            with Image.open(BytesIO(data)) as meta_image:
+                params["width"].value = meta_image.width
+                params["height"].value = meta_image.height
+                for k, v in getattr(meta_image, "text", {}).items():
+                    if k in params:
+                        if k == "lora":
+                            params[k].value = v.split("\x1f")
+                        elif params[k].meta:
+                            params[k].value = params[k].typing(v)
 
 for id, val in args.items():
-    if id in ["help", "print", "comment", "input", "include"]:
-        pass
-    elif id in params:
-        if val is not None and not (isinstance(val, list) and len(val) == 0 and params[id].long is None and params[id].short is None):
-            params[id].value = val
-    else:
-        raise ValueError(f'Argument id "{id}" not in params')
+    if id in params and val is not None and not (isinstance(val, list) and len(val) == 0 and params[id].long is None and params[id].short is None):
+        params[id].value = val
 
 args = {k: v for k, v in args.items() if k not in params}
+
+if args.get("json", None) is not None:
+    dump = {}
+    for k, v in params.items():
+        if v.value != v.default and not (v.value is False and v.typing is bool):
+            v = v.value
+            if isinstance(v, Path):
+                v = str(v)
+            dump[k] = v
+    s = json.dumps(dump)
+    args["json"].write(s.encode())
+    exit()
 
 if args.get("print", False):
     print("\n".join([f"{p.name}: {p.value}" for p in params.values()]))
@@ -746,7 +790,7 @@ for kwargs in jobs:
             ("steps", ["num_inference_steps"]),
             ("denoise", ["strength"]),
             ("negative", ["negative_prompt"]),
-            ("cfg", ["guidance_scale", "prior_guidance_scale"]),
+            ("guidance", ["guidance_scale", "prior_guidance_scale"]),
             ("rescale", ["guidance_rescale"]),
         ]:
             if f in kwargs:
