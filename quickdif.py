@@ -137,6 +137,22 @@ params = [
     QDParam("lora", str, short="-l", long="--lora", help='Apply Loras, ex. "ms_paint.safetensors:::0.6"', meta=True, multi=True),
     QDParam("batch_count", int, short="-b", long="--batch-count", value=1),
     QDParam("batch_size", int, short="-B", long="--batch-size", value=1),
+    ### System
+    QDParam("output", Path, short="-o", long="--output", value=out, help="Output directory for images"),
+    QDParam("dtype", str, short="-D", long="--dtype", value="fp16", choices=dtypes, help="Data format for inference"),
+    QDParam(
+        "offload",
+        str,
+        short="-ol",
+        long="--offload",
+        choices=offload,
+        help="Set amount of CPU offload. Model is equivalent to most other apps' --med-vram, while sequential is equivalent to --low-vram",
+    ),
+    QDParam("attention", str, long="--attention", choices=attention),
+    QDParam("compile", bool, long="--compile", help="Compile unet with torch.compile()"),
+    QDParam("tile", bool, long="--tile", help="Tile VAE"),
+    QDParam("xl_vae", bool, long="--xl-vae", help="Override the SDXL VAE. Useful for models with broken vae."),
+    QDParam("no_sdpa_hijack", bool, long="--no-sdpa-hijack", help="Do not monkey patch the torch SDPA function on AMD cards."),
 ]
 params = {param.name: param for param in params}
 # QDPARAMS }}}
@@ -149,44 +165,38 @@ for param in params.values():
     args = [param.short] if param.short else []
     args.append(param.long if param.long else param.name)
 
-    kwargs = {
-        "type": param.typing,
-        "help": ". ".join(
-            [
-                h
-                for h in [
-                    param.help,
-                    # f"Can be one of {param.choices}" if param.choices else None,
-                    f'Default "{param.value}"' if param.value else None,
-                ]
-                if h is not None
-            ]
-        ),
-    }
-    if param.choices is not None:
-        kwargs["choices"] = param.choices
-    if param.multi:
-        kwargs["nargs"] = "*"
+    kwargs = {}
+
+    help = [param.help]
+    if param.value is list and len(param.value) == 1:
+        help += [f'Default "{param.value[0]}"']
+    elif param.value is not None:
+        help += [f'Default "{param.value}"']
+    help = ". ".join([h for h in help if h is not None])
+
+    if help:
+        kwargs["help"] = help
+
+    if param.typing == bool and param.multi is False:
+        kwargs["action"] = "store_true"
     else:
-        kwargs["nargs"] = "?"
+        kwargs["type"] = param.typing
+
+        if param.choices is not None:
+            kwargs["choices"] = param.choices
+
+        if param.multi:
+            kwargs["nargs"] = "*"
+        else:
+            kwargs["nargs"] = "?"
 
     parser.add_argument(*args, **kwargs)
 
 parser.add_argument("-i", "--input", type=argparse.FileType(mode="rb"), help="Input image")
-parser.add_argument("-o", "--output", type=Path, default=out, help=f"Output directory for images. Default {out}")
 parser.add_argument(
     "-I", "--include", type=argparse.FileType(mode="rb"), help="Include parameters from another image. Only works with quickdif images"
 )
-parser.add_argument("-D", "--dtype", choices=dtypes, default="fp16", help=f"Data format for inference. Default fp16, can be one of {dtypes}")
-parser.add_argument("-ol", "--offload", choices=offload, help=f"Set amount of CPU offload. Can be one of {offload}")
-parser.add_argument(
-    "--attention", choices=attention, help=f"Attention processor. Can be one of {attention}. Default is 'sdp' on Torch 2 and 'default' otherwise"
-)
 parser.add_argument("--comment", type=str, help="Add a comment to the image.")
-parser.add_argument("--compile", action="store_true", help="Compile unet with torch.compile()")
-parser.add_argument("--tile", action="store_true", help="Tile VAE")
-parser.add_argument("--xl-vae", action="store_true", help="Override the SDXL VAE. Useful for models with broken vae.")
-parser.add_argument("--no-sdpa-hijack", action="store_true", help="Do not monkey patch the torch SDPA function on AMD cards.")
 parser.add_argument("--print", action="store_true", help="Print out generation params and exit.")
 parser.add_argument("--help", action="help")
 
@@ -203,28 +213,26 @@ if "include" in args:
                         params[k].value = v.split("\x1f")
                     elif params[k].meta:
                         params[k].value = params[k].typing(v)
-    del args["include"]
 
 for id, val in args.items():
-    match id:
-        # TODO: most of these could probably be QD Params
-        case "help" | "print" | "comment" | "compile" | "tile" | "xl_vae" | "no_sdpa_hijack" | "input" | "output" | "dtype" | "offload" | "attention":
-            pass
-        case id:
-            if id in params:
-                if val is not None and not (isinstance(val, list) and len(val) == 0 and params[id].long is None and params[id].short is None):
-                    params[id].value = val
-            else:
-                raise ValueError(f'Argument id "{id}" not in params')
+    if id in ["help", "print", "comment", "input", "include"]:
+        pass
+    elif id in params:
+        if val is not None and not (isinstance(val, list) and len(val) == 0 and params[id].long is None and params[id].short is None):
+            params[id].value = val
+    else:
+        raise ValueError(f'Argument id "{id}" not in params')
+
+args = {k: v for k, v in args.items() if k not in params}
 
 if args.get("print", False):
     print("\n".join([f"{p.name}: {p.value}" for p in params.values()]))
     exit()
 
-if args["output"].is_dir():
+if params["output"].value.is_dir():
     pass
-elif not args["output"].exists():
-    args["output"].mkdir()
+elif not params["output"].value.exists():
+    params["output"].value.mkdir()
 else:
     raise ValueError("out must be directory")
 
@@ -246,7 +254,7 @@ if args.get("comment", ""):
 # Load Torch and libs that depend on it after the CLI cause it's laggy.
 import torch  # noqa: E402
 
-if not args.get("no_sdpa_hijack", False):
+if not params["no_sdpa_hijack"].value:
     if "AMD" in torch.cuda.get_device_name() or "Radeon" in torch.cuda.get_device_name():
         try:
             from flash_attn import flash_attn_func
@@ -342,7 +350,7 @@ class SmartSigint:
 
 torch.set_grad_enabled(False)
 torch.set_float32_matmul_precision("high")
-dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[args["dtype"]]
+dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[params["dtype"].value]
 if "cascade" in params["model"].value and dtype == torch.float16:
     dtype = torch.bfloat16
 # TORCH }}}
@@ -384,25 +392,25 @@ pipe_params = signature(pipe).parameters
 
 pipe.safety_checker = None
 pipe.watermarker = None
-if args["offload"] == "model":
+if params["offload"].value == "model":
     pipe.enable_model_cpu_offload()
-elif args["offload"] == "sequential":
+elif params["offload"].value == "sequential":
     pipe.enable_sequential_cpu_offload()
 else:
     pipe = pipe.to("cuda")
 # PIPE }}}
 
 # ATTENTION {{{
-if not args.get("compile", False):
+if not params["compile"].value:
     processor = None
-    if subquad_processor is not None and args["attention"] == "subquad":
+    if subquad_processor is not None and params["attention"].value == "subquad":
         processor = subquad_processor(query_chunk_size=2**12, kv_chunk_size=2**15)
-    elif args["attention"] == "rocm_flash":
+    elif params["attention"].value == "rocm_flash":
         if rocm_flash_processor is not None:
             processor = rocm_flash_processor()
         else:
             print('\n Attention Processor "rocm_flash" not available.\n')
-    elif args["attention"] == "sdp":
+    elif params["attention"].value == "sdp":
         processor = AttnProcessor2_0()
 
     for id, item in [("pipe", pipe)] + [
@@ -420,13 +428,13 @@ if not args.get("compile", False):
         if item is not None:
             if hasattr(item, "set_attn_processor") and processor is not None:
                 item.set_attn_processor(processor)
-            elif hasattr(item, "set_default_attn_processor") and args["attention"] == "default":
+            elif hasattr(item, "set_default_attn_processor") and params["attention"].value == "default":
                 item.set_default_attn_processor()
 
 # }}}
 
 # COMPILE {{{
-if args.get("compile", False):
+if params["compile"].value:
     if hasattr(pipe, "unet"):
         pipe.unet = torch.compile(pipe.unet)
     if hasattr(pipe, "transformer"):
@@ -478,9 +486,9 @@ else:
 
 # VAE {{{
 if hasattr(pipe, "vae"):
-    if XL and args.get("xl_vae", False):
+    if XL and params["xl_vae"].value:
         pipe.vae = AutoencoderKL.from_pretrained("stabilityai/sdxl-vae", torch_dtype=pipe.vae.dtype, use_safetensors=True).to(pipe.vae.device)
-    if args.get("tile", False):
+    if params["tile"].value:
         pipe.vae.enable_tiling()
     else:
         pipe.vae.enable_slicing()
@@ -752,10 +760,10 @@ for kwargs in jobs:
                 del kwargs[k]
 
         for n, image in enumerate(pipe(**kwargs).images):
-            p = args["output"].joinpath(f"{filenum:05}.png")
+            p = params["output"].value.joinpath(f"{filenum:05}.png")
             while p.exists():
                 filenum += 1
-                p = args["output"].joinpath(f"{filenum:05}.png")
+                p = params["output"].value.joinpath(f"{filenum:05}.png")
             pnginfo = PngImagePlugin.PngInfo()
             for k, v in meta.items():
                 pnginfo.add_text(k, str(v))
