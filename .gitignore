@@ -1,4 +1,5 @@
 *.json
+*.toml
 *.png
 *.latent
 checkpoints
