@@ -104,6 +104,10 @@ class QDParam:
         if isinstance(new, list):
             if len(new) == 0:
                 new = None
+        if self.choices and new is not None:
+            for v in new if isinstance(new, list) else [new]:
+                if v not in self.choices:
+                    raise ValueError(f'Parameter "{self.name}" value "{v}" must be one of "{self.choices}"')
         if (
             isinstance(new, self.typing)
             or new is None
