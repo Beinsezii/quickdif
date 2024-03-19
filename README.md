@@ -7,7 +7,7 @@ Quick and easy CLI inference that just works™ for a variety of Diffusers model
   - Iterate over parameters like prompt or CFG
   - Some more advanced tweaks like multi-Lora, colored latents, and variance masks
   - Extremely small 1-shot script using `accelerate` for hot loading models
-  - Just works™; not broken
+  - Load settings from JSON, TOML, PNG
 
 ## Not Including
   - ControlNet + other Stable Diffusion extensions
@@ -62,6 +62,12 @@ You must have a recent Python version installed, at least 3.10+. In essence you 
 > ./quickdif.sh "underwater photograph of a dark cave full of bioluminescent glowing mushrooms" -g 9.0 -s 30 -C black -c 0.8
 # Compile for a long job
 > ./quickdif.sh $(cat prompts.txt) --compile
+# Export favorite settings to the defaults JSON
+> ./quickdif.sh -m "stabilityai/stable-cascade" -s 20 -n "blurry, noisy, cropped" --json ./quickdif.json
+# Save a style to a custom JSON
+> ./quickdif.sh "fantasy artwork of a kitten wearing gothic plate armor" -g 10 -G 0.5 --json ./epic_kitten.json
+# Merge multiple configs
+> ./quickdif.sh -I underwater_cave.png epic_kitten.json
 ```
 
 ## F.A.Q.
