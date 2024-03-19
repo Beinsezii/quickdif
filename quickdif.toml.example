@@ -1,0 +1,22 @@
+# vi:ft=toml
+# 
+# Example TOML config for quickdif.
+# Rename to `quickdif.toml` or create your own to set new defaults
+# Alternatively you can load this file or other tomls/jsons directly with -I / --include
+
+# Set some simple values
+model = "stabilityai/stable-cascade"
+negative = "blurry, noisy, cropped"
+steps = 20
+
+# You can use [] as None/null to unset defaults and use the pipeline defaults
+guidance = []
+
+# System values can be set as well, not just image parameters
+offload = "model"
+
+# Unknown keys are simply ignored
+# foo = 'bar'
+
+# You can set multiple values in a config, though this is not recommended
+# prompt = ["puppy", "kitten"]
