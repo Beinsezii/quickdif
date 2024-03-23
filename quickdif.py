@@ -129,6 +129,7 @@ params = [
     QDParam("steps", int, short="-s", long="--steps", value=30, multi=True, meta=True),
     QDParam("decoder_steps", int, short="-ds", long="--decoder-steps", value=-8, multi=True, meta=True),
     QDParam("guidance", float, short="-g", long="--guidance", value=5.0, multi=True, meta=True),
+    QDParam("decoder_guidance", float, short="-dg", long="--decoder-guidance", multi=True, meta=True),
     QDParam("rescale", float, short="-G", long="--rescale", value=0.0, multi=True, meta=True),
     QDParam("denoise", float, short="-d", long="--denoise", multi=True, meta=True),
     QDParam("noise_type", str, short="-nt", long="--noise-type", choices=noise_types, value="cpu32", multi=True, meta=True),
@@ -795,6 +796,7 @@ for kwargs in jobs:
             ("denoise", ["strength"]),
             ("negative", ["negative_prompt"]),
             ("guidance", ["guidance_scale", "prior_guidance_scale"]),
+            ("decoder_guidance", ["decoder_guidance_scale"]),
             ("rescale", ["guidance_rescale"]),
         ]:
             if f in kwargs:
