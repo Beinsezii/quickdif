@@ -11,6 +11,7 @@ from typing import Any
 
 import tomllib
 import tqdm
+import numpy as np
 from PIL import Image, PngImagePlugin
 
 # LATENT COLORS {{{
@@ -138,6 +139,8 @@ params = [
     QDParam("color_power", float, short="-c", long="--color-power", multi=True, meta=True),
     QDParam("variance_scale", int, short="-vs", long="--variance-scale", value=2, multi=True, meta=True),
     QDParam("variance_power", float, short="-vp", long="--variance-power", multi=True, meta=True),
+    QDParam("pixelate", float, long="--pixelate", multi=True, meta=True, help="Pixelate image using a divisor. Best used with a pixel art Lora"),
+    QDParam("posterize", int, long="--posterize", multi=True, meta=True, help="Set amount of colors per channel. Best used with --pixelate"),
     QDParam("sampler", str, short="-S", long="--sampler", choices=samplers, value="default", multi=True, meta=True),
     QDParam("spacing", str, long="--spacing", choices=spacings, value="trailing", multi=True, meta=True),
     ### Global
@@ -667,12 +670,16 @@ if params["height"].value:
 i32max = 2**31 - 1
 seeds = [torch.randint(high=i32max, low=-i32max, size=(1,)).item()] if not params["seed"].value else params["seed"].value
 jobs = [jobs | {"seed": s + n * params["batch_size"].value} for n in range(params["batch_count"].value) for s in seeds]
+image_ops = [{}]
 
 for param in params.values():
     if param.multi:
         match param.name:
             case "seed" | "sampler" | "spacing" | "lora":
                 pass
+            case "pixelate" | "posterize":
+                if param.value:
+                    image_ops = [o | {param.name: v} for o in image_ops for v in param.value]
             case other:
                 if param.value:
                     jobs = [j | {param.name: v} for j in jobs for v in param.value]
@@ -810,10 +817,6 @@ for kwargs in jobs:
                 del kwargs[k]
 
         for n, image in enumerate(pipe(**kwargs).images):
-            p = params["output"].value.joinpath(f"{filenum:05}.png")
-            while p.exists():
-                filenum += 1
-                p = params["output"].value.joinpath(f"{filenum:05}.png")
             pnginfo = PngImagePlugin.PngInfo()
             for k, v in meta.items():
                 pnginfo.add_text(k, str(v))
@@ -821,7 +824,31 @@ for kwargs in jobs:
                 pnginfo.add_text("seed", str(seed + n))
             else:
                 pnginfo.add_text("seed", f"{seed} + {n}")
-            image.save(p, format="PNG", pnginfo=pnginfo, compress_level=4)
+
+            for ops in image_ops:
+                i = image.copy()
+                info = copy(pnginfo)
+                for k, v in ops.items():
+                    info.add_text(k, str(v))
+                p = params["output"].value.joinpath(f"{filenum:05}.png")
+                while p.exists():
+                    filenum += 1
+                    p = params["output"].value.joinpath(f"{filenum:05}.png")
+
+                if ops.get("posterize", None) is not None:
+                    if ops["posterize"] > 1:
+                        arr = np.asarray(i).astype(np.float32)
+                        factor = (ops["posterize"] - 1) / 256
+                        i.frombytes(((arr * factor).round() / factor).clip(0, 255).astype(np.uint8).tobytes())
+
+                if ops.get("pixelate", None):
+                    if ops["pixelate"] > 1:
+                        w, h = i.width, i.height
+                        i = i.resize((math.ceil(w / ops["pixelate"]), math.ceil(h / ops["pixelate"])), resample=Image.BOX)
+                        i = i.resize((w, h), resample=Image.NEAREST)
+
+                i.save(p, format="PNG", pnginfo=info, compress_level=4)
+
         if bar:
             bar.update(params["batch_size"].value)
         # PROCESS }}}
