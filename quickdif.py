@@ -844,7 +844,7 @@ for kwargs in jobs:
                 if ops.get("pixelate", None):
                     if ops["pixelate"] > 1:
                         w, h = i.width, i.height
-                        i = i.resize((math.ceil(w / ops["pixelate"]), math.ceil(h / ops["pixelate"])), resample=Image.BOX)
+                        i = i.resize((round(w / ops["pixelate"]), round(h / ops["pixelate"])), resample=Image.BOX)
                         i = i.resize((w, h), resample=Image.NEAREST)
 
                 i.save(p, format="PNG", pnginfo=info, compress_level=4)
