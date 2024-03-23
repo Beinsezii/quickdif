@@ -9,9 +9,9 @@ from pathlib import Path
 from sys import exit
 from typing import Any
 
+import numpy as np
 import tomllib
 import tqdm
-import numpy as np
 from PIL import Image, PngImagePlugin
 
 # LATENT COLORS {{{
@@ -826,7 +826,7 @@ for kwargs in jobs:
                 pnginfo.add_text("seed", f"{seed} + {n}")
 
             for ops in image_ops:
-                i = image.copy()
+                i = image
                 info = copy(pnginfo)
                 for k, v in ops.items():
                     info.add_text(k, str(v))
@@ -838,8 +838,8 @@ for kwargs in jobs:
                 if ops.get("posterize", None) is not None:
                     if ops["posterize"] > 1:
                         arr = np.asarray(i).astype(np.float32)
-                        factor = (ops["posterize"] - 1) / 256
-                        i.frombytes(((arr * factor).round() / factor).clip(0, 255).astype(np.uint8).tobytes())
+                        factor = float((ops["posterize"] - 1) / 256)
+                        i = Image.fromarray(((arr * factor).round() / factor).clip(0, 255).astype(np.uint8), mode=i.mode)
 
                 if ops.get("pixelate", None):
                     if ops["pixelate"] > 1:
