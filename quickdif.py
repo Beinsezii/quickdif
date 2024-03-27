@@ -420,8 +420,8 @@ if not params["no_sdpa_hijack"].value:
         print(f"# # #\nCould not detect AMD GPU from:\n{torch.cuda.get_device_name()}\n# # #")
 
 import transformers  # noqa: E402
+from compel import Compel, ReturnedEmbeddingsType  # noqa: E402
 
-from attn_custom import SubQuadraticCrossAttnProcessor as subquad_processor  # noqa: E402
 from diffusers import (  # noqa: E402
     AutoencoderKL,
     AutoPipelineForImage2Image,
@@ -441,10 +441,14 @@ from diffusers import (  # noqa: E402
 from diffusers.models.attention_processor import AttnProcessor2_0  # noqa: E402
 
 try:
+    from attn_custom import SubQuadraticCrossAttnProcessor as subquad_processor
+except ImportError:
+    subquad_processor = None
+
+try:
     from attn_custom import FlashAttnProcessor as rocm_flash_processor
 except ImportError:
     rocm_flash_processor = None
-from compel import Compel, ReturnedEmbeddingsType  # noqa: E402
 
 
 # elegent solution from <https://stackoverflow.com/questions/842557/>
