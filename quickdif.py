@@ -748,6 +748,19 @@ if params["height"].value:
 jobs = [job]
 image_ops = [{}]
 
+# hack to make sure large expands dont delete themselves
+expand_keys = ["prompt", "negative"]
+non_expand_total = (
+    functools.reduce(lambda x, y: x * y, [len(p.value) for p in params.values() if p.multi and p.value is not None and p.name not in expand_keys])
+    * params["batch_count"].value
+)
+if params["shuffle"].value:
+    for key in expand_keys:
+        if len(params[key].value) > non_expand_total**2:
+            print(f"Downsampling '{key}' from {len(params[key].value)} to {non_expand_total ** 2}")
+            params[key].value = random.sample(params[key].value, non_expand_total**2)
+
+
 for param in params.values():
     if param.multi:
         match param.name:
