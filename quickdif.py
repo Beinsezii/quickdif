@@ -476,7 +476,7 @@ class SmartSigint:
         if self.received and callable(self.old_handler):
             self.old_handler(*self.received)
 
-    def __exit__(self, _type, _value, _traceback):
+    def __exit__(self, *_):
         self.terminate()
 
 
