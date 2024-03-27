@@ -2,6 +2,7 @@
 *.toml
 *.png
 *.latent
+*.tar*
 checkpoints
 comments
 diffusers
