@@ -337,7 +337,7 @@ args = {k: v for k, v in args.items() if k not in params}
 if args.get("json", None) is not None:
     dump = {}
     for k, v in params.items():
-        if v.value != v.default and not (v.value is False and v.typing is bool):
+        if v.value != v.default:
             v = v.value
             if isinstance(v, Path):
                 v = str(v)
