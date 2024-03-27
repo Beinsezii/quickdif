@@ -18,6 +18,7 @@ from PIL import Image, PngImagePlugin
 
 
 # FUNCTIONS {{{
+# pexpand {{{
 @functools.cache
 def pexpand_get_bounds(string: str, body: Tuple[str, str]) -> None | Tuple[int, int]:
     start = len(string) + 1
@@ -77,6 +78,15 @@ def pexpand(prompt: str, body: Tuple[str, str] = ("{", "}"), sep: str = "|") -> 
     results[:] = dict.fromkeys(results)
 
     return [result.replace("\\\\", "\x1a").replace("\\", "").replace("\x1a", "\\") for result in results]
+
+
+# }}}
+def oversample(population: list, k: int):
+    samples = []
+    while len(samples) < k:
+        samples += random.sample(population, min(len(population), k - len(samples)))
+    assert len(samples) == k
+    return samples
 
 
 # }}}
@@ -745,21 +755,14 @@ if params["width"].value:
 if params["height"].value:
     job["height"] = params["height"].value
 
-jobs = [job]
-image_ops = [{}]
-
-# hack to make sure large expands dont delete themselves
-expand_keys = ["prompt", "negative"]
-non_expand_total = (
-    functools.reduce(lambda x, y: x * y, [len(p.value) for p in params.values() if p.multi and p.value is not None and p.name not in expand_keys])
-    * params["batch_count"].value
-)
 if params["shuffle"].value:
-    for key in expand_keys:
-        if len(params[key].value) > non_expand_total**2:
-            print(f"Downsampling '{key}' from {len(params[key].value)} to {non_expand_total ** 2}")
-            params[key].value = random.sample(params[key].value, non_expand_total**2)
+    jobs = [job] * params["batch_count"].value
+    merger = lambda items, name, vals: [i | {name: v} for i, v in zip(items, oversample(vals, len(items)))]  # noqa: E731
+else:
+    jobs = [job]
+    merger = lambda items, name, vals: [i | {name: v} for i in items for v in vals]  # noqa: E731
 
+image_ops = [{}]
 
 for param in params.values():
     if param.multi:
@@ -768,28 +771,23 @@ for param in params.values():
                 pass
             case "pixelate" | "posterize":
                 if param.value:
-                    image_ops = [o | {param.name: v} for o in image_ops for v in param.value]
+                    image_ops = merger(image_ops, param.name, param.value)
             case other:
                 if param.value:
-                    jobs = [j | {param.name: v} for j in jobs for v in param.value]
+                    jobs = merger(jobs, param.name, param.value)
 
 if schedulers:
-    jobs = [j | {"scheduler": s} for j in jobs for s in schedulers]
+    jobs = merger(jobs, "scheduler", schedulers)
 
 i32max = 2**31 - 1
 seeds = [torch.randint(high=i32max, low=-i32max, size=(1,)).item()] if not params["seed"].value else params["seed"].value
-if params["walk"].value:
-    jobs = [
-        j | {"seed": s + c * params["batch_size"].value + (n * params["batch_size"].value * params["batch_count"].value)}
-        for c in range(params["batch_count"].value)
-        for s in seeds
-        for n, j in enumerate(jobs)
-    ]
-else:
-    jobs = [j | {"seed": s + c * params["batch_size"].value} for c in range(params["batch_count"].value) for s in seeds for j in jobs]
-
+seeds = [s + c * params["batch_size"].value for c in range(params["batch_count"].value) for s in seeds]
 if params["shuffle"].value:
-    jobs = random.sample(jobs, params["batch_count"].value)
+    jobs = merger(jobs, "seed", seeds)
+elif params["walk"].value:
+    jobs = [j | {"seed": s + (n * params["batch_size"].value * params["batch_count"].value)} for s in seeds for n, j in enumerate(jobs)]
+else:
+    jobs = [j | {"seed": s} for s in seeds for j in jobs]
 
 if __name__ != "__main__":  # TODO: this is a hack, pipe shouldn't even be loaded.
     jobs = []
