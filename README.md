@@ -5,7 +5,7 @@ Quick and easy CLI inference that just works™ for a variety of Diffusers model
   - Verified working with Stable Diffusion (1.5/2.1/XL Base), Stable Cascade/Wuerstchen, Kandinsky22, Pixart
   - Supports many common settings found in GUIs
   - Iterate over parameters like prompt or CFG
-  - Expand prompts with `{brace|syntax}`
+  - Expand prompts with `photo of {all|of|these}` or `photo of [one|of|these]`
   - Some more advanced tweaks like multi-Lora, colored latents, and variance masks
   - Extremely small 1-shot script using `accelerate` for hot loading models
   - Load settings from JSON, TOML, PNG
