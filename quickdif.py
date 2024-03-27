@@ -7,12 +7,84 @@ from inspect import signature
 from io import BytesIO
 from pathlib import Path
 from sys import exit
-from typing import Any
+from typing import Any, List, Tuple
 
 import numpy as np
 import tomllib
 import tqdm
 from PIL import Image, PngImagePlugin
+
+
+# FUNCTIONS {{{
+def unescape(string) -> str:
+    result = ""
+    escape = False
+    for c in string:
+        if escape:
+            result += c
+            escape = False
+        elif c == "\\":
+            escape = True
+        else:
+            result += c
+    return result
+
+
+def pexpand_get_bounds(string: str, body: Tuple[str, str]) -> None | Tuple[int, int]:
+    start = len(string) + 1
+    end = 0
+    escape = False
+    for n, c in enumerate(string):
+        if escape:
+            escape = False
+            continue
+        elif c == "\\":
+            escape = True
+            continue
+        elif c == body[0]:
+            start = n
+        elif c == body[1]:
+            end = n
+        if end > start:
+            return (start, end)
+    return None
+
+
+def pexpand(prompt: str, body: Tuple[str, str] = ("{", "}"), sep: str = "|") -> List[str]:
+    results = [prompt]
+    bounds = pexpand_get_bounds(prompt, body)
+    # Split first body; first close after last open
+    if bounds is not None:
+        prefix = prompt[: bounds[0]]
+        suffix = prompt[bounds[1] + 1 :]
+        values = []
+        current = ""
+        escape = False
+        for c in prompt[bounds[0] + 1 : bounds[1]]:
+            if escape:
+                current += c
+                escape = False
+                continue
+            elif c == "\\":
+                escape = True
+            if c == sep and not escape:
+                values.append(current)
+                current = ""
+            else:
+                current += c
+        values.append(current)
+        results = [prefix + v + suffix for v in values]
+
+    # Recurse on unexpanded bodies
+    for res in results:
+        if pexpand_get_bounds(res, body) is not None:
+            results = list(dict.fromkeys([r for res in [pexpand(r, body, sep) for r in results] for r in res]))
+            break
+
+    return [unescape(result) for result in results]
+
+
+# }}}
 
 # LATENT COLORS {{{
 COLS_XL = {
@@ -276,6 +348,10 @@ if args.get("json", None) is not None:
     s = json.dumps(dump)
     args["json"].write(s.encode())
     exit()
+
+for key in "prompt", "negative":
+    if params[key].value is not None:
+        params[key].value = [expanded for nested in [pexpand(p) for p in params[key].value] for expanded in nested]
 
 if args.get("print", False):
     print("\n".join([f"{p.name}: {p.value}" for p in params.values()]))
@@ -686,6 +762,9 @@ for param in params.values():
 
 if schedulers:
     jobs = [j | {"scheduler": s} for j in jobs for s in schedulers]
+
+if __name__ != "__main__":  # TODO: this is a hack, pipe shouldn't even be loaded.
+    jobs = []
 
 # INPUT ARGS }}}
 
