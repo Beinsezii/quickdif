@@ -1,7 +1,8 @@
-import random
 import argparse
+import functools
 import json
 import math
+import random
 import signal
 from copy import copy
 from inspect import signature
@@ -17,20 +18,7 @@ from PIL import Image, PngImagePlugin
 
 
 # FUNCTIONS {{{
-def unescape(string) -> str:
-    result = ""
-    escape = False
-    for c in string:
-        if escape:
-            result += c
-            escape = False
-        elif c == "\\":
-            escape = True
-        else:
-            result += c
-    return result
-
-
+@functools.cache
 def pexpand_get_bounds(string: str, body: Tuple[str, str]) -> None | Tuple[int, int]:
     start = len(string) + 1
     end = 0
@@ -51,8 +39,8 @@ def pexpand_get_bounds(string: str, body: Tuple[str, str]) -> None | Tuple[int, 
     return None
 
 
+@functools.cache
 def pexpand(prompt: str, body: Tuple[str, str] = ("{", "}"), sep: str = "|") -> List[str]:
-    results = [prompt]
     bounds = pexpand_get_bounds(prompt, body)
     # Split first body; first close after last open
     if bounds is not None:
@@ -75,14 +63,20 @@ def pexpand(prompt: str, body: Tuple[str, str] = ("{", "}"), sep: str = "|") -> 
                 current += c
         values.append(current)
         results = [prefix + v + suffix for v in values]
+    else:
+        results = [prompt]
 
     # Recurse on unexpanded bodies
-    for res in results:
-        if pexpand_get_bounds(res, body) is not None:
-            results = list(dict.fromkeys([r for res in [pexpand(r, body, sep) for r in results] for r in res]))
-            break
+    results, iter = [], results
+    for result in iter:
+        if pexpand_get_bounds(result, body) is None:
+            results.append(result)
+        else:
+            results += pexpand(result, body, sep)
 
-    return [unescape(result) for result in results]
+    results[:] = dict.fromkeys(results)
+
+    return [result.replace("\\\\", "\x1a").replace("\\", "").replace("\x1a", "\\") for result in results]
 
 
 # }}}
