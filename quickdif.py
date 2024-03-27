@@ -278,7 +278,7 @@ parser.add_argument("-i", "--input", type=argparse.FileType(mode="rb"), help="In
 parser.add_argument(
     "-I", "--include", type=argparse.FileType(mode="rb"), nargs="*", help="Include parameters from another image. Only works with quickdif images"
 )
-parser.add_argument("--json", type=argparse.FileType(mode="wb"), help="Output settings to JSON")
+parser.add_argument("--json", type=argparse.FileType(mode="r+b"), help="Output settings to JSON")
 # parser.add_argument("--toml", type=argparse.FileType(mode="wb"), help="Output settings to TOML")
 parser.add_argument("--comment", type=str, help="Add a comment to the image.")
 parser.add_argument("--print", action="store_true", help="Print out generation params and exit.")
@@ -343,6 +343,7 @@ if args.get("json", None) is not None:
                 v = str(v)
             dump[k] = v
     s = json.dumps(dump)
+    args["json"].truncate()
     args["json"].write(s.encode())
     exit()
 
