@@ -1,3 +1,4 @@
+import random
 import argparse
 import json
 import math
@@ -222,6 +223,8 @@ params = [
     QDParam("lora", str, short="-l", long="--lora", help='Apply Loras, ex. "ms_paint.safetensors:::0.6"', meta=True, multi=True),
     QDParam("batch_count", int, short="-b", long="--batch-count", value=1),
     QDParam("batch_size", int, short="-B", long="--batch-size", value=1),
+    QDParam("walk", bool, long="--walk", help="Iterate/walk seeds on duplicate params instead of copying"),
+    QDParam("shuffle", bool, long="--shuffle", help="Pick randomly from duplicate params instead of running all variants"),
     ### System
     QDParam("output", Path, short="-o", long="--output", value=out, help="Output directory for images"),
     QDParam("dtype", str, short="-D", long="--dtype", value="fp16", choices=dtypes, help="Data format for inference"),
@@ -735,7 +738,7 @@ if input_image is None:
 # INPUT TENSOR }}}
 
 # INPUT ARGS {{{
-jobs = {
+job = {
     "num_images_per_prompt": params["batch_size"].value,
     "clean_caption": False,  # stop IF nag. what does this even do
 }
@@ -743,13 +746,11 @@ jobs = {
 if not params["negative"].value:
     params["negative"].value = [""]
 if params["width"].value:
-    jobs["width"] = params["width"].value
+    job["width"] = params["width"].value
 if params["height"].value:
-    jobs["height"] = params["height"].value
+    job["height"] = params["height"].value
 
-i32max = 2**31 - 1
-seeds = [torch.randint(high=i32max, low=-i32max, size=(1,)).item()] if not params["seed"].value else params["seed"].value
-jobs = [jobs | {"seed": s + n * params["batch_size"].value} for n in range(params["batch_count"].value) for s in seeds]
+jobs = [job]
 image_ops = [{}]
 
 for param in params.values():
@@ -766,6 +767,21 @@ for param in params.values():
 
 if schedulers:
     jobs = [j | {"scheduler": s} for j in jobs for s in schedulers]
+
+i32max = 2**31 - 1
+seeds = [torch.randint(high=i32max, low=-i32max, size=(1,)).item()] if not params["seed"].value else params["seed"].value
+if params["walk"].value:
+    jobs = [
+        j | {"seed": s + c * params["batch_size"].value + (n * params["batch_size"].value * params["batch_count"].value)}
+        for c in range(params["batch_count"].value)
+        for s in seeds
+        for n, j in enumerate(jobs)
+    ]
+else:
+    jobs = [j | {"seed": s + c * params["batch_size"].value} for c in range(params["batch_count"].value) for s in seeds for j in jobs]
+
+if params["shuffle"].value:
+    jobs = random.sample(jobs, params["batch_count"].value)
 
 if __name__ != "__main__":  # TODO: this is a hack, pipe shouldn't even be loaded.
     jobs = []
