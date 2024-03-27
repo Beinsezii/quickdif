@@ -20,7 +20,7 @@ from PIL import Image, PngImagePlugin
 # FUNCTIONS {{{
 # pexpand {{{
 @functools.cache
-def pexpand_get_bounds(string: str, body: Tuple[str, str]) -> None | Tuple[int, int]:
+def _pexpand_bounds(string: str, body: Tuple[str, str]) -> None | Tuple[int, int]:
     start = len(string) + 1
     end = 0
     escape = False
@@ -40,9 +40,8 @@ def pexpand_get_bounds(string: str, body: Tuple[str, str]) -> None | Tuple[int, 
     return None
 
 
-@functools.cache
-def pexpand(prompt: str, body: Tuple[str, str] = ("{", "}"), sep: str = "|") -> List[str]:
-    bounds = pexpand_get_bounds(prompt, body)
+def _pexpand(prompt: str, body: Tuple[str, str] = ("{", "}"), sep: str = "|", single: bool = False) -> List[str]:
+    bounds = _pexpand_bounds(prompt, body)
     # Split first body; first close after last open
     if bounds is not None:
         prefix = prompt[: bounds[0]]
@@ -63,6 +62,8 @@ def pexpand(prompt: str, body: Tuple[str, str] = ("{", "}"), sep: str = "|") -> 
             else:
                 current += c
         values.append(current)
+        if single:
+            values = [random.choice(values)]
         results = [prefix + v + suffix for v in values]
     else:
         results = [prompt]
@@ -70,14 +71,29 @@ def pexpand(prompt: str, body: Tuple[str, str] = ("{", "}"), sep: str = "|") -> 
     # Recurse on unexpanded bodies
     results, iter = [], results
     for result in iter:
-        if pexpand_get_bounds(result, body) is None:
+        if _pexpand_bounds(result, body) is None:
             results.append(result)
         else:
-            results += pexpand(result, body, sep)
+            results += pexpand(result, body, sep, single)
+
+    if single:
+        results = [random.choice(results)]
 
     results[:] = dict.fromkeys(results)
 
     return [result.replace("\\\\", "\x1a").replace("\\", "").replace("\x1a", "\\") for result in results]
+
+
+@functools.cache
+def _pexpand_cache(*args, **kwargs):
+    return _pexpand(*args, **kwargs)
+
+
+def pexpand(prompt: str, body: Tuple[str, str] = ("{", "}"), sep: str = "|", single: bool = False) -> List[str]:
+    if single:
+        return _pexpand(prompt, body, sep, single)
+    else:
+        return _pexpand_cache(prompt, body, sep, single)
 
 
 # }}}
@@ -792,6 +808,13 @@ elif params["walk"].value:
     jobs = [j | {"seed": s + (n * params["batch_size"].value * params["batch_count"].value)} for s in seeds for n, j in enumerate(jobs)]
 else:
     jobs = [j | {"seed": s} for s in seeds for j in jobs]
+
+for j in jobs:
+    for key in "prompt", "negative":
+        if key in j:
+            expands = pexpand(j[key], body=("[", "]"), single=True)
+            assert len(expands) == 1
+            j[key] = expands[0]
 
 if __name__ != "__main__":  # TODO: this is a hack, pipe shouldn't even be loaded.
     jobs = []
