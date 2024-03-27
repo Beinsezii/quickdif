@@ -240,7 +240,7 @@ params = [
     QDParam("compile", bool, long="--compile", help="Compile unet with torch.compile()"),
     QDParam("tile", bool, long="--tile", help="Tile VAE"),
     QDParam("xl_vae", bool, long="--xl-vae", help="Override the SDXL VAE. Useful for models with broken vae."),
-    QDParam("no_sdpa_hijack", bool, long="--no-sdpa-hijack", help="Do not monkey patch the torch SDPA function on AMD cards."),
+    QDParam("disable_amd_patch", bool, long="--disable-amd-patch", help="Do not monkey patch the torch SDPA function on AMD cards."),
 ]
 params = {param.name: param for param in params}
 # QDPARAMS }}}
@@ -266,7 +266,7 @@ for param in params.values():
         kwargs["help"] = help
 
     if param.typing == bool and param.multi is False:
-        kwargs["action"] = "store_true"
+        kwargs["action"] = argparse.BooleanOptionalAction
     else:
         kwargs["type"] = param.typing
 
@@ -385,7 +385,7 @@ if args.get("comment", ""):
 # Load Torch and libs that depend on it after the CLI cause it's laggy.
 import torch  # noqa: E402
 
-if not params["no_sdpa_hijack"].value:
+if not params["disable_amd_patch"].value:
     if "AMD" in torch.cuda.get_device_name() or "Radeon" in torch.cuda.get_device_name():
         try:
             from flash_attn import flash_attn_func
