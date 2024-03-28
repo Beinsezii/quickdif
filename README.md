@@ -20,7 +20,9 @@ Quick and easy CLI inference that just works™ for a variety of Diffusers model
   - 1-click installer
 
 ## Installation
-You must have a recent Python version installed, at least 3.10+. In essence you just need to install `requirements.txt` for your environment of choice.
+You must have a recent Python version installed, at least 3.11+.
+
+In essence you just need to install the pip packages from `requirements.txt` to your environment of choice, then you can run the quickdif script
 
 #### Basic setup
 ```sh
