@@ -329,7 +329,7 @@ params = [
     ),
     QDParam(
         "noise_power",
-        str,
+        float,
         short="-np",
         long="--noise-power",
         multi=True,
