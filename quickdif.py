@@ -134,6 +134,7 @@ COLS_FTMSE = {
 # QDPARAMS {{{
 
 
+# Enums {{{
 @enum.unique
 class Iter(enum.StrEnum):
     Basic = enum.auto()
@@ -261,35 +262,155 @@ class QDParam:
                 self._value = self.typing(new)
 
 
+# }}}
+
+
+# Parameters {{{
 params = [
     ### Batching
-    QDParam("prompt", str, multi=True, meta=True),
-    QDParam("negative", str, short="-n", long="--negative", multi=True, meta=True),
-    QDParam("seed", int, short="-e", long="--seed", multi=True, meta=True),
-    QDParam("steps", int, short="-s", long="--steps", value=30, multi=True, meta=True),
-    QDParam("decoder_steps", int, short="-ds", long="--decoder-steps", value=-8, multi=True, meta=True),
-    QDParam("guidance", float, short="-g", long="--guidance", value=5.0, multi=True, meta=True),
-    QDParam("decoder_guidance", float, short="-dg", long="--decoder-guidance", multi=True, meta=True),
-    QDParam("rescale", float, short="-G", long="--rescale", value=0.0, multi=True, meta=True),
-    QDParam("denoise", float, short="-d", long="--denoise", multi=True, meta=True),
-    QDParam("noise_type", NoiseType, short="-nt", long="--noise-type", value=NoiseType.Cpu32, multi=True, meta=True),
-    QDParam("noise_power", str, short="-np", long="--noise-power", multi=True, meta=True),
-    QDParam("color", LatentColor, short="-C", long="--color", value=LatentColor.Black, multi=True, meta=True),
-    QDParam("color_power", float, short="-c", long="--color-power", multi=True, meta=True),
-    QDParam("variance_scale", int, short="-vs", long="--variance-scale", value=2, multi=True, meta=True),
-    QDParam("variance_power", float, short="-vp", long="--variance-power", multi=True, meta=True),
+    QDParam("prompt", str, multi=True, meta=True, help="Positive prompt"),
+    QDParam("negative", str, short="-n", long="--negative", multi=True, meta=True, help="Negative prompt"),
+    QDParam("seed", int, short="-e", long="--seed", multi=True, meta=True, help="Seed for RNG"),
+    QDParam(
+        "steps",
+        int,
+        short="-s",
+        long="--steps",
+        value=30,
+        multi=True,
+        meta=True,
+        help="Amount of denoising steps. Prior/Decoder models this only affects the Prior",
+    ),
+    QDParam(
+        "decoder_steps",
+        int,
+        short="-ds",
+        long="--decoder-steps",
+        value=-8,
+        multi=True,
+        meta=True,
+        help="Amount of denoising steps for the Decoder if applicable",
+    ),
+    QDParam(
+        "guidance",
+        float,
+        short="-g",
+        long="--guidance",
+        value=5.0,
+        multi=True,
+        meta=True,
+        help="CFG/Classier-Free Guidance. Will guide diffusion more strongly towards the prompts. High values will produce unnatural images",
+    ),
+    QDParam(
+        "decoder_guidance", float, short="-dg", long="--decoder-guidance", multi=True, meta=True, help="Guidance for the Decoder stage if applicable"
+    ),
+    QDParam(
+        "rescale",
+        float,
+        short="-G",
+        long="--rescale",
+        value=0.0,
+        multi=True,
+        meta=True,
+        help="Rescale the noise during guidance. Moderate values may help produce more natural images when using strong guidance",
+    ),
+    QDParam(
+        "denoise", float, short="-d", long="--denoise", multi=True, meta=True, help="Denoising amount for Img2Img. Higher values will change more"
+    ),
+    QDParam(
+        "noise_type",
+        NoiseType,
+        short="-nt",
+        long="--noise-type",
+        value=NoiseType.Cpu32,
+        multi=True,
+        meta=True,
+        help="Device and precision to source RNG from. To reproduce seeds from other diffusion programs it may be necessary to change this",
+    ),
+    QDParam(
+        "noise_power",
+        str,
+        short="-np",
+        long="--noise-power",
+        multi=True,
+        meta=True,
+        help="Multiplier to the initial latent noise if applicable. <1 for smoother, >1 for more details",
+    ),
+    QDParam(
+        "color",
+        LatentColor,
+        short="-C",
+        long="--color",
+        value=LatentColor.Black,
+        multi=True,
+        meta=True,
+        help="Color of initial latent noise if applicable. Currently only for XL and SD-FT-MSE latent spaces",
+    ),
+    QDParam("color_power", float, short="-c", long="--color-power", multi=True, meta=True, help="Power/opacity of colored latent noise"),
+    QDParam(
+        "variance_scale",
+        int,
+        short="-vs",
+        long="--variance-scale",
+        value=2,
+        multi=True,
+        meta=True,
+        help="Amount of 'zones' for variance noise. '2' will make a 2x2 grid or 4 tiles",
+    ),
+    QDParam(
+        "variance_power",
+        float,
+        short="-vp",
+        long="--variance-power",
+        multi=True,
+        meta=True,
+        help="Power/opacity for variance noise. Variance noise simply adds randomly generated colored zones to encourage new compositions on overfitted models",
+    ),
     QDParam("pixelate", float, long="--pixelate", multi=True, meta=True, help="Pixelate image using a divisor. Best used with a pixel art Lora"),
     QDParam("posterize", int, long="--posterize", multi=True, meta=True, help="Set amount of colors per channel. Best used with --pixelate"),
-    QDParam("sampler", Sampler, short="-S", long="--sampler", value=Sampler.Default, multi=True, meta=True),
-    QDParam("spacing", Spacing, long="--spacing", value=Spacing.Trailing, multi=True, meta=True),
+    QDParam(
+        "sampler",
+        Sampler,
+        short="-S",
+        long="--sampler",
+        value=Sampler.Default,
+        multi=True,
+        meta=True,
+        help="""Sampler to use in denoising. Naming scheme is as follows:
+  - euler/ddim/ddpm: As stated
+  - dpm: DPM++
+  - k: Use karras sigmas
+  - s: Use SDE stochastic noise
+  - a: Use ancestral sampling
+  - 2/3: Use 2nd/3rd order sampling
+Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
+    ),
+    QDParam("spacing", Spacing, long="--spacing", value=Spacing.Trailing, multi=True, meta=True, help="Sampler timestep spacing"),
     ### Global
-    QDParam("width", int, short="-w", long="--width"),
-    QDParam("height", int, short="-h", long="--height"),
-    QDParam("model", str, short="-m", long="--model", value="stabilityai/stable-diffusion-xl-base-1.0", meta=True),
-    QDParam("lora", str, short="-l", long="--lora", help='Apply Loras, ex. "ms_paint.safetensors:::0.6"', meta=True, multi=True),
-    QDParam("batch_count", int, short="-b", long="--batch-count", value=1),
-    QDParam("batch_size", int, short="-B", long="--batch-size", value=1),
-    QDParam("iter", Iter, long="--iter", value=Iter.Basic),
+    QDParam("width", int, short="-w", long="--width", help="Output image width"),
+    QDParam("height", int, short="-h", long="--height", help="Output image height"),
+    QDParam(
+        "model",
+        str,
+        short="-m",
+        long="--model",
+        value="stabilityai/stable-diffusion-xl-base-1.0",
+        meta=True,
+        help="Safetensor file or HuggingFace model ID",
+    ),
+    QDParam("lora", str, short="-l", long="--lora", meta=True, multi=True, help='Apply Loras, ex. "ms_paint.safetensors:::0.6"'),
+    QDParam("batch_count", int, short="-b", long="--batch-count", value=1, help="Behavior dependant on 'iter'"),
+    QDParam("batch_size", int, short="-B", long="--batch-size", value=1, help="Amount of images to produce in each job"),
+    QDParam(
+        "iter",
+        Iter,
+        long="--iter",
+        value=Iter.Basic,
+        help="""Controls how jobs are created
+  - 'basic': Run every combination of parameters 'batch_count' times, incrementing seed each 'batch_count'
+  - 'walk': Run every combination of parameters 'batch_count' times, incrementing seed for every individual job
+  - 'shuffle': Pick randomly from all given parameters 'batch_count' times""",
+    ),
     ### System
     QDParam(
         "output",
@@ -299,7 +420,14 @@ params = [
         value=Path("/tmp/quickdif/" if Path("/tmp/").exists() else "./output/"),
         help="Output directory for images",
     ),
-    QDParam("dtype", DType, short="-dt", long="--dtype", value=DType.FP16, help="Data format for inference"),
+    QDParam(
+        "dtype",
+        DType,
+        short="-dt",
+        long="--dtype",
+        value=DType.FP16,
+        help="Data format for inference. Should be left at FP16 unless the device or model does not work properly",
+    ),
     QDParam(
         "offload",
         Offload,
@@ -307,13 +435,14 @@ params = [
         value=Offload.NONE,
         help="Set amount of CPU offload. In most UIs, 'model' is equivalent to --med-vram while 'sequential' is equivalent to --low-vram",
     ),
-    QDParam("attention", Attention, value=Attention.Default, long="--attention"),
-    QDParam("compile", bool, long="--compile", help="Compile unet with torch.compile()"),
-    QDParam("tile", bool, long="--tile", help="Tile VAE"),
-    QDParam("xl_vae", bool, long="--xl-vae", help="Override the SDXL VAE. Useful for models with broken vae."),
-    QDParam("disable_amd_patch", bool, long="--disable-amd-patch", help="Do not monkey patch the torch SDPA function on AMD cards."),
+    QDParam("attention", Attention, value=Attention.Default, long="--attention", help="Select attention processor to use"),
+    QDParam("compile", bool, long="--compile", help="Compile network with torch.compile()"),
+    QDParam("tile", bool, long="--tile", help="Tile VAE. Slicing is already used by default so only set tile if creating very large images"),
+    QDParam("xl_vae", bool, long="--xl-vae", help="Override the SDXL VAE. Useful for models that use the broken 1.0 vae"),
+    QDParam("disable_amd_patch", bool, long="--disable-amd-patch", help="Do not monkey patch the torch SDPA function on AMD cards"),
 ]
 params = {param.name: param for param in params}
+# }}}
 # QDPARAMS }}}
 
 # CLI {{{
