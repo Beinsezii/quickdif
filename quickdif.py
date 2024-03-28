@@ -377,12 +377,12 @@ params = [
         multi=True,
         meta=True,
         help="""Sampler to use in denoising. Naming scheme is as follows:
-  - euler/ddim/ddpm: As stated
-  - dpm: DPM++
-  - k: Use karras sigmas
-  - s: Use SDE stochastic noise
-  - a: Use ancestral sampling
-  - 2/3: Use 2nd/3rd order sampling
+euler/ddim/ddpm - Literal names;
+dpm - DPM++;
+k - Use karras sigmas;
+s - Use SDE stochastic noise;
+a - Use ancestral sampling;
+2/3 - Use 2nd/3rd order sampling;
 Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
     ),
     QDParam("spacing", Spacing, long="--spacing", value=Spacing.Trailing, multi=True, meta=True, help="Sampler timestep spacing"),
@@ -406,10 +406,10 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         Iter,
         long="--iter",
         value=Iter.Basic,
-        help="""Controls how jobs are created
-  - 'basic': Run every combination of parameters 'batch_count' times, incrementing seed each 'batch_count'
-  - 'walk': Run every combination of parameters 'batch_count' times, incrementing seed for every individual job
-  - 'shuffle': Pick randomly from all given parameters 'batch_count' times""",
+        help="""Controls how jobs are created:
+'basic' - Run every combination of parameters 'batch_count' times, incrementing seed each 'batch_count';
+'walk' - Run every combination of parameters 'batch_count' times, incrementing seed for every individual job;
+'shuffle' - Pick randomly from all given parameters 'batch_count' times""",
     ),
     ### System
     QDParam(
