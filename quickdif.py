@@ -514,7 +514,10 @@ if args["include"]:
                 try:
                     for k, v in f(data).items():
                         if k in params:
-                            params[k].value = v
+                            try:
+                                params[k].value = v
+                            except ValueError:
+                                print(f"Config value '{v}' cannot be assigned to parameter '{params[k].name}', ignoring")
                         else:
                             print(f'Unknown key in serial config "{k}"')
                     break
@@ -529,7 +532,10 @@ if args["include"]:
                         if k == "lora":
                             params[k].value = v.split("\x1f")
                         elif params[k].meta:
-                            params[k].value = v
+                            try:
+                                params[k].value = v
+                            except ValueError:
+                                print(f"Config value '{v}' cannot be assigned to parameter '{params[k].name}', ignoring")
 
 for id, val in args.items():
     if id in params and val is not None and not (isinstance(val, list) and len(val) == 0 and params[id].long is None and params[id].short is None):
