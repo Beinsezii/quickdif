@@ -1,4 +1,5 @@
 import argparse
+import enum
 import functools
 import json
 import math
@@ -130,33 +131,86 @@ COLS_FTMSE = {
 }
 # LATENT COLORS }}}
 
+
 # QDPARAMS {{{
-samplers = [
-    "default",
-    "dpm",
-    "dpmk",
-    "sdpm",
-    "sdpmk",
-    "dpm2",
-    "dpm2k",
-    "sdpm2",
-    "sdpm2k",
-    "dpm3",
-    "dpm3k",
-    # "sdpm3",
-    # "sdpm3k",
-    "ddim",
-    "ddpm",
-    "euler",
-    "eulerk",
-    "eulera",
-]
-spacings = ["leading", "trailing", "linspace"]
-dtypes = ["fp16", "bf16", "fp32"]
-offload = ["model", "sequential"]
-noise_types = ["cpu16", "cpu16b", "cpu32", "cuda16", "cuda16b", "cuda32"]
-attention = ["default", "sdp", "subquad", "rocm_flash"]
-out = Path("/tmp/quickdif/" if Path("/tmp/").exists() else "./output/")
+@enum.unique
+class Iter(enum.StrEnum):
+    Basic = enum.auto()
+    Walk = enum.auto()
+    Shuffle = enum.auto()
+
+
+@enum.unique
+class Sampler(enum.StrEnum):
+    Default = enum.auto()
+    Ddim = enum.auto()
+    Ddpm = enum.auto()
+    Euler = enum.auto()
+    EulerK = enum.auto()
+    EulerA = enum.auto()
+    Dpm = enum.auto()
+    DpmK = enum.auto()
+    SDpm = enum.auto()
+    SDpmK = enum.auto()
+    Dpm2 = enum.auto()
+    Dpm2K = enum.auto()
+    SDpm2 = enum.auto()
+    SDpm2K = enum.auto()
+    Dpm3 = enum.auto()
+    Dpm3K = enum.auto()
+    SDpm3 = enum.auto()
+    SDpm3K = enum.auto()
+
+
+@enum.unique
+class Spacing(enum.StrEnum):
+    Leading = enum.auto()
+    Trailing = enum.auto()
+    Linspace = enum.auto()
+
+
+@enum.unique
+class DType(enum.StrEnum):
+    FP16 = enum.auto()
+    BF16 = enum.auto()
+    FP32 = enum.auto()
+
+
+@enum.unique
+class Offload(enum.StrEnum):
+    NONE = enum.auto()  # why no assign to None?
+    Model = enum.auto()
+    Sequential = enum.auto()
+
+
+@enum.unique
+class NoiseType(enum.StrEnum):
+    Cpu16 = enum.auto()
+    Cpu16B = enum.auto()
+    Cpu32 = enum.auto()
+    Cuda16 = enum.auto()
+    Cuda16B = enum.auto()
+    Cuda32 = enum.auto()
+
+
+@enum.unique
+class Attention(enum.StrEnum):
+    Default = enum.auto()
+    Sdp = enum.auto()
+    SubQuad = enum.auto()
+    RocmFlash = enum.auto()
+
+
+@enum.unique
+class LatentColor(enum.StrEnum):
+    Red = enum.auto()
+    Green = enum.auto()
+    Blue = enum.auto()
+    Cyan = enum.auto()
+    Magenta = enum.auto()
+    Yellow = enum.auto()
+    Black = enum.auto()
+    White = enum.auto()
 
 
 class QDParam:
@@ -169,7 +223,6 @@ class QDParam:
         long: str | None = None,
         help: str | None = None,
         multi: bool = False,
-        choices: list | None = None,
         meta: bool = False,
     ):
         self.name = name
@@ -178,16 +231,10 @@ class QDParam:
         self.short = short
         self.long = long
         self.multi = multi
-        self.choices = choices
         self.meta = meta
 
         self.value = value
         self.default = copy(self.value)
-
-        # I was originally gonna automate the assigning using setattr but that confuses the LSP
-        for k, _ in locals().items():
-            if k != "self" and k not in self.__dict__ and k != "value":
-                raise ValueError(f"Value '{k}' unset in QDParam")
 
     @property
     def value(self) -> Any:
@@ -198,10 +245,6 @@ class QDParam:
         if isinstance(new, list):
             if len(new) == 0:
                 new = None
-        if self.choices and new is not None:
-            for v in new if isinstance(new, list) else [new]:
-                if v not in self.choices:
-                    raise ValueError(f'Parameter "{self.name}" value "{v}" must be one of "{self.choices}"')
         if (
             isinstance(new, self.typing)
             or new is None
@@ -226,16 +269,16 @@ params = [
     QDParam("decoder_guidance", float, short="-dg", long="--decoder-guidance", multi=True, meta=True),
     QDParam("rescale", float, short="-G", long="--rescale", value=0.0, multi=True, meta=True),
     QDParam("denoise", float, short="-d", long="--denoise", multi=True, meta=True),
-    QDParam("noise_type", str, short="-nt", long="--noise-type", choices=noise_types, value="cpu32", multi=True, meta=True),
+    QDParam("noise_type", NoiseType, short="-nt", long="--noise-type", value=NoiseType.Cpu32, multi=True, meta=True),
     QDParam("noise_power", str, short="-np", long="--noise-power", multi=True, meta=True),
-    QDParam("color", str, short="-C", long="--color", value="black", choices=list(COLS_XL.keys()), multi=True, meta=True),
+    QDParam("color", LatentColor, short="-C", long="--color", value=LatentColor.Black, multi=True, meta=True),
     QDParam("color_power", float, short="-c", long="--color-power", multi=True, meta=True),
     QDParam("variance_scale", int, short="-vs", long="--variance-scale", value=2, multi=True, meta=True),
     QDParam("variance_power", float, short="-vp", long="--variance-power", multi=True, meta=True),
     QDParam("pixelate", float, long="--pixelate", multi=True, meta=True, help="Pixelate image using a divisor. Best used with a pixel art Lora"),
     QDParam("posterize", int, long="--posterize", multi=True, meta=True, help="Set amount of colors per channel. Best used with --pixelate"),
-    QDParam("sampler", str, short="-S", long="--sampler", choices=samplers, value="default", multi=True, meta=True),
-    QDParam("spacing", str, long="--spacing", choices=spacings, value="trailing", multi=True, meta=True),
+    QDParam("sampler", Sampler, short="-S", long="--sampler", value=Sampler.Default, multi=True, meta=True),
+    QDParam("spacing", Spacing, long="--spacing", value=Spacing.Trailing, multi=True, meta=True),
     ### Global
     QDParam("width", int, short="-w", long="--width"),
     QDParam("height", int, short="-h", long="--height"),
@@ -243,20 +286,25 @@ params = [
     QDParam("lora", str, short="-l", long="--lora", help='Apply Loras, ex. "ms_paint.safetensors:::0.6"', meta=True, multi=True),
     QDParam("batch_count", int, short="-b", long="--batch-count", value=1),
     QDParam("batch_size", int, short="-B", long="--batch-size", value=1),
-    QDParam("walk", bool, long="--walk", help="Iterate/walk seeds on duplicate params instead of copying"),
-    QDParam("shuffle", bool, long="--shuffle", help="Pick randomly from duplicate params instead of running all variants"),
+    QDParam("iter", Iter, long="--iter", value=Iter.Basic),
     ### System
-    QDParam("output", Path, short="-o", long="--output", value=out, help="Output directory for images"),
-    QDParam("dtype", str, short="-D", long="--dtype", value="fp16", choices=dtypes, help="Data format for inference"),
+    QDParam(
+        "output",
+        Path,
+        short="-o",
+        long="--output",
+        value=Path("/tmp/quickdif/" if Path("/tmp/").exists() else "./output/"),
+        help="Output directory for images",
+    ),
+    QDParam("dtype", DType, short="-dt", long="--dtype", value=DType.FP16, help="Data format for inference"),
     QDParam(
         "offload",
-        str,
-        short="-ol",
+        Offload,
         long="--offload",
-        choices=offload,
+        value=Offload.NONE,
         help="Set amount of CPU offload. In most UIs, 'model' is equivalent to --med-vram while 'sequential' is equivalent to --low-vram",
     ),
-    QDParam("attention", str, long="--attention", choices=attention),
+    QDParam("attention", Attention, value=Attention.Default, long="--attention"),
     QDParam("compile", bool, long="--compile", help="Compile unet with torch.compile()"),
     QDParam("tile", bool, long="--tile", help="Tile VAE"),
     QDParam("xl_vae", bool, long="--xl-vae", help="Override the SDXL VAE. Useful for models with broken vae."),
@@ -290,8 +338,8 @@ for param in params.values():
     else:
         kwargs["type"] = param.typing
 
-        if param.choices is not None:
-            kwargs["choices"] = param.choices
+        if issubclass(param.typing, enum.Enum):
+            kwargs["choices"] = [e.value for e in param.typing]
 
         if param.multi:
             kwargs["nargs"] = "*"
@@ -305,6 +353,7 @@ parser.add_argument(
     "-I", "--include", type=argparse.FileType(mode="rb"), nargs="*", help="Include parameters from another image. Only works with quickdif images"
 )
 parser.add_argument("--json", type=argparse.FileType(mode="a+b"), help="Output settings to JSON")
+# It would be nice to write toml but I don't think its worth a 3rd party lib
 # parser.add_argument("--toml", type=argparse.FileType(mode="wb"), help="Output settings to TOML")
 parser.add_argument("--comment", type=str, help="Add a comment to the image.")
 parser.add_argument("--print", action="store_true", help="Print out generation params and exit.")
@@ -410,6 +459,7 @@ if args.get("comment", ""):
 # Load Torch and libs that depend on it after the CLI cause it's laggy.
 import torch  # noqa: E402
 
+amd_hijack = False
 if not params["disable_amd_patch"].value:
     if "AMD" in torch.cuda.get_device_name() or "Radeon" in torch.cuda.get_device_name():
         try:
@@ -441,6 +491,7 @@ if not params["disable_amd_patch"].value:
                 return hidden_states
 
             torch.nn.functional.scaled_dot_product_attention = sdpa_hijack
+            amd_hijack = True
             print("# # #\nHijacked SDPA with ROCm Flash Attention\n# # #")
         except ImportError as e:
             print(f"# # #\nCould not load Flash Attention for hijack:\n{e}\n# # #")
@@ -510,7 +561,7 @@ class SmartSigint:
 
 torch.set_grad_enabled(False)
 torch.set_float32_matmul_precision("high")
-dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[params["dtype"].value]
+dtype = {DType.FP16: torch.float16, DType.BF16: torch.bfloat16, DType.FP32: torch.float32}[params["dtype"].value]
 if "cascade" in params["model"].value and dtype == torch.float16:
     dtype = torch.bfloat16
 # TORCH }}}
@@ -552,26 +603,37 @@ pipe_params = signature(pipe).parameters
 
 pipe.safety_checker = None
 pipe.watermarker = None
-if params["offload"].value == "model":
-    pipe.enable_model_cpu_offload()
-elif params["offload"].value == "sequential":
-    pipe.enable_sequential_cpu_offload()
-else:
-    pipe = pipe.to("cuda")
+match params["offload"].value:
+    case Offload.NONE:
+        pipe = pipe.to("cuda")
+    case Offload.Model:
+        pipe.enable_model_cpu_offload()
+    case Offload.Sequential:
+        pipe.enable_sequential_cpu_offload()
+    case other:
+        raise ValueError
 # PIPE }}}
 
 # ATTENTION {{{
 if not params["compile"].value:
     processor = None
-    if subquad_processor is not None and params["attention"].value == "subquad":
-        processor = subquad_processor(query_chunk_size=2**12, kv_chunk_size=2**15)
-    elif params["attention"].value == "rocm_flash":
-        if rocm_flash_processor is not None:
-            processor = rocm_flash_processor()
-        else:
-            print('\n Attention Processor "rocm_flash" not available.\n')
-    elif params["attention"].value == "sdp":
-        processor = AttnProcessor2_0()
+    match params["attention"].value:
+        case Attention.Sdp:
+            processor = AttnProcessor2_0()
+        case Attention.Default:
+            pass
+        case Attention.SubQuad:
+            if subquad_processor is not None:
+                processor = subquad_processor(query_chunk_size=2**12, kv_chunk_size=2**15)
+            else:
+                print('\nAttention Processor "subquad" not available.\n')
+        case Attention.RocmFlash:
+            if amd_hijack:
+                print('\nIgnoring attention procesor "rocm_flash" as SDPA was patched.\n')
+            elif rocm_flash_processor is not None:
+                processor = rocm_flash_processor()
+            else:
+                print('\nAttention Processor "rocm_flash" not available.\n')
 
     for id, item in [("pipe", pipe)] + [
         (id, getattr(pipe, id, None))
@@ -588,8 +650,6 @@ if not params["compile"].value:
         if item is not None:
             if hasattr(item, "set_attn_processor") and processor is not None:
                 item.set_attn_processor(processor)
-            elif hasattr(item, "set_default_attn_processor") and params["attention"].value == "default":
-                item.set_default_attn_processor()
 
 # }}}
 
@@ -660,38 +720,49 @@ if hasattr(pipe, "vae"):
 schedulers = None
 if hasattr(pipe, "scheduler"):
     sampler_map = {
-        "default": pipe.scheduler,
-        "dpm": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=1, use_karras_sigmas=False),
-        "dpmk": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=1, use_karras_sigmas=True),
-        "sdpm": DPMSolverMultistepScheduler.from_config(
+        Sampler.Default: pipe.scheduler,
+        Sampler.Ddim: DDIMScheduler.from_config(pipe.scheduler.config),
+        Sampler.Ddpm: DDPMScheduler.from_config(pipe.scheduler.config),
+        Sampler.Euler: EulerDiscreteScheduler.from_config(pipe.scheduler.config),
+        Sampler.EulerK: EulerDiscreteScheduler.from_config(pipe.scheduler.config, use_karras_sigmas=True),
+        Sampler.EulerA: EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config),
+        Sampler.Dpm: DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=1, use_karras_sigmas=False
+        ),
+        Sampler.DpmK: DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=1, use_karras_sigmas=True
+        ),
+        Sampler.SDpm: DPMSolverMultistepScheduler.from_config(
             pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=1, use_karras_sigmas=False
         ),
-        "sdpmk": DPMSolverMultistepScheduler.from_config(
+        Sampler.SDpmK: DPMSolverMultistepScheduler.from_config(
             pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=1, use_karras_sigmas=True
         ),
-        "dpm2": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=2, use_karras_sigmas=False),
-        "dpm2k": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=2, use_karras_sigmas=True),
-        "sdpm2": DPMSolverMultistepScheduler.from_config(
+        Sampler.Dpm2: DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=2, use_karras_sigmas=False
+        ),
+        Sampler.Dpm2K: DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=2, use_karras_sigmas=True
+        ),
+        Sampler.SDpm2: DPMSolverMultistepScheduler.from_config(
             pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=2, use_karras_sigmas=False
         ),
-        "sdpm2k": DPMSolverMultistepScheduler.from_config(
+        Sampler.SDpm2K: DPMSolverMultistepScheduler.from_config(
             pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=2, use_karras_sigmas=True
         ),
-        "dpm3": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=3, use_karras_sigmas=False),
-        "dpm3k": DPMSolverMultistepScheduler.from_config(pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=3, use_karras_sigmas=True),
-        # "sdpm3": DPMSolverMultistepScheduler.from_config(
-        #     pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=False
-        # ),
-        # "sdpm3k": DPMSolverMultistepScheduler.from_config(
-        #     pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=True
-        # ),
-        "ddim": DDIMScheduler.from_config(pipe.scheduler.config),
-        "ddpm": DDPMScheduler.from_config(pipe.scheduler.config),
-        "euler": EulerDiscreteScheduler.from_config(pipe.scheduler.config),
-        "eulerk": EulerDiscreteScheduler.from_config(pipe.scheduler.config, use_karras_sigmas=True),
-        "eulera": EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config),
+        Sampler.Dpm3: DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=3, use_karras_sigmas=False
+        ),
+        Sampler.Dpm3K: DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=3, use_karras_sigmas=True
+        ),
+        Sampler.SDpm3: DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=False
+        ),
+        Sampler.SDpm3K: DPMSolverMultistepScheduler.from_config(
+            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=True
+        ),
     }
-    assert list(sampler_map.keys()) == samplers
     if params["sampler"].value:
         schedulers = []
         for s in params["sampler"].value:
@@ -775,7 +846,7 @@ if params["width"].value:
 if params["height"].value:
     job["height"] = params["height"].value
 
-if params["shuffle"].value:
+if params["iter"].value is Iter.Shuffle:
     jobs = [job] * params["batch_count"].value
     merger = lambda items, name, vals: [i | {name: v} for i, v in zip(items, oversample(vals, len(items)))]  # noqa: E731
 else:
@@ -802,12 +873,15 @@ if schedulers:
 i32max = 2**31 - 1
 seeds = [torch.randint(high=i32max, low=-i32max, size=(1,)).item()] if not params["seed"].value else params["seed"].value
 seeds = [s + c * params["batch_size"].value for c in range(params["batch_count"].value) for s in seeds]
-if params["shuffle"].value:
-    jobs = merger(jobs, "seed", seeds)
-elif params["walk"].value:
-    jobs = [j | {"seed": s + (n * params["batch_size"].value * params["batch_count"].value)} for s in seeds for n, j in enumerate(jobs)]
-else:
-    jobs = [j | {"seed": s} for s in seeds for j in jobs]
+match params["iter"].value:
+    case Iter.Shuffle:
+        jobs = merger(jobs, "seed", seeds)
+    case Iter.Walk:
+        jobs = [j | {"seed": s + (n * params["batch_size"].value * params["batch_count"].value)} for s in seeds for n, j in enumerate(jobs)]
+    case Iter.Basic:
+        jobs = [j | {"seed": s} for s in seeds for j in jobs]
+    case other:
+        raise ValueError
 
 for j in jobs:
     for key in "prompt", "negative":
@@ -845,12 +919,12 @@ for kwargs in jobs:
         if "noise_type" in kwargs:
             noise_type = kwargs.pop("noise_type")
             noise_dtype, noise_device = {
-                "cpu16": (torch.float16, "cpu"),
-                "cpu16b": (torch.bfloat16, "cpu"),
-                "cpu32": (torch.float32, "cpu"),
-                "cuda16": (torch.float16, "cuda"),
-                "cuda16b": (torch.bfloat16, "cuda"),
-                "cuda32": (torch.float32, "cuda"),
+                NoiseType.Cpu16: (torch.float16, "cpu"),
+                NoiseType.Cpu16B: (torch.bfloat16, "cpu"),
+                NoiseType.Cpu32: (torch.float32, "cpu"),
+                NoiseType.Cuda16: (torch.float16, "cuda"),
+                NoiseType.Cuda16B: (torch.bfloat16, "cuda"),
+                NoiseType.Cuda32: (torch.float32, "cuda"),
             }[noise_type]
         else:
             noise_dtype, noise_device = None, None
