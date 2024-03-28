@@ -160,8 +160,8 @@ class Sampler(enum.StrEnum):
     SDpm2K = enum.auto()
     Dpm3 = enum.auto()
     Dpm3K = enum.auto()
-    SDpm3 = enum.auto()
-    SDpm3K = enum.auto()
+    # SDpm3 = enum.auto()
+    # SDpm3K = enum.auto()
 
 
 @enum.unique
@@ -884,12 +884,12 @@ if hasattr(pipe, "scheduler"):
         Sampler.Dpm3K: DPMSolverMultistepScheduler.from_config(
             pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=3, use_karras_sigmas=True
         ),
-        Sampler.SDpm3: DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=False
-        ),
-        Sampler.SDpm3K: DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=True
-        ),
+        # Sampler.SDpm3: DPMSolverMultistepScheduler.from_config(
+        #     pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=False
+        # ),
+        # Sampler.SDpm3K: DPMSolverMultistepScheduler.from_config(
+        #     pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=True
+        # ),
     }
     if params["sampler"].value:
         schedulers = []
