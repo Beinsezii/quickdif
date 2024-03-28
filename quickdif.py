@@ -162,6 +162,12 @@ class Sampler(enum.StrEnum):
     Dpm3K = enum.auto()
     # SDpm3 = enum.auto()
     # SDpm3K = enum.auto()
+    Unipc = enum.auto()
+    UnipcK = enum.auto()
+    Unipc2 = enum.auto()
+    Unipc2K = enum.auto()
+    # Unipc3 = enum.auto()
+    # Unipc3K = enum.auto()
 
 
 @enum.unique
@@ -644,6 +650,7 @@ from diffusers import (  # noqa: E402
     StableDiffusionPipeline,
     StableDiffusionXLImg2ImgPipeline,
     StableDiffusionXLPipeline,
+    UniPCMultistepScheduler,
 )
 from diffusers.models.attention_processor import AttnProcessor2_0  # noqa: E402
 
@@ -890,6 +897,12 @@ if hasattr(pipe, "scheduler"):
         # Sampler.SDpm3K: DPMSolverMultistepScheduler.from_config(
         #     pipe.scheduler.config, final_sigmas_type="zero", algorithm_type="sde-dpmsolver++", solver_order=3, use_karras_sigmas=True
         # ),
+        Sampler.Unipc: UniPCMultistepScheduler.from_config(pipe.scheduler.config, solver_order=1, use_karras_sigmas=False),
+        Sampler.UnipcK: UniPCMultistepScheduler.from_config(pipe.scheduler.config, solver_order=1, use_karras_sigmas=True),
+        Sampler.Unipc2: UniPCMultistepScheduler.from_config(pipe.scheduler.config, solver_order=2, use_karras_sigmas=False),
+        Sampler.Unipc2K: UniPCMultistepScheduler.from_config(pipe.scheduler.config, solver_order=2, use_karras_sigmas=True),
+        # Sampler.Unipc3: UniPCMultistepScheduler.from_config(pipe.scheduler.config, solver_order=3, use_karras_sigmas=False),
+        # Sampler.Unipc3K: UniPCMultistepScheduler.from_config(pipe.scheduler.config, solver_order=3, use_karras_sigmas=True),
     }
     if params["sampler"].value:
         schedulers = []
