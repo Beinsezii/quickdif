@@ -131,8 +131,9 @@ COLS_FTMSE = {
 }
 # LATENT COLORS }}}
 
-
 # QDPARAMS {{{
+
+
 @enum.unique
 class Iter(enum.StrEnum):
     Basic = enum.auto()
@@ -245,17 +246,19 @@ class QDParam:
         if isinstance(new, list):
             if len(new) == 0:
                 new = None
-        if (
-            isinstance(new, self.typing)
-            or new is None
-            or (isinstance(new, list) and all([isinstance(x, self.typing) for x in new]) and self.multi is True)
-        ):
-            if self.multi and not isinstance(new, list) and new is not None:
-                self._value = [new]
-            else:
+        if new is None:
+            self._value = new
+        elif isinstance(new, list):
+            if self.multi:
+                new = [self.typing(v) for v in new]
                 self._value = new
+            else:
+                raise ValueError(f"Refusing to assign list '{new}' to non-multi QDParam '{self.name}'")
         else:
-            raise ValueError(f'Cannot assign value "{new}" of type "{type(new)}" to param "{self.name}" of type "{self.typing}"')
+            if self.multi:
+                self._value = [self.typing(new)]
+            else:
+                self._value = self.typing(new)
 
 
 params = [
@@ -382,10 +385,6 @@ if args["include"]:
                 try:
                     for k, v in f(data).items():
                         if k in params:
-                            if isinstance(v, list):
-                                v = [params[k].typing(x) for x in v]
-                            elif v is not None:
-                                v = params[k].typing(v)
                             params[k].value = v
                         else:
                             print(f'Unknown key in serial config "{k}"')
@@ -401,7 +400,7 @@ if args["include"]:
                         if k == "lora":
                             params[k].value = v.split("\x1f")
                         elif params[k].meta:
-                            params[k].value = params[k].typing(v)
+                            params[k].value = v
 
 for id, val in args.items():
     if id in params and val is not None and not (isinstance(val, list) and len(val) == 0 and params[id].long is None and params[id].short is None):
