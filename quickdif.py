@@ -608,7 +608,7 @@ if not params["disable_amd_patch"].value:
             sdpa = torch.nn.functional.scaled_dot_product_attention
 
             def sdpa_hijack(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None):
-                if query.shape[3] <= 128 and attn_mask is None:
+                if query.shape[3] <= 128 and attn_mask is None and query.dtype != torch.float32:
                     result = flash_attn_func(
                         q=query.transpose(1, 2),
                         k=key.transpose(1, 2),

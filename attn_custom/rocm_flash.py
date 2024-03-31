@@ -66,7 +66,7 @@ class FlashAttnProcessor:
         inner_dim = key.shape[-1]
         head_dim = inner_dim // attn.heads
 
-        if head_dim <= 128 and attention_mask is None:
+        if head_dim <= 128 and attention_mask is None and query.dtype != torch.float32:
             query = query.reshape(batch_size, -1, attn.heads, head_dim)
             key = key.reshape(batch_size, -1, attn.heads, head_dim)
             value = value.reshape(batch_size, -1, attn.heads, head_dim)
