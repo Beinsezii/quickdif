@@ -723,6 +723,7 @@ from diffusers import (  # noqa: E402
     EulerAncestralDiscreteScheduler,
     EulerDiscreteScheduler,
     PixArtAlphaPipeline,
+    SchedulerMixin,
     StableCascadeCombinedPipeline,
     StableDiffusionImg2ImgPipeline,
     StableDiffusionPipeline,
@@ -934,82 +935,64 @@ if hasattr(pipe, "vae"):
 # VAE }}}
 
 # SCHEDULER {{{
-schedulers = None
+schedulers: list[tuple[str, type[SchedulerMixin]]] = []
 if hasattr(pipe, "scheduler"):
-    sampler_map = {
-        Sampler.Default: pipe.scheduler,
-        Sampler.Ddim: DDIMScheduler.from_config(pipe.scheduler.config),
-        Sampler.Ddpm: DDPMScheduler.from_config(pipe.scheduler.config),
-        Sampler.Euler: EulerDiscreteScheduler.from_config(pipe.scheduler.config),
-        Sampler.EulerK: EulerDiscreteScheduler.from_config(pipe.scheduler.config, use_karras_sigmas=True),
-        Sampler.EulerA: EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config),
-        Sampler.Dpm: DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=1, use_karras_sigmas=False
-        ),
-        Sampler.DpmK: DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=1, use_karras_sigmas=True
-        ),
-        Sampler.SDpm: DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=1, use_karras_sigmas=False
-        ),
-        Sampler.SDpmK: DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=1, use_karras_sigmas=True
-        ),
-        Sampler.Dpm2: DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=2, use_karras_sigmas=False
-        ),
-        Sampler.Dpm2K: DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=2, use_karras_sigmas=True
-        ),
-        Sampler.SDpm2: DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=2, use_karras_sigmas=False
-        ),
-        Sampler.SDpm2K: DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, algorithm_type="sde-dpmsolver++", solver_order=2, use_karras_sigmas=True
-        ),
-        Sampler.Dpm3: DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=3, use_karras_sigmas=False
-        ),
-        Sampler.Dpm3K: DPMSolverMultistepScheduler.from_config(
-            pipe.scheduler.config, algorithm_type="dpmsolver++", solver_order=3, use_karras_sigmas=True
-        ),
-        Sampler.Unipc: UniPCMultistepScheduler.from_config(pipe.scheduler.config, solver_order=1, use_karras_sigmas=False),
-        Sampler.UnipcK: UniPCMultistepScheduler.from_config(pipe.scheduler.config, solver_order=1, use_karras_sigmas=True),
-        Sampler.Unipc2: UniPCMultistepScheduler.from_config(pipe.scheduler.config, solver_order=2, use_karras_sigmas=False),
-        Sampler.Unipc2K: UniPCMultistepScheduler.from_config(pipe.scheduler.config, solver_order=2, use_karras_sigmas=True),
-        Sampler.Unipc3: UniPCMultistepScheduler.from_config(pipe.scheduler.config, solver_order=3, use_karras_sigmas=False),
-        Sampler.Unipc3K: UniPCMultistepScheduler.from_config(pipe.scheduler.config, solver_order=3, use_karras_sigmas=True),
+    sampler_args = {
+        "steps_offset": 0,
+        "set_alpha_to_one": True,
+        "final_sigmas_type": "zero",
     }
+    sampler_map: dict[Sampler, tuple[Any, dict[str, Any]]] = {
+        Sampler.Default: (pipe.scheduler, {}),
+        Sampler.Ddim: (DDIMScheduler, {}),
+        Sampler.Ddpm: (DDPMScheduler, {}),
+        Sampler.Euler: (EulerDiscreteScheduler, {}),
+        Sampler.EulerK: (EulerDiscreteScheduler, {"use_karras_sigmas": True}),
+        Sampler.EulerA: (EulerAncestralDiscreteScheduler, {}),
+        Sampler.Dpm: (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 1, "use_karras_sigmas": False}),
+        Sampler.DpmK: (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 1, "use_karras_sigmas": True}),
+        Sampler.SDpm: (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++", "solver_order": 1, "use_karras_sigmas": False}),
+        Sampler.SDpmK: (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++", "solver_order": 1, "use_karras_sigmas": True}),
+        Sampler.Dpm2: (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 2, "use_karras_sigmas": False}),
+        Sampler.Dpm2K: (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 2, "use_karras_sigmas": True}),
+        Sampler.SDpm2: (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++", "solver_order": 2, "use_karras_sigmas": False}),
+        Sampler.SDpm2K: (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++", "solver_order": 2, "use_karras_sigmas": True}),
+        Sampler.Dpm3: (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 3, "use_karras_sigmas": False}),
+        Sampler.Dpm3K: (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 3, "use_karras_sigmas": True}),
+        Sampler.Unipc: (UniPCMultistepScheduler, {"solver_order": 1, "use_karras_sigmas": False}),
+        Sampler.UnipcK: (UniPCMultistepScheduler, {"solver_order": 1, "use_karras_sigmas": True}),
+        Sampler.Unipc2: (UniPCMultistepScheduler, {"solver_order": 2, "use_karras_sigmas": False}),
+        Sampler.Unipc2K: (UniPCMultistepScheduler, {"solver_order": 2, "use_karras_sigmas": True}),
+        Sampler.Unipc3: (UniPCMultistepScheduler, {"solver_order": 3, "use_karras_sigmas": False}),
+        Sampler.Unipc3K: (UniPCMultistepScheduler, {"solver_order": 3, "use_karras_sigmas": True}),
+    }
+    for name, (sched, args) in sampler_map.items():
+        for k, v in args.items():
+            sig = signature(sched).parameters
+            if k not in sig:
+                raise AssertionError(f"kwarg '{k}' not valid for requested scheduler for '{name}'.\nParameters: {list(sig)}")
+
+    builders: list[tuple[str, Any, dict[str, Any]]] = []
+    if not params["sampler"].value:
+        params["sampler"].value = [Sampler.Default]
     if params["sampler"].value:
-        schedulers = []
         for s in params["sampler"].value:
-            sampler = sampler_map[s]
-            schedulers.append((s, sampler))
+            sched, kwargs = sampler_map[s]
+            builders.append((s, sched, kwargs))
 
     if params["spacing"].value:
-        schedulers = [
-            (
-                name,
-                sched.from_config(
-                    sched.config,
-                    timestep_spacing=space,
-                    steps_offset=0,
-                    set_alpha_to_one=True,
-                    final_sigmas_type="zero",
-                ),
-            )
-            for name, sched in (schedulers if schedulers else [("default", pipe.scheduler)])
-            for space in params["spacing"].value
-        ]
+        builders = [(name, sched, kwargs | {"timestep_spacing": space}) for name, sched, kwargs in builders for space in params["spacing"].value]
 
-    # consume single samplers
-    if schedulers and len(schedulers) == 1:
-        name, sched = schedulers[0]
-        base_meta["sampler"] = name
-        if params["spacing"].value and hasattr(sched.config, "timestep_spacing"):
-            base_meta["spacing"] = sched.config.timestep_spacing
-        pipe.scheduler = sched
-        schedulers = None
+    # Consume a single builder
+    if len(builders) == 1:
+        name, sched, kwargs = builders[0]
+        if name != Sampler.Default:
+            base_meta["sampler"] = name
+        pipe.scheduler = sched.from_config(pipe.scheduler.config, **kwargs)
+    # convert from (name, class, args) => (name, scheduler)
+    elif len(builders) > 1:
+        schedulers = [(name, sched.from_config(pipe.scheduler.config, **kwargs)) for name, sched, kwargs in builders]
+
 # SCHEDULER }}}
 
 # INPUT TENSOR {{{
@@ -1134,7 +1117,8 @@ for kwargs in jobs:
         if "scheduler" in kwargs:
             name, sched = kwargs.pop("scheduler")
             pipe.scheduler = sched
-            meta["sampler"] = name
+            if name != Sampler.Default:
+                meta["sampler"] = name
             if params["spacing"].value and hasattr(sched.config, "timestep_spacing"):
                 meta["spacing"] = sched.config.timestep_spacing
 
