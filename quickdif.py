@@ -818,6 +818,10 @@ pipe.safety_checker = None
 pipe.watermarker = None
 match params["offload"].value:
     case Offload.NONE:
+        if hasattr(pipe, "prior_pipe"):
+            pipe.prior_pipe = pipe.prior_pipe.to("cuda")
+        if hasattr(pipe, "decoder_pipe"):
+            pipe.decoder_pipe = pipe.decoder_pipe.to("cuda")
         pipe = pipe.to("cuda")
     case Offload.Model:
         pipe.enable_model_cpu_offload()
@@ -1028,7 +1032,7 @@ if input_image is None:
         channels = pipe.prior_pipe.prior.config.in_channels
 
     if factor is not None and channels is not None:
-        latent_params = (channels, factor, default_size if default_size is not None else math.ceil(1024 / factor))
+        latent_params = (channels, factor, default_size if default_size is not None else round(1024 / factor))
     else:
         print(f'\nModel {params["model"].value} not able to use pre-noised latents.\nNoise options will not be respected.\n')
 
@@ -1140,9 +1144,10 @@ for kwargs in jobs:
         if latent_params is not None:
             channels, factor, default_size = latent_params
             if resolution is not None:
-                width, height = math.ceil(resolution.width / factor), math.ceil(resolution.height / factor)
+                width, height = round(resolution.width / factor), round(resolution.height / factor)
             else:
                 width, height = default_size, default_size
+                kwargs["width"], kwargs["height"] = round(default_size * factor), round(default_size * factor)
             shape = (params["batch_size"].value, channels, height, width)
             latents = torch.zeros(shape, dtype=dtype, device="cpu")
             for latent, generator in zip(latents, generators):
