@@ -4,6 +4,7 @@ import functools
 import json
 import math
 import random
+import re
 import signal
 from copy import copy
 from inspect import signature
@@ -98,12 +99,21 @@ def pexpand(prompt: str, body: Tuple[str, str] = ("{", "}"), sep: str = "|", sin
 
 
 # }}}
+
+
 def oversample(population: list, k: int):
     samples = []
     while len(samples) < k:
         samples += random.sample(population, min(len(population), k - len(samples)))
     assert len(samples) == k
     return samples
+
+
+def roundint(n: int | float, step: int) -> int:
+    if n % step >= step / 2:
+        return round(n + step - (n % step))
+    else:
+        return round(n - (n % step))
 
 
 # }}}
@@ -221,6 +231,59 @@ class LatentColor(enum.StrEnum):
     White = enum.auto()
 
 
+# }}}
+
+# Structs {{{
+
+
+class Resolution:
+    def __init__(self, resolution: str | tuple[int, int]):
+        if isinstance(resolution, str):
+            self._str = resolution
+            m = re.match(r"^ *([\d\.]+) *: *([\d\.]+) *(?:: *(\d+))? *(?:@ *([\d\.]+))? *$", resolution)
+            if m:
+                hor, ver, rnd, mpx = m.groups()
+                hor, ver = float(hor), float(ver)
+                rnd = 64 if rnd is None else int(rnd)
+                mpx = 1.0 if mpx is None else float(mpx)
+                self._width = roundint(math.sqrt(hor / ver * mpx * 10**6), rnd)
+                self._height = roundint(math.sqrt(ver / hor * mpx * 10**6), rnd)
+            else:
+                m = re.match(r"^ *(\d+) *[x*]? *(\d+)? *$", resolution)
+                if m is None:
+                    m = re.match(r"^ *(\d+)? *[x*] *(\d+) *$", resolution)
+                if m:
+                    w, h = m.groups()
+                    w = 1024 if w is None else int(w)
+                    h = 1024 if h is None else int(h)
+                    self._width, self._height = w, h
+                else:
+                    raise ValueError
+        else:
+            self._str = None
+            self._width, self._height = resolution
+        if not (16 <= self.width <= 4096 and 16 <= self.height <= 4096):
+            raise ValueError
+
+    @property
+    def width(self) -> int:
+        return self._width
+
+    @property
+    def height(self) -> int:
+        return self._height
+
+    @property
+    def resolution(self) -> tuple[int, int]:
+        return (self.width, self.height)
+
+    def __repr__(self):
+        return str(self.width) + "x" + str(self.height)
+
+    def __str__(self):
+        return self._str if self._str is not None else self.__repr__()
+
+
 class QDParam:
     def __init__(
         self,
@@ -244,6 +307,9 @@ class QDParam:
         self.value = value
         self.default = copy(self.value)
 
+    def _cast(self, new):
+        return new if isinstance(new, self.typing) else self.typing(new)
+
     @property
     def value(self) -> Any:
         return self._value
@@ -257,19 +323,18 @@ class QDParam:
             self._value = new
         elif isinstance(new, list):
             if self.multi:
-                new = [self.typing(v) for v in new]
+                new = [self._cast(v) for v in new]
                 self._value = new
             else:
                 raise ValueError(f"Refusing to assign list '{new}' to non-multi QDParam '{self.name}'")
         else:
             if self.multi:
-                self._value = [self.typing(new)]
+                self._value = [self._cast(new)]
             else:
-                self._value = self.typing(new)
+                self._value = self._cast(new)
 
 
 # }}}
-
 
 # Parameters {{{
 params = [
@@ -277,6 +342,7 @@ params = [
     QDParam("prompt", str, multi=True, meta=True, help="Positive prompt"),
     QDParam("negative", str, short="-n", long="--negative", multi=True, meta=True, help="Negative prompt"),
     QDParam("seed", int, short="-e", long="--seed", multi=True, meta=True, help="Seed for RNG"),
+    QDParam("resolution", Resolution, short="-r", long="--resolution", multi=True),
     QDParam(
         "steps",
         int,
@@ -393,8 +459,6 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
     ),
     QDParam("spacing", Spacing, long="--spacing", value=Spacing.Trailing, multi=True, meta=True, help="Sampler timestep spacing"),
     ### Global
-    QDParam("width", int, short="-w", long="--width", help="Output image width"),
-    QDParam("height", int, short="-h", long="--height", help="Output image height"),
     QDParam(
         "model",
         str,
@@ -531,8 +595,7 @@ if args["include"]:
                     pass
         except UnicodeDecodeError:
             with Image.open(BytesIO(data)) as meta_image:
-                params["width"].value = meta_image.width
-                params["height"].value = meta_image.height
+                params["resolution"].value = (meta_image.width, meta_image.height)
                 for k, v in getattr(meta_image, "text", {}).items():
                     if k in params:
                         if k == "lora":
@@ -556,6 +619,9 @@ if args.get("json", None) is not None:
             v = v.value
             if isinstance(v, Path):
                 v = str(v)
+            elif isinstance(v, list):
+                if all(map(lambda x: isinstance(x, Resolution), v)):
+                    v = [str(v) for v in v]
             dump[k] = v
     s = json.dumps(dump)
     try:
@@ -943,7 +1009,7 @@ if hasattr(pipe, "scheduler"):
 # SCHEDULER }}}
 
 # INPUT TENSOR {{{
-size = None
+latent_params: tuple[int, float, int] | None = None
 if input_image is None:
     factor: float | None = None
     channels: int | None = None
@@ -961,20 +1027,8 @@ if input_image is None:
         factor = pipe.prior_pipe.config.resolution_multiple
         channels = pipe.prior_pipe.prior.config.in_channels
 
-    if factor is not None and default_size is None:
-        if params["height"].value is None:
-            params["height"].value = 1024
-        if params["width"].value is None:
-            params["width"].value = 1024
-        default_size = math.ceil(1024 / factor)
-
-    if factor is not None and channels is not None and default_size is not None:
-        size = [
-            params["batch_size"].value,
-            channels,
-            math.ceil(params["height"].value / factor) if params["height"].value else default_size,
-            math.ceil(params["width"].value / factor) if params["width"].value else default_size,
-        ]
+    if factor is not None and channels is not None:
+        latent_params = (channels, factor, default_size if default_size is not None else math.ceil(1024 / factor))
     else:
         print(f'\nModel {params["model"].value} not able to use pre-noised latents.\nNoise options will not be respected.\n')
 
@@ -988,10 +1042,6 @@ job = {
 
 if not params["negative"].value:
     params["negative"].value = [""]
-if params["width"].value:
-    job["width"] = params["width"].value
-if params["height"].value:
-    job["height"] = params["height"].value
 
 if params["iter"].value is Iter.Shuffle:
     jobs = [job] * params["batch_count"].value
@@ -1057,6 +1107,7 @@ for kwargs in jobs:
             if param.name in kwargs and param.meta:
                 meta[param.name] = kwargs[param.name]
 
+        resolution: Resolution | None = kwargs.pop("resolution") if "resolution" in kwargs else None
         noise_power = kwargs.pop("noise_power") if "noise_power" in kwargs else None
         variance_power = kwargs.pop("variance_power") if "variance_power" in kwargs else None
         variance_scale = kwargs.pop("variance_scale") if "variance_scale" in kwargs else None
@@ -1086,15 +1137,21 @@ for kwargs in jobs:
         # NOISE {{{
         generators = [torch.Generator(noise_device).manual_seed(seed + n) for n in range(params["batch_size"].value)]
 
-        if size is not None:
-            latents = torch.zeros(size, dtype=dtype, device="cpu")
+        if latent_params is not None:
+            channels, factor, default_size = latent_params
+            if resolution is not None:
+                width, height = math.ceil(resolution.width / factor), math.ceil(resolution.height / factor)
+            else:
+                width, height = default_size, default_size
+            shape = (params["batch_size"].value, channels, height, width)
+            latents = torch.zeros(shape, dtype=dtype, device="cpu")
             for latent, generator in zip(latents, generators):
                 # Variance
                 if variance_power is not None and variance_scale is not None and variance_power != 0:
                     # save state so init noise seeds are the same with/without
                     state = generator.get_state()
-                    variance = torch.randn([1, size[1], variance_scale, variance_scale], generator=generator, dtype=noise_dtype, device=noise_device)
-                    latent += torch.nn.UpsamplingBilinear2d((size[2], size[3]))(variance).mul(variance_power)[0].to("cpu")
+                    variance = torch.randn([1, shape[1], variance_scale, variance_scale], generator=generator, dtype=noise_dtype, device=noise_device)
+                    latent += torch.nn.UpsamplingBilinear2d((shape[2], shape[3]))(variance).mul(variance_power)[0].to("cpu")
                     generator.set_state(state)
                 # Init noise
                 noise = torch.randn(latents.shape[1:], generator=generator, dtype=noise_dtype, device=noise_device)
@@ -1115,7 +1172,7 @@ for kwargs in jobs:
                     torch.tensor(cols[color], dtype=dtype, device="cpu")
                     .mul(color_power)
                     .div(sigma)
-                    .expand([size[0], size[2], size[3], size[1]])
+                    .expand([shape[0], shape[2], shape[3], shape[1]])
                     .permute((0, 3, 1, 2))
                 )
 
@@ -1143,6 +1200,9 @@ for kwargs in jobs:
         # PROCESS {{{
         if input_image is not None:
             kwargs["image"] = input_image
+
+        if resolution is not None:
+            kwargs["width"], kwargs["height"] = resolution.resolution
 
         if "prior_num_inference_steps" in pipe_params and "steps" in kwargs:
             steps = kwargs.pop("steps")
