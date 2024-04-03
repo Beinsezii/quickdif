@@ -176,8 +176,8 @@ class Sampler(enum.StrEnum):
     UnipcK = enum.auto()
     Unipc2 = enum.auto()
     Unipc2K = enum.auto()
-    # Unipc3 = enum.auto()
-    # Unipc3K = enum.auto()
+    Unipc3 = enum.auto()
+    Unipc3K = enum.auto()
 
 
 @enum.unique
@@ -981,8 +981,8 @@ if hasattr(pipe, "scheduler"):
         Sampler.UnipcK: UniPCMultistepScheduler.from_config(pipe.scheduler.config, solver_order=1, use_karras_sigmas=True),
         Sampler.Unipc2: UniPCMultistepScheduler.from_config(pipe.scheduler.config, solver_order=2, use_karras_sigmas=False),
         Sampler.Unipc2K: UniPCMultistepScheduler.from_config(pipe.scheduler.config, solver_order=2, use_karras_sigmas=True),
-        # Sampler.Unipc3: UniPCMultistepScheduler.from_config(pipe.scheduler.config, solver_order=3, use_karras_sigmas=False),
-        # Sampler.Unipc3K: UniPCMultistepScheduler.from_config(pipe.scheduler.config, solver_order=3, use_karras_sigmas=True),
+        Sampler.Unipc3: UniPCMultistepScheduler.from_config(pipe.scheduler.config, solver_order=3, use_karras_sigmas=False),
+        Sampler.Unipc3K: UniPCMultistepScheduler.from_config(pipe.scheduler.config, solver_order=3, use_karras_sigmas=True),
     }
     if params["sampler"].value:
         schedulers = []
