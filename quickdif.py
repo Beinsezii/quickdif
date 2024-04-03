@@ -11,7 +11,7 @@ from inspect import signature
 from io import BytesIO, UnsupportedOperation
 from pathlib import Path
 from sys import exit
-from typing import Any, List, Tuple
+from typing import Any
 
 import numpy as np
 import tomllib
@@ -22,7 +22,7 @@ from PIL import Image, PngImagePlugin
 # FUNCTIONS {{{
 # pexpand {{{
 @functools.cache
-def _pexpand_bounds(string: str, body: Tuple[str, str]) -> None | Tuple[int, int]:
+def _pexpand_bounds(string: str, body: tuple[str, str]) -> None | tuple[int, int]:
     start = len(string) + 1
     end = 0
     escape = False
@@ -42,7 +42,7 @@ def _pexpand_bounds(string: str, body: Tuple[str, str]) -> None | Tuple[int, int
     return None
 
 
-def _pexpand(prompt: str, body: Tuple[str, str] = ("{", "}"), sep: str = "|", single: bool = False) -> List[str]:
+def _pexpand(prompt: str, body: tuple[str, str] = ("{", "}"), sep: str = "|", single: bool = False) -> list[str]:
     bounds = _pexpand_bounds(prompt, body)
     # Split first body; first close after last open
     if bounds is not None:
@@ -91,7 +91,7 @@ def _pexpand_cache(*args, **kwargs):
     return _pexpand(*args, **kwargs)
 
 
-def pexpand(prompt: str, body: Tuple[str, str] = ("{", "}"), sep: str = "|", single: bool = False) -> List[str]:
+def pexpand(prompt: str, body: tuple[str, str] = ("{", "}"), sep: str = "|", single: bool = False) -> list[str]:
     if single:
         return _pexpand(prompt, body, sep, single)
     else:
@@ -337,7 +337,7 @@ class QDParam:
 # }}}
 
 # Parameters {{{
-params = [
+params_list: list[QDParam] = [
     ### Batching
     QDParam("prompt", str, multi=True, meta=True, help="Positive prompt"),
     QDParam("negative", str, short="-n", long="--negative", multi=True, meta=True, help="Negative prompt"),
@@ -517,7 +517,8 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
     QDParam("xl_vae", bool, long="--xl-vae", help="Override the SDXL VAE. Useful for models that use the broken 1.0 vae"),
     QDParam("disable_amd_patch", bool, long="--disable-amd-patch", help="Do not monkey patch the torch SDPA function on AMD cards"),
 ]
-params = {param.name: param for param in params}
+params: dict[str, QDParam] = {param.name: param for param in params_list}
+del params_list
 # }}}
 # QDPARAMS }}}
 
