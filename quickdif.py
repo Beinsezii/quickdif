@@ -342,7 +342,14 @@ params = [
     QDParam("prompt", str, multi=True, meta=True, help="Positive prompt"),
     QDParam("negative", str, short="-n", long="--negative", multi=True, meta=True, help="Negative prompt"),
     QDParam("seed", int, short="-e", long="--seed", multi=True, meta=True, help="Seed for RNG"),
-    QDParam("resolution", Resolution, short="-r", long="--resolution", multi=True),
+    QDParam(
+        "resolution",
+        Resolution,
+        short="-r",
+        long="--resolution",
+        multi=True,
+        help="Resolution in either [width]x[height] or aspect_x:aspect_y[:round][@megapixels] formats.",
+    ),
     QDParam(
         "steps",
         int,
@@ -449,8 +456,7 @@ params = [
         multi=True,
         meta=True,
         help="""Sampler to use in denoising. Naming scheme is as follows:
-euler/ddim/ddpm - Literal names;
-dpm - DPM++;
+euler/ddim/etc. - Literal names;
 k - Use karras sigmas;
 s - Use SDE stochastic noise;
 a - Use ancestral sampling;
