@@ -657,7 +657,7 @@ input_image = None
 if args["input"]:
     input_image = Image.open(args["input"])
 
-base_meta = {"model": params["model"].value, "url": "https://github.com/Beinsezii/quickdif"}
+base_meta: dict[str, str] = {"model": params["model"].value, "url": "https://github.com/Beinsezii/quickdif"}
 
 if args.get("comment", ""):
     try:
@@ -935,7 +935,7 @@ if hasattr(pipe, "vae"):
 # VAE }}}
 
 # SCHEDULER {{{
-schedulers: list[tuple[str, type[SchedulerMixin]]] = []
+schedulers: list[tuple[dict[str, str], type[SchedulerMixin]]] = []
 if hasattr(pipe, "scheduler"):
     sampler_args = {
         "steps_offset": 0,
@@ -972,26 +972,33 @@ if hasattr(pipe, "scheduler"):
             if k not in sig:
                 raise AssertionError(f"kwarg '{k}' not valid for requested scheduler for '{name}'.\nParameters: {list(sig)}")
 
-    builders: list[tuple[str, Any, dict[str, Any]]] = []
+    builders: list[tuple[dict[str, str], Any, dict[str, Any]]] = []
     if not params["sampler"].value:
         params["sampler"].value = [Sampler.Default]
     if params["sampler"].value:
         for s in params["sampler"].value:
             sched, kwargs = sampler_map[s]
-            builders.append((s, sched, kwargs))
+            builders.append(({"sampler": s}, sched, kwargs))
 
     if params["spacing"].value:
-        builders = [(name, sched, kwargs | {"timestep_spacing": space}) for name, sched, kwargs in builders for space in params["spacing"].value]
+        builders = [
+            (sched_meta | {"spacing": space}, sched, kwargs | {"timestep_spacing": space})
+            for sched_meta, sched, kwargs in builders
+            for space in params["spacing"].value
+        ]
+
+    for sched_meta, _, _ in builders:
+        if sched_meta["sampler"] == Sampler.Default:
+            del sched_meta["sampler"]
 
     # Consume a single builder
     if len(builders) == 1:
-        name, sched, kwargs = builders[0]
-        if name != Sampler.Default:
-            base_meta["sampler"] = name
+        sched_meta, sched, kwargs = builders[0]
+        base_meta |= sched_meta
         pipe.scheduler = sched.from_config(pipe.scheduler.config, **kwargs)
     # convert from (name, class, args) => (name, scheduler)
     elif len(builders) > 1:
-        schedulers = [(name, sched.from_config(pipe.scheduler.config, **kwargs)) for name, sched, kwargs in builders]
+        schedulers = [(sched_meta, sched.from_config(pipe.scheduler.config, **kwargs)) for sched_meta, sched, kwargs in builders]
 
 # SCHEDULER }}}
 
@@ -1087,12 +1094,12 @@ bar = tqdm.tqdm(desc="Images", total=total) if total > 1 else None
 for kwargs in jobs:
     with SmartSigint(job_name="current batch"):
         torch.cuda.empty_cache()
-        meta = base_meta.copy()
+        batch_meta = base_meta.copy()
         seed = kwargs.pop("seed")
 
         for param in params.values():
             if param.name in kwargs and param.meta:
-                meta[param.name] = kwargs[param.name]
+                batch_meta[param.name] = kwargs[param.name]
 
         resolution: Resolution | None = kwargs.pop("resolution") if "resolution" in kwargs else None
         noise_power = kwargs.pop("noise_power") if "noise_power" in kwargs else None
@@ -1115,12 +1122,9 @@ for kwargs in jobs:
             noise_dtype, noise_device = None, None
 
         if "scheduler" in kwargs:
-            name, sched = kwargs.pop("scheduler")
+            sched_meta, sched = kwargs.pop("scheduler")
+            batch_meta |= sched_meta
             pipe.scheduler = sched
-            if name != Sampler.Default:
-                meta["sampler"] = name
-            if params["spacing"].value and hasattr(sched.config, "timestep_spacing"):
-                meta["spacing"] = sched.config.timestep_spacing
 
         # NOISE {{{
         generators = [torch.Generator(noise_device).manual_seed(seed + n) for n in range(params["batch_size"].value)]
@@ -1220,7 +1224,7 @@ for kwargs in jobs:
 
         for n, image in enumerate(pipe(**kwargs).images):
             pnginfo = PngImagePlugin.PngInfo()
-            for k, v in meta.items():
+            for k, v in batch_meta.items():
                 pnginfo.add_text(k, str(v))
             if "latents" in kwargs or n == 0:
                 pnginfo.add_text("seed", str(seed + n))
