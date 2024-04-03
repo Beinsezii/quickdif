@@ -240,12 +240,14 @@ class Resolution:
     def __init__(self, resolution: str | tuple[int, int]):
         if isinstance(resolution, str):
             self._str = resolution
-            m = re.match(r"^ *([\d\.]+) *: *([\d\.]+) *(?:: *(\d+))? *(?:@ *([\d\.]+))? *$", resolution)
+            m = re.match(r"^ *([\d\.]+) *: *([\d\.]+) *(?:: *(\d+))? *(?:([@^]) *([\d\.]+))? *$", resolution)
             if m:
-                hor, ver, rnd, mpx = m.groups()
+                hor, ver, rnd, method, mpx = m.groups()
                 hor, ver = float(hor), float(ver)
                 rnd = 64 if rnd is None else int(rnd)
                 mpx = 1.0 if mpx is None else float(mpx)
+                if method == "^":
+                    mpx = mpx * mpx / 10**6
                 self._width = roundint(math.sqrt(hor / ver * mpx * 10**6), rnd)
                 self._height = roundint(math.sqrt(ver / hor * mpx * 10**6), rnd)
             else:
@@ -348,7 +350,7 @@ params = [
         short="-r",
         long="--resolution",
         multi=True,
-        help="Resolution in either [width]x[height] or aspect_x:aspect_y[:round][@megapixels] formats.",
+        help="Resolution in either [width]x[height] or aspect_x:aspect_y[:round][@megapixels|^square] formats.",
     ),
     QDParam(
         "steps",
