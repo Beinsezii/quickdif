@@ -522,151 +522,169 @@ del params_list
 # }}}
 # QDPARAMS }}}
 
-# CLI {{{
-parser = argparse.ArgumentParser(
-    description="Quick and easy inference for a variety of Diffusers models. Not all models support all options", add_help=False
-)
-for param in params.values():
-    args = [param.short] if param.short else []
-    args.append(param.long if param.long else param.name)
 
-    kwargs = {}
+def build_parser(params: dict[str, QDParam]) -> argparse.ArgumentParser:
+    # {{{
+    parser = argparse.ArgumentParser(
+        description="Quick and easy inference for a variety of Diffusers models. Not all models support all options", add_help=False
+    )
+    for param in params.values():
+        args = [param.short] if param.short else []
+        args.append(param.long if param.long else param.name)
 
-    help = [param.help]
-    if isinstance(param.value, list) and len(param.value) == 1:
-        help += [f'Default "{param.value[0]}"']
-    elif param.value is not None:
-        help += [f'Default "{param.value}"']
-    help = ". ".join([h for h in help if h is not None])
+        kwargs = {}
 
-    if help:
-        kwargs["help"] = help
+        help = [param.help]
+        if isinstance(param.value, list) and len(param.value) == 1:
+            help += [f'Default "{param.value[0]}"']
+        elif param.value is not None:
+            help += [f'Default "{param.value}"']
+        help = ". ".join([h for h in help if h is not None])
 
-    if param.typing == bool and param.multi is False:
-        kwargs["action"] = argparse.BooleanOptionalAction
-    else:
-        kwargs["type"] = param.typing
+        if help:
+            kwargs["help"] = help
 
-        if issubclass(param.typing, enum.Enum):
-            kwargs["choices"] = [e.value for e in param.typing]
-
-        if param.multi:
-            kwargs["nargs"] = "*"
+        if param.typing == bool and param.multi is False:
+            kwargs["action"] = argparse.BooleanOptionalAction
         else:
-            kwargs["nargs"] = "?"
+            kwargs["type"] = param.typing
 
-    parser.add_argument(*args, **kwargs)
+            if issubclass(param.typing, enum.Enum):
+                kwargs["choices"] = [e.value for e in param.typing]
 
-parser.add_argument("-i", "--input", type=argparse.FileType(mode="rb"), help="Input image")
-parser.add_argument(
-    "-I", "--include", type=argparse.FileType(mode="rb"), nargs="*", help="Include parameters from another image. Only works with quickdif images"
-)
-parser.add_argument("--json", type=argparse.FileType(mode="a+b"), help="Output settings to JSON")
-# It would be nice to write toml but I don't think its worth a 3rd party lib
-# parser.add_argument("--toml", type=argparse.FileType(mode="wb"), help="Output settings to TOML")
-parser.add_argument("--comment", type=str, help="Add a comment to the image.")
-parser.add_argument("--print", action="store_true", help="Print out generation params and exit.")
-parser.add_argument("--help", action="help")
+            if param.multi:
+                kwargs["nargs"] = "*"
+            else:
+                kwargs["nargs"] = "?"
 
-args = vars(parser.parse_args())
+        parser.add_argument(*args, **kwargs)
 
-for ext in "json", "toml":
-    default = Path(__file__).parent.joinpath(Path(f"quickdif.{ext}"))
-    if default.exists():
-        reader = default.open(mode="rb")
-        if args["include"] is None:
-            args["include"] = [reader]
-        else:
-            args["include"].insert(0, reader)
+    parser.add_argument("-i", "--input", type=argparse.FileType(mode="rb"), help="Input image")
+    parser.add_argument(
+        "-I", "--include", type=argparse.FileType(mode="rb"), nargs="*", help="Include parameters from another image. Only works with quickdif images"
+    )
+    parser.add_argument("--json", type=argparse.FileType(mode="a+b"), help="Output settings to JSON")
+    # It would be nice to write toml but I don't think its worth a 3rd party lib
+    # parser.add_argument("--toml", type=argparse.FileType(mode="a+b"), help="Output settings to TOML")
+    parser.add_argument("--comment", type=str, help="Add a comment to the image.")
+    parser.add_argument("--print", action="store_true", help="Print out generation params and exit.")
+    parser.add_argument("--help", action="help")
 
-if args["include"]:
-    for reader in args["include"]:
-        data = reader.read()
-        try:
-            data = data.decode()
-            for f, e in [
-                (tomllib.loads, tomllib.TOMLDecodeError),
-                (json.loads, json.JSONDecodeError),
-            ]:
-                try:
-                    for k, v in f(data).items():
+    return parser
+    # }}}
+
+
+def parse_cli(params: dict[str, QDParam]) -> tuple[str | None, Image.Image | None]:
+    # {{{
+    args = vars(build_parser(params).parse_args())
+
+    for ext in "json", "toml":
+        default = Path(__file__).parent.joinpath(Path(f"quickdif.{ext}"))
+        if default.exists():
+            reader = default.open(mode="rb")
+            if args["include"] is None:
+                args["include"] = [reader]
+            else:
+                args["include"].insert(0, reader)
+
+    if args["include"]:
+        for reader in args["include"]:
+            data = reader.read()
+            try:
+                data = data.decode()
+                for f, e in [
+                    (tomllib.loads, tomllib.TOMLDecodeError),
+                    (json.loads, json.JSONDecodeError),
+                ]:
+                    try:
+                        for k, v in f(data).items():
+                            if k in params:
+                                try:
+                                    params[k].value = v
+                                except ValueError:
+                                    print(f"Config value '{v}' cannot be assigned to parameter '{params[k].name}', ignoring")
+                            else:
+                                print(f'Unknown key in serial config "{k}"')
+                        break
+                    except e:
+                        pass
+            except UnicodeDecodeError:
+                with Image.open(BytesIO(data)) as meta_image:
+                    params["resolution"].value = (meta_image.width, meta_image.height)
+                    for k, v in getattr(meta_image, "text", {}).items():
                         if k in params:
-                            try:
-                                params[k].value = v
-                            except ValueError:
-                                print(f"Config value '{v}' cannot be assigned to parameter '{params[k].name}', ignoring")
-                        else:
-                            print(f'Unknown key in serial config "{k}"')
-                    break
-                except e:
-                    pass
-        except UnicodeDecodeError:
-            with Image.open(BytesIO(data)) as meta_image:
-                params["resolution"].value = (meta_image.width, meta_image.height)
-                for k, v in getattr(meta_image, "text", {}).items():
-                    if k in params:
-                        if k == "lora":
-                            params[k].value = v.split("\x1f")
-                        elif params[k].meta:
-                            try:
-                                params[k].value = v
-                            except ValueError:
-                                print(f"Config value '{v}' cannot be assigned to parameter '{params[k].name}', ignoring")
+                            if k == "lora":
+                                params[k].value = v.split("\x1f")
+                            elif params[k].meta:
+                                try:
+                                    params[k].value = v
+                                except ValueError:
+                                    print(f"Config value '{v}' cannot be assigned to parameter '{params[k].name}', ignoring")
 
-for id, val in args.items():
-    if id in params and val is not None and not (isinstance(val, list) and len(val) == 0 and params[id].long is None and params[id].short is None):
-        params[id].value = val
+    for id, val in args.items():
+        if (
+            id in params
+            and val is not None
+            and not (isinstance(val, list) and len(val) == 0 and params[id].long is None and params[id].short is None)
+        ):
+            params[id].value = val
 
-args = {k: v for k, v in args.items() if k not in params}
+    args = {k: v for k, v in args.items() if k not in params}
 
-if args.get("json", None) is not None:
-    dump = {}
-    for k, v in params.items():
-        if v.value != v.default:
-            v = v.value
-            if isinstance(v, Path):
-                v = str(v)
-            elif isinstance(v, list):
-                if all(map(lambda x: isinstance(x, Resolution), v)):
-                    v = [str(v) for v in v]
-            dump[k] = v
-    s = json.dumps(dump)
-    try:
-        args["json"].seek(0)
-        args["json"].truncate()
-    except UnsupportedOperation:
+    if args.get("json", None) is not None:
+        dump = {}
+        for k, v in params.items():
+            if v.value != v.default:
+                v = v.value
+                if isinstance(v, Path):
+                    v = str(v)
+                elif isinstance(v, list):
+                    if all(map(lambda x: isinstance(x, Resolution), v)):
+                        v = [str(v) for v in v]
+                dump[k] = v
+        s = json.dumps(dump)
+        try:
+            args["json"].seek(0)
+            args["json"].truncate()
+        except UnsupportedOperation:
+            pass
+        args["json"].write(s.encode())
+        exit()
+
+    for key in "prompt", "negative":
+        if params[key].value is not None:
+            params[key].value = [expanded for nested in [pexpand(p) for p in params[key].value] for expanded in nested]
+
+    if args.get("print", False):
+        print("\n".join([f"{p.name}: {p.value}" for p in params.values()]))
+        exit()
+
+    if params["output"].value.is_dir():
         pass
-    args["json"].write(s.encode())
-    exit()
+    elif not params["output"].value.exists():
+        params["output"].value.mkdir()
+    else:
+        raise ValueError("out must be directory")
 
-for key in "prompt", "negative":
-    if params[key].value is not None:
-        params[key].value = [expanded for nested in [pexpand(p) for p in params[key].value] for expanded in nested]
+    input_image = None
+    if args["input"]:
+        input_image = Image.open(args["input"])
 
-if args.get("print", False):
-    print("\n".join([f"{p.name}: {p.value}" for p in params.values()]))
-    exit()
+    comment = None
+    if args.get("comment", ""):
+        try:
+            with open(args["comment"], "r") as f:
+                comment = f.read()
+        except Exception:
+            comment = args["comment"]
 
-if params["output"].value.is_dir():
-    pass
-elif not params["output"].value.exists():
-    params["output"].value.mkdir()
-else:
-    raise ValueError("out must be directory")
+    return (comment, input_image)
+    # }}}
 
-input_image = None
-if args["input"]:
-    input_image = Image.open(args["input"])
 
-base_meta: dict[str, str] = {"model": params["model"].value, "url": "https://github.com/Beinsezii/quickdif"}
-
-if args.get("comment", ""):
-    try:
-        with open(args["comment"], "r") as f:
-            base_meta["comment"] = f.read()
-    except Exception:
-        base_meta["comment"] = args["comment"]
-# CLI }}}
+input_image = None  # TODO: make truly local
+if __name__ == "__main__":
+    (comment, input_image) = parse_cli(params)
 
 # TORCH PRELUDE {{{
 #
@@ -1266,17 +1284,14 @@ def process_job(
     # }}}
 
 
-def main(params: dict[str, QDParam]):
+def main(main_params: dict[str, QDParam], meta: dict[str, str]):
     # {{{
-    main_params = params
-    main_meta = base_meta
-
     pipe = get_pipe(params["model"].value, params["offload"].value, params["dtype"].value)
 
     if main_params["lora"].value:
         lora_string = apply_loras(main_params["lora"].value, pipe)
         if lora_string:
-            main_meta["lora"] = lora_string
+            meta["lora"] = lora_string
 
     if hasattr(pipe, "vae"):
         set_vae(main_params, pipe)
@@ -1293,7 +1308,7 @@ def main(params: dict[str, QDParam]):
         schedulers = build_schedulers(main_params, pipe.scheduler)
         if len(schedulers) == 1:
             sched_meta, sched = schedulers[0]
-            main_meta |= sched_meta
+            meta |= sched_meta
             pipe.scheduler = sched
     else:
         schedulers = []
@@ -1305,11 +1320,16 @@ def main(params: dict[str, QDParam]):
     pbar = tqdm(desc="Images", total=total_images)
     for job in jobs:
         with SmartSigint(job_name="current batch"):
-            process_job(main_params, pipe, job, image_ops, main_meta.copy())
+            process_job(main_params, pipe, job, image_ops, meta.copy())
             pbar.update(main_params["batch_size"].value)
 
     # }}}
 
 
 if __name__ == "__main__":
-    main(params)
+    meta: dict[str, str] = {"model": params["model"].value, "url": "https://github.com/Beinsezii/quickdif"}
+    comment = locals().get('comment', None)
+    if comment:
+        meta["comment"] = comment
+
+    main(params, meta)
