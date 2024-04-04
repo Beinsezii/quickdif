@@ -668,9 +668,13 @@ if args.get("comment", ""):
         base_meta["comment"] = args["comment"]
 # CLI }}}
 
-# TORCH {{{
+# TORCH PRELUDE {{{
+#
 # Load Torch and libs that depend on it after the CLI cause it's laggy.
 import torch  # noqa: E402
+
+torch.set_grad_enabled(False)
+torch.set_float32_matmul_precision("high")
 
 amd_hijack = False
 if not params["disable_amd_patch"].value:
@@ -744,10 +748,12 @@ try:
     from attn_custom import FlashAttnProcessor as rocm_flash_processor
 except ImportError:
     rocm_flash_processor = None
+# }}}
 
 
 # elegent solution from <https://stackoverflow.com/questions/842557/>
 class SmartSigint:
+    # {{{
     def __init__(self, num=1, job_name=None):
         self.num = num
         self.job_name = job_name if job_name is not None else "current job"
@@ -774,65 +780,67 @@ class SmartSigint:
     def __exit__(self, *_):
         self.terminate()
 
+    # }}}
 
-torch.set_grad_enabled(False)
-torch.set_float32_matmul_precision("high")
-dtype = {DType.FP16: torch.float16, DType.BF16: torch.bfloat16, DType.FP32: torch.float32}[params["dtype"].value]
-if "cascade" in params["model"].value and dtype == torch.float16:
-    dtype = torch.bfloat16
-# TORCH }}}
 
-# PIPE {{{
-pipe_args = {
-    "add_watermarker": False,
-    "safety_checker": None,
-    "torch_dtype": dtype,
-    "use_safetensors": True,
-    "watermarker": None,
-}
+def get_pipe(model: str, offload: Offload, dtype: DType) -> DiffusionPipeline:
+    # {{{
+    pipe_args = {
+        "add_watermarker": False,
+        "safety_checker": None,
+        "torch_dtype": {DType.FP16: torch.float16, DType.BF16: torch.bfloat16, DType.FP32: torch.float32}[dtype],
+        "use_safetensors": True,
+        "watermarker": None,
+    }
 
-with SmartSigint(num=2, job_name="model load"):
-    if "stabilityai/stable-cascade" in params["model"].value:
-        pipe = StableCascadeCombinedPipeline.from_pretrained(params["model"].value, **pipe_args)
-    elif params["model"].value.endswith(".safetensors"):
-        if input_image is not None:
-            try:
-                pipe = StableDiffusionXLImg2ImgPipeline.from_single_file(params["model"].value, **pipe_args)
-            except:  # noqa: E722
-                pipe = StableDiffusionImg2ImgPipeline.from_single_file(params["model"].value, **pipe_args)
+    with SmartSigint(num=2, job_name="model load"):
+        if "stabilityai/stable-cascade" in model:
+            if dtype == torch.float16:
+                pipe_args["torch_dtype"] = torch.bfloat16
+            pipe = StableCascadeCombinedPipeline.from_pretrained(model, **pipe_args)
+        elif model.endswith(".safetensors"):
+            if input_image is not None:
+                try:
+                    pipe = StableDiffusionXLImg2ImgPipeline.from_single_file(model, **pipe_args)
+                except:  # noqa: E722
+                    pipe = StableDiffusionImg2ImgPipeline.from_single_file(model, **pipe_args)
+            else:
+                try:
+                    pipe = StableDiffusionXLPipeline.from_single_file(model, **pipe_args)
+                except:  # noqa: E722
+                    pipe = StableDiffusionPipeline.from_single_file(model, **pipe_args)
         else:
-            try:
-                pipe = StableDiffusionXLPipeline.from_single_file(params["model"].value, **pipe_args)
-            except:  # noqa: E722
-                pipe = StableDiffusionPipeline.from_single_file(params["model"].value, **pipe_args)
-    else:
-        if input_image is not None:
-            pipe = AutoPipelineForImage2Image.from_pretrained(params["model"].value, **pipe_args)
-        else:
-            pipe = AutoPipelineForText2Image.from_pretrained(params["model"].value, **pipe_args)
+            if input_image is not None:
+                pipe = AutoPipelineForImage2Image.from_pretrained(model, **pipe_args)
+            else:
+                pipe = AutoPipelineForText2Image.from_pretrained(model, **pipe_args)
 
-XL = isinstance(pipe, StableDiffusionXLPipeline) or isinstance(pipe, StableDiffusionXLImg2ImgPipeline)
-SD = isinstance(pipe, StableDiffusionPipeline) or isinstance(pipe, StableDiffusionImg2ImgPipeline)
+    pipe.safety_checker = None
+    pipe.watermarker = None
+    match offload:
+        case Offload.NONE:
+            if hasattr(pipe, "prior_pipe"):
+                pipe.prior_pipe = pipe.prior_pipe.to("cuda")
+            if hasattr(pipe, "decoder_pipe"):
+                pipe.decoder_pipe = pipe.decoder_pipe.to("cuda")
+            pipe = pipe.to("cuda")
+        case Offload.Model:
+            pipe.enable_model_cpu_offload()
+        case Offload.Sequential:
+            pipe.enable_sequential_cpu_offload()
+        case _:
+            raise ValueError
 
-assert callable(pipe)
-pipe_params = signature(pipe).parameters
+    return pipe
+    # }}}
 
-pipe.safety_checker = None
-pipe.watermarker = None
-match params["offload"].value:
-    case Offload.NONE:
-        if hasattr(pipe, "prior_pipe"):
-            pipe.prior_pipe = pipe.prior_pipe.to("cuda")
-        if hasattr(pipe, "decoder_pipe"):
-            pipe.decoder_pipe = pipe.decoder_pipe.to("cuda")
-        pipe = pipe.to("cuda")
-    case Offload.Model:
-        pipe.enable_model_cpu_offload()
-    case Offload.Sequential:
-        pipe.enable_sequential_cpu_offload()
-    case other:
-        raise ValueError
-# PIPE }}}
+
+def is_xl(pipe: DiffusionPipeline) -> bool:
+    return isinstance(pipe, StableDiffusionXLPipeline) or isinstance(pipe, StableDiffusionXLImg2ImgPipeline)
+
+
+def is_sd(pipe: DiffusionPipeline) -> bool:
+    return isinstance(pipe, StableDiffusionPipeline) or isinstance(pipe, StableDiffusionImg2ImgPipeline)
 
 
 def set_attn(pipe: DiffusionPipeline, attention: Attention):
@@ -925,20 +933,19 @@ def get_compel(pipe: DiffusionPipeline) -> Compel | None:
 
 def set_vae(params: dict[str, QDParam], pipe: DiffusionPipeline):
     # {{{
-    if XL and params["xl_vae"].value:
+    if is_xl(pipe) and params["xl_vae"].value:
         pipe.vae = AutoencoderKL.from_pretrained("stabilityai/sdxl-vae", torch_dtype=pipe.vae.dtype, use_safetensors=True).to(pipe.vae.device)
     if params["tile"].value:
         pipe.vae.enable_tiling()
     else:
         pipe.vae.enable_slicing()
-    if dtype != torch.float16:
+    if pipe.dtype != torch.float16:
         pipe.vae.config.force_upcast = False
     # }}}
 
 
 def build_schedulers(params: dict[str, QDParam], default_scheduler: Any) -> list[tuple[dict[str, str], type[SchedulerMixin]]]:
     # {{{
-    schedulers: list[tuple[dict[str, str], type[SchedulerMixin]]] = []
     sampler_args = {
         "steps_offset": 0,
         "set_alpha_to_one": True,
@@ -969,7 +976,7 @@ def build_schedulers(params: dict[str, QDParam], default_scheduler: Any) -> list
         Sampler.Unipc3K: (UniPCMultistepScheduler, {"solver_order": 3, "use_karras_sigmas": True}),
     }
     for name, (sched, args) in sampler_map.items():
-        for k, v in args.items():
+        for k in args:
             sig = signature(sched).parameters
             if k not in sig:
                 raise AssertionError(f"kwarg '{k}' not valid for requested scheduler for '{name}'.\nParameters: {list(sig)}")
@@ -993,7 +1000,7 @@ def build_schedulers(params: dict[str, QDParam], default_scheduler: Any) -> list
         if sched_meta["sampler"] == Sampler.Default:
             del sched_meta["sampler"]
 
-    return [(sched_meta, sched.from_config(default_scheduler.config, **kwargs)) for sched_meta, sched, kwargs in builders]
+    return [(sched_meta, sched.from_config(default_scheduler.config, **(sampler_args | kwargs))) for sched_meta, sched, kwargs in builders]
     # }}}
 
 
@@ -1134,7 +1141,7 @@ def process_job(
             width, height = default_size, default_size
             job_args["width"], job_args["height"] = round(default_size * factor), round(default_size * factor)
         shape = (params["batch_size"].value, channels, height, width)
-        latents = torch.zeros(shape, dtype=dtype, device="cpu")
+        latents = torch.zeros(shape, dtype=pipe.dtype, device="cpu")
         for latent, generator in zip(latents, generators):
             # Variance
             if variance_power is not None and variance_scale is not None and variance_power != 0:
@@ -1150,16 +1157,16 @@ def process_job(
             latent += noise.to("cpu")
 
         # Colored latents
-        if XL:
+        if is_xl(pipe):
             cols = COLS_XL
-        elif SD or isinstance(pipe, PixArtAlphaPipeline):
+        elif is_sd(pipe) or isinstance(pipe, PixArtAlphaPipeline):
             cols = COLS_FTMSE
         else:
             cols = None
         if cols and color_power is not None and color is not None and color_power != 0:
             sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config).init_noise_sigma
             latents += (
-                torch.tensor(cols[color], dtype=dtype, device="cpu")
+                torch.tensor(cols[color], dtype=pipe.dtype, device="cpu")
                 .mul(color_power)
                 .div(sigma)
                 .expand([shape[0], shape[2], shape[3], shape[1]])
@@ -1177,7 +1184,7 @@ def process_job(
     if compel is not None:
         pos = job_args.pop("prompt") if "prompt" in job_args else ""
         neg = job_args.pop("negative") if "negative" in job_args else ""
-        if XL:
+        if is_xl(pipe):
             ncond, npool = compel.build_conditioning_tensor(neg)
             pcond, ppool = compel.build_conditioning_tensor(pos)
             job_args = job_args | {"pooled_prompt_embeds": ppool, "negative_pooled_prompt_embeds": npool}
@@ -1189,6 +1196,8 @@ def process_job(
     # CONDITIONING }}}
 
     # INFERENCE {{{
+    pipe_params = signature(pipe).parameters
+
     if input_image is not None:
         job_args["image"] = input_image
 
@@ -1261,30 +1270,31 @@ def main(params: dict[str, QDParam]):
     # {{{
     main_params = params
     main_meta = base_meta
-    main_pipe = pipe
+
+    pipe = get_pipe(params["model"].value, params["offload"].value, params["dtype"].value)
 
     if main_params["lora"].value:
-        lora_string = apply_loras(main_params["lora"].value, main_pipe)
+        lora_string = apply_loras(main_params["lora"].value, pipe)
         if lora_string:
             main_meta["lora"] = lora_string
 
-    if hasattr(main_pipe, "vae"):
-        set_vae(main_params, main_pipe)
+    if hasattr(pipe, "vae"):
+        set_vae(main_params, pipe)
 
     if main_params["compile"].value:
-        if hasattr(main_pipe, "unet"):
-            main_pipe.unet = torch.compile(main_pipe.unet)
-        if hasattr(main_pipe, "transformer"):
-            main_pipe.transformer = torch.compile(main_pipe.transformer)
+        if hasattr(pipe, "unet"):
+            pipe.unet = torch.compile(pipe.unet)
+        if hasattr(pipe, "transformer"):
+            pipe.transformer = torch.compile(pipe.transformer)
     elif main_params["attention"].value:
-        set_attn(main_pipe, params["attention"].value)
+        set_attn(pipe, params["attention"].value)
 
-    if hasattr(main_pipe, "scheduler"):
-        schedulers = build_schedulers(main_params, main_pipe.scheduler)
+    if hasattr(pipe, "scheduler"):
+        schedulers = build_schedulers(main_params, pipe.scheduler)
         if len(schedulers) == 1:
             sched_meta, sched = schedulers[0]
             main_meta |= sched_meta
-            main_pipe.scheduler = sched
+            pipe.scheduler = sched
     else:
         schedulers = []
 
@@ -1295,7 +1305,7 @@ def main(params: dict[str, QDParam]):
     pbar = tqdm(desc="Images", total=total_images)
     for job in jobs:
         with SmartSigint(job_name="current batch"):
-            process_job(main_params, main_pipe, job, image_ops, main_meta.copy())
+            process_job(main_params, pipe, job, image_ops, main_meta.copy())
             pbar.update(main_params["batch_size"].value)
 
     # }}}
