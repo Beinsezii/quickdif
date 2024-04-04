@@ -1013,14 +1013,14 @@ if input_image is None:
     if hasattr(pipe, "vae_scale_factor"):
         factor = pipe.vae_scale_factor
     if hasattr(pipe, "unet"):
-        channels = pipe.unet.config.in_channels
-        default_size = pipe.unet.config.sample_size
+        channels = pipe.unet.config["in_channels"]
+        default_size = pipe.unet.config["sample_size"]
     if hasattr(pipe, "transformer"):
-        channels = pipe.transformer.config.in_channels
-        default_size = pipe.transformer.config.sample_size
+        channels = pipe.transformer.config["in_channels"]
+        default_size = pipe.transformer.config["sample_size"]
     if hasattr(pipe, "prior_pipe"):
-        factor = pipe.prior_pipe.config.resolution_multiple
-        channels = pipe.prior_pipe.prior.config.in_channels
+        factor = pipe.prior_pipe.config["resolution_multiple"]
+        channels = pipe.prior_pipe.prior.config["in_channels"]
 
     if factor is not None and channels is not None:
         latent_params = (channels, factor, default_size if default_size is not None else round(1024 / factor))
