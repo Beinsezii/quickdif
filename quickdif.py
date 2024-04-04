@@ -18,8 +18,49 @@ import tomllib
 from PIL import Image, PngImagePlugin
 from tqdm import tqdm
 
+# LATENT COLORS {{{
+COLS_XL = {
+    "black": [-2.8232, 0.5033, 0.3139, 0.3359],
+    "white": [2.3501, 0.2248, 1.2127, -1.0597],
+    "red": [-2.5614, -2.5784, 1.3915, -1.6186],
+    "green": [-0.4599, 1.8333, 3.4502, 1.1301],
+    "blue": [0.0593, 2.1290, -2.3017, 0.5399],
+    "cyan": [1.6195, 3.3881, 0.5599, 1.0360],
+    "magenta": [-0.1252, -0.6654, -1.5711, -1.1750],
+    "yellow": [-0.8608, -1.3759, 4.2304, -1.0693],
+}
+COLS_FTMSE = {
+    "black": [-0.9953, -2.6024, 1.1153, 1.2966],
+    "white": [2.1749, 1.4434, -0.0318, -1.1621],
+    "red": [1.2575, -0.8768, -1.8788, 0.7792],
+    "green": [0.7681, 0.8218, 2.3520, 1.8135],
+    "blue": [-0.6330, -3.0466, 0.9888, -1.4022],
+    "cyan": [0.5828, -0.1041, 2.9347, -0.0978],
+    "magenta": [0.7387, -1.5557, -1.3593, -1.4386],
+    "yellow": [2.3476, 2.0031, -0.0791, 1.6609],
+}
+# LATENT COLORS }}}
 
-# FUNCTIONS {{{
+
+# UTILS {{{
+def oversample(population: list, k: int):
+    samples = []
+    while len(samples) < k:
+        samples += random.sample(population, min(len(population), k - len(samples)))
+    assert len(samples) == k
+    return samples
+
+
+def roundint(n: int | float, step: int) -> int:
+    if n % step >= step / 2:
+        return round(n + step - (n % step))
+    else:
+        return round(n - (n % step))
+
+
+# }}}
+
+
 # pexpand {{{
 @functools.cache
 def _pexpand_bounds(string: str, body: tuple[str, str]) -> None | tuple[int, int]:
@@ -99,49 +140,6 @@ def pexpand(prompt: str, body: tuple[str, str] = ("{", "}"), sep: str = "|", sin
 
 
 # }}}
-
-
-def oversample(population: list, k: int):
-    samples = []
-    while len(samples) < k:
-        samples += random.sample(population, min(len(population), k - len(samples)))
-    assert len(samples) == k
-    return samples
-
-
-def roundint(n: int | float, step: int) -> int:
-    if n % step >= step / 2:
-        return round(n + step - (n % step))
-    else:
-        return round(n - (n % step))
-
-
-# }}}
-
-# LATENT COLORS {{{
-COLS_XL = {
-    "black": [-2.8232, 0.5033, 0.3139, 0.3359],
-    "white": [2.3501, 0.2248, 1.2127, -1.0597],
-    "red": [-2.5614, -2.5784, 1.3915, -1.6186],
-    "green": [-0.4599, 1.8333, 3.4502, 1.1301],
-    "blue": [0.0593, 2.1290, -2.3017, 0.5399],
-    "cyan": [1.6195, 3.3881, 0.5599, 1.0360],
-    "magenta": [-0.1252, -0.6654, -1.5711, -1.1750],
-    "yellow": [-0.8608, -1.3759, 4.2304, -1.0693],
-}
-COLS_FTMSE = {
-    "black": [-0.9953, -2.6024, 1.1153, 1.2966],
-    "white": [2.1749, 1.4434, -0.0318, -1.1621],
-    "red": [1.2575, -0.8768, -1.8788, 0.7792],
-    "green": [0.7681, 0.8218, 2.3520, 1.8135],
-    "blue": [-0.6330, -3.0466, 0.9888, -1.4022],
-    "cyan": [0.5828, -0.1041, 2.9347, -0.0978],
-    "magenta": [0.7387, -1.5557, -1.3593, -1.4386],
-    "yellow": [2.3476, 2.0031, -0.0791, 1.6609],
-}
-# LATENT COLORS }}}
-
-# QDPARAMS {{{
 
 
 # Enums {{{
@@ -231,10 +229,9 @@ class LatentColor(enum.StrEnum):
 
 # }}}
 
-# Structs {{{
-
 
 class Resolution:
+    # {{{
     def __init__(self, resolution: str | tuple[int, int]):
         if isinstance(resolution, str):
             self._str = resolution
@@ -283,8 +280,11 @@ class Resolution:
     def __str__(self):
         return self._str if self._str is not None else self.__repr__()
 
+    # }}}
+
 
 class QDParam:
+    # {{{
     def __init__(
         self,
         name: str,
@@ -333,194 +333,199 @@ class QDParam:
             else:
                 self._value = self._cast(new)
 
+    # }}}
 
-# }}}
 
-# Parameters {{{
-params_list: list[QDParam] = [
-    ### Batching
-    QDParam("prompt", str, multi=True, meta=True, help="Positive prompt"),
-    QDParam("negative", str, short="-n", long="--negative", multi=True, meta=True, help="Negative prompt"),
-    QDParam("seed", int, short="-e", long="--seed", multi=True, meta=True, help="Seed for RNG"),
-    QDParam(
-        "resolution",
-        Resolution,
-        short="-r",
-        long="--resolution",
-        multi=True,
-        help="Resolution in either [width]x[height] or aspect_x:aspect_y[:round][@megapixels|^square] formats.",
-    ),
-    QDParam(
-        "steps",
-        int,
-        short="-s",
-        long="--steps",
-        value=30,
-        multi=True,
-        meta=True,
-        help="Amount of denoising steps. Prior/Decoder models this only affects the Prior",
-    ),
-    QDParam(
-        "decoder_steps",
-        int,
-        short="-ds",
-        long="--decoder-steps",
-        value=-8,
-        multi=True,
-        meta=True,
-        help="Amount of denoising steps for the Decoder if applicable",
-    ),
-    QDParam(
-        "guidance",
-        float,
-        short="-g",
-        long="--guidance",
-        value=5.0,
-        multi=True,
-        meta=True,
-        help="CFG/Classier-Free Guidance. Will guide diffusion more strongly towards the prompts. High values will produce unnatural images",
-    ),
-    QDParam(
-        "decoder_guidance", float, short="-dg", long="--decoder-guidance", multi=True, meta=True, help="Guidance for the Decoder stage if applicable"
-    ),
-    QDParam(
-        "rescale",
-        float,
-        short="-G",
-        long="--rescale",
-        value=0.0,
-        multi=True,
-        meta=True,
-        help="Rescale the noise during guidance. Moderate values may help produce more natural images when using strong guidance",
-    ),
-    QDParam(
-        "denoise", float, short="-d", long="--denoise", multi=True, meta=True, help="Denoising amount for Img2Img. Higher values will change more"
-    ),
-    QDParam(
-        "noise_type",
-        NoiseType,
-        short="-nt",
-        long="--noise-type",
-        value=NoiseType.Cpu32,
-        multi=True,
-        meta=True,
-        help="Device and precision to source RNG from. To reproduce seeds from other diffusion programs it may be necessary to change this",
-    ),
-    QDParam(
-        "noise_power",
-        float,
-        short="-np",
-        long="--noise-power",
-        multi=True,
-        meta=True,
-        help="Multiplier to the initial latent noise if applicable. <1 for smoother, >1 for more details",
-    ),
-    QDParam(
-        "color",
-        LatentColor,
-        short="-C",
-        long="--color",
-        value=LatentColor.Black,
-        multi=True,
-        meta=True,
-        help="Color of initial latent noise if applicable. Currently only for XL and SD-FT-MSE latent spaces",
-    ),
-    QDParam("color_power", float, short="-c", long="--color-power", multi=True, meta=True, help="Power/opacity of colored latent noise"),
-    QDParam(
-        "variance_scale",
-        int,
-        short="-vs",
-        long="--variance-scale",
-        value=2,
-        multi=True,
-        meta=True,
-        help="Amount of 'zones' for variance noise. '2' will make a 2x2 grid or 4 tiles",
-    ),
-    QDParam(
-        "variance_power",
-        float,
-        short="-vp",
-        long="--variance-power",
-        multi=True,
-        meta=True,
-        help="Power/opacity for variance noise. Variance noise simply adds randomly generated colored zones to encourage new compositions on overfitted models",
-    ),
-    QDParam("pixelate", float, long="--pixelate", multi=True, meta=True, help="Pixelate image using a divisor. Best used with a pixel art Lora"),
-    QDParam("posterize", int, long="--posterize", multi=True, meta=True, help="Set amount of colors per channel. Best used with --pixelate"),
-    QDParam(
-        "sampler",
-        Sampler,
-        short="-S",
-        long="--sampler",
-        value=Sampler.Default,
-        multi=True,
-        meta=True,
-        help="""Sampler to use in denoising. Naming scheme is as follows:
+def qdparams() -> dict[str, QDParam]:
+    # {{{
+    params = [
+        ### Batching
+        QDParam("prompt", str, multi=True, meta=True, help="Positive prompt"),
+        QDParam("negative", str, short="-n", long="--negative", multi=True, meta=True, help="Negative prompt"),
+        QDParam("seed", int, short="-e", long="--seed", multi=True, meta=True, help="Seed for RNG"),
+        QDParam(
+            "resolution",
+            Resolution,
+            short="-r",
+            long="--resolution",
+            multi=True,
+            help="Resolution in either [width]x[height] or aspect_x:aspect_y[:round][@megapixels|^square] formats.",
+        ),
+        QDParam(
+            "steps",
+            int,
+            short="-s",
+            long="--steps",
+            value=30,
+            multi=True,
+            meta=True,
+            help="Amount of denoising steps. Prior/Decoder models this only affects the Prior",
+        ),
+        QDParam(
+            "decoder_steps",
+            int,
+            short="-ds",
+            long="--decoder-steps",
+            value=-8,
+            multi=True,
+            meta=True,
+            help="Amount of denoising steps for the Decoder if applicable",
+        ),
+        QDParam(
+            "guidance",
+            float,
+            short="-g",
+            long="--guidance",
+            value=5.0,
+            multi=True,
+            meta=True,
+            help="CFG/Classier-Free Guidance. Will guide diffusion more strongly towards the prompts. High values will produce unnatural images",
+        ),
+        QDParam(
+            "decoder_guidance",
+            float,
+            short="-dg",
+            long="--decoder-guidance",
+            multi=True,
+            meta=True,
+            help="Guidance for the Decoder stage if applicable",
+        ),
+        QDParam(
+            "rescale",
+            float,
+            short="-G",
+            long="--rescale",
+            value=0.0,
+            multi=True,
+            meta=True,
+            help="Rescale the noise during guidance. Moderate values may help produce more natural images when using strong guidance",
+        ),
+        QDParam(
+            "denoise", float, short="-d", long="--denoise", multi=True, meta=True, help="Denoising amount for Img2Img. Higher values will change more"
+        ),
+        QDParam(
+            "noise_type",
+            NoiseType,
+            short="-nt",
+            long="--noise-type",
+            value=NoiseType.Cpu32,
+            multi=True,
+            meta=True,
+            help="Device and precision to source RNG from. To reproduce seeds from other diffusion programs it may be necessary to change this",
+        ),
+        QDParam(
+            "noise_power",
+            float,
+            short="-np",
+            long="--noise-power",
+            multi=True,
+            meta=True,
+            help="Multiplier to the initial latent noise if applicable. <1 for smoother, >1 for more details",
+        ),
+        QDParam(
+            "color",
+            LatentColor,
+            short="-C",
+            long="--color",
+            value=LatentColor.Black,
+            multi=True,
+            meta=True,
+            help="Color of initial latent noise if applicable. Currently only for XL and SD-FT-MSE latent spaces",
+        ),
+        QDParam("color_power", float, short="-c", long="--color-power", multi=True, meta=True, help="Power/opacity of colored latent noise"),
+        QDParam(
+            "variance_scale",
+            int,
+            short="-vs",
+            long="--variance-scale",
+            value=2,
+            multi=True,
+            meta=True,
+            help="Amount of 'zones' for variance noise. '2' will make a 2x2 grid or 4 tiles",
+        ),
+        QDParam(
+            "variance_power",
+            float,
+            short="-vp",
+            long="--variance-power",
+            multi=True,
+            meta=True,
+            help="Power/opacity for variance noise. Variance noise simply adds randomly generated colored zones to encourage new compositions on overfitted models",
+        ),
+        QDParam("pixelate", float, long="--pixelate", multi=True, meta=True, help="Pixelate image using a divisor. Best used with a pixel art Lora"),
+        QDParam("posterize", int, long="--posterize", multi=True, meta=True, help="Set amount of colors per channel. Best used with --pixelate"),
+        QDParam(
+            "sampler",
+            Sampler,
+            short="-S",
+            long="--sampler",
+            value=Sampler.Default,
+            multi=True,
+            meta=True,
+            help="""Sampler to use in denoising. Naming scheme is as follows:
 euler/ddim/etc. - Literal names;
 k - Use karras sigmas;
 s - Use SDE stochastic noise;
 a - Use ancestral sampling;
 2/3 - Use 2nd/3rd order sampling;
 Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
-    ),
-    QDParam("spacing", Spacing, long="--spacing", value=Spacing.Trailing, multi=True, meta=True, help="Sampler timestep spacing"),
-    ### Global
-    QDParam(
-        "model",
-        str,
-        short="-m",
-        long="--model",
-        value="stabilityai/stable-diffusion-xl-base-1.0",
-        meta=True,
-        help="Safetensor file or HuggingFace model ID",
-    ),
-    QDParam("lora", str, short="-l", long="--lora", meta=True, multi=True, help='Apply Loras, ex. "ms_paint.safetensors:::0.6"'),
-    QDParam("batch_count", int, short="-b", long="--batch-count", value=1, help="Behavior dependant on 'iter'"),
-    QDParam("batch_size", int, short="-B", long="--batch-size", value=1, help="Amount of images to produce in each job"),
-    QDParam(
-        "iter",
-        Iter,
-        long="--iter",
-        value=Iter.Basic,
-        help="""Controls how jobs are created:
+        ),
+        QDParam("spacing", Spacing, long="--spacing", value=Spacing.Trailing, multi=True, meta=True, help="Sampler timestep spacing"),
+        ### Global
+        QDParam(
+            "model",
+            str,
+            short="-m",
+            long="--model",
+            value="stabilityai/stable-diffusion-xl-base-1.0",
+            meta=True,
+            help="Safetensor file or HuggingFace model ID",
+        ),
+        QDParam("lora", str, short="-l", long="--lora", meta=True, multi=True, help='Apply Loras, ex. "ms_paint.safetensors:::0.6"'),
+        QDParam("batch_count", int, short="-b", long="--batch-count", value=1, help="Behavior dependant on 'iter'"),
+        QDParam("batch_size", int, short="-B", long="--batch-size", value=1, help="Amount of images to produce in each job"),
+        QDParam(
+            "iter",
+            Iter,
+            long="--iter",
+            value=Iter.Basic,
+            help="""Controls how jobs are created:
 'basic' - Run every combination of parameters 'batch_count' times, incrementing seed each 'batch_count';
 'walk' - Run every combination of parameters 'batch_count' times, incrementing seed for every individual job;
 'shuffle' - Pick randomly from all given parameters 'batch_count' times""",
-    ),
-    ### System
-    QDParam(
-        "output",
-        Path,
-        short="-o",
-        long="--output",
-        value=Path("/tmp/quickdif/" if Path("/tmp/").exists() else "./output/"),
-        help="Output directory for images",
-    ),
-    QDParam(
-        "dtype",
-        DType,
-        short="-dt",
-        long="--dtype",
-        value=DType.FP16,
-        help="Data format for inference. Should be left at FP16 unless the device or model does not work properly",
-    ),
-    QDParam(
-        "offload",
-        Offload,
-        long="--offload",
-        value=Offload.NONE,
-        help="Set amount of CPU offload. In most UIs, 'model' is equivalent to --med-vram while 'sequential' is equivalent to --low-vram",
-    ),
-    QDParam("attention", Attention, value=Attention.Default, long="--attention", help="Select attention processor to use"),
-    QDParam("compile", bool, long="--compile", help="Compile network with torch.compile()"),
-    QDParam("tile", bool, long="--tile", help="Tile VAE. Slicing is already used by default so only set tile if creating very large images"),
-    QDParam("xl_vae", bool, long="--xl-vae", help="Override the SDXL VAE. Useful for models that use the broken 1.0 vae"),
-    QDParam("disable_amd_patch", bool, long="--disable-amd-patch", help="Do not monkey patch the torch SDPA function on AMD cards"),
-]
-params: dict[str, QDParam] = {param.name: param for param in params_list}
-del params_list
-# }}}
-# QDPARAMS }}}
+        ),
+        ### System
+        QDParam(
+            "output",
+            Path,
+            short="-o",
+            long="--output",
+            value=Path("/tmp/quickdif/" if Path("/tmp/").exists() else "./output/"),
+            help="Output directory for images",
+        ),
+        QDParam(
+            "dtype",
+            DType,
+            short="-dt",
+            long="--dtype",
+            value=DType.FP16,
+            help="Data format for inference. Should be left at FP16 unless the device or model does not work properly",
+        ),
+        QDParam(
+            "offload",
+            Offload,
+            long="--offload",
+            value=Offload.NONE,
+            help="Set amount of CPU offload. In most UIs, 'model' is equivalent to --med-vram while 'sequential' is equivalent to --low-vram",
+        ),
+        QDParam("attention", Attention, value=Attention.Default, long="--attention", help="Select attention processor to use"),
+        QDParam("compile", bool, long="--compile", help="Compile network with torch.compile()"),
+        QDParam("tile", bool, long="--tile", help="Tile VAE. Slicing is already used by default so only set tile if creating very large images"),
+        QDParam("xl_vae", bool, long="--xl-vae", help="Override the SDXL VAE. Useful for models that use the broken 1.0 vae"),
+        QDParam("disable_amd_patch", bool, long="--disable-amd-patch", help="Do not monkey patch the torch SDPA function on AMD cards"),
+    ]  # ugh autoindent
+    return {param.name: param for param in params}
+    # }}}
 
 
 def build_parser(params: dict[str, QDParam]) -> argparse.ArgumentParser:
@@ -682,9 +687,12 @@ def parse_cli(params: dict[str, QDParam]) -> tuple[str | None, Image.Image | Non
     # }}}
 
 
+disable_amd_patch = True
 input_image = None  # TODO: make truly local
 if __name__ == "__main__":
-    (comment, input_image) = parse_cli(params)
+    global_params = qdparams()
+    (comment, input_image) = parse_cli(global_params)
+    disable_amd_patch = global_params["disable_amd_patch"].value
 
 # TORCH PRELUDE {{{
 #
@@ -695,7 +703,7 @@ torch.set_grad_enabled(False)
 torch.set_float32_matmul_precision("high")
 
 amd_hijack = False
-if not params["disable_amd_patch"].value:
+if not disable_amd_patch:
     if "AMD" in torch.cuda.get_device_name() or "Radeon" in torch.cuda.get_device_name():
         try:
             from flash_attn import flash_attn_func
@@ -1044,8 +1052,6 @@ def get_latent_params(pipe: DiffusionPipeline) -> tuple[int, float, int] | None:
 
         if factor is not None and channels is not None:
             latent_params = (channels, factor, default_size if default_size is not None else round(1024 / factor))
-        else:
-            print(f'\nModel {params["model"].value} not able to use pre-noised latents.\nNoise options will not be respected.\n')
 
     return latent_params
     # }}}
@@ -1284,28 +1290,31 @@ def process_job(
     # }}}
 
 
-def main(main_params: dict[str, QDParam], meta: dict[str, str]):
+def main(params: dict[str, QDParam], meta: dict[str, str]):
     # {{{
     pipe = get_pipe(params["model"].value, params["offload"].value, params["dtype"].value)
 
-    if main_params["lora"].value:
-        lora_string = apply_loras(main_params["lora"].value, pipe)
+    if not get_latent_params(pipe):
+        print(f'\nModel {params["model"].value} not able to use pre-noised latents.\nNoise options will not be respected.\n')
+
+    if params["lora"].value:
+        lora_string = apply_loras(params["lora"].value, pipe)
         if lora_string:
             meta["lora"] = lora_string
 
     if hasattr(pipe, "vae"):
-        set_vae(main_params, pipe)
+        set_vae(params, pipe)
 
-    if main_params["compile"].value:
+    if params["compile"].value:
         if hasattr(pipe, "unet"):
             pipe.unet = torch.compile(pipe.unet)
         if hasattr(pipe, "transformer"):
             pipe.transformer = torch.compile(pipe.transformer)
-    elif main_params["attention"].value:
+    elif params["attention"].value:
         set_attn(pipe, params["attention"].value)
 
     if hasattr(pipe, "scheduler"):
-        schedulers = build_schedulers(main_params, pipe.scheduler)
+        schedulers = build_schedulers(params, pipe.scheduler)
         if len(schedulers) == 1:
             sched_meta, sched = schedulers[0]
             meta |= sched_meta
@@ -1313,22 +1322,23 @@ def main(main_params: dict[str, QDParam], meta: dict[str, str]):
     else:
         schedulers = []
 
-    jobs, image_ops = build_jobs(main_params, schedulers)
+    jobs, image_ops = build_jobs(params, schedulers)
 
-    total_images = len(jobs) * main_params["batch_size"].value
-    print(f'\nGenerating {len(jobs)} batches of {main_params["batch_size"].value} images for {total_images} total...')
+    total_images = len(jobs) * params["batch_size"].value
+    print(f'\nGenerating {len(jobs)} batches of {params["batch_size"].value} images for {total_images} total...')
     pbar = tqdm(desc="Images", total=total_images)
     for job in jobs:
         with SmartSigint(job_name="current batch"):
-            process_job(main_params, pipe, job, image_ops, meta.copy())
-            pbar.update(main_params["batch_size"].value)
+            process_job(params, pipe, job, image_ops, meta.copy())
+            pbar.update(params["batch_size"].value)
 
     # }}}
 
 
 if __name__ == "__main__":
+    params = locals()["global_params"]
+    comment = locals()["comment"]
     meta: dict[str, str] = {"model": params["model"].value, "url": "https://github.com/Beinsezii/quickdif"}
-    comment = locals().get('comment', None)
     if comment:
         meta["comment"] = comment
 
