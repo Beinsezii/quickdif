@@ -688,11 +688,10 @@ def parse_cli(params: dict[str, QDParam]) -> tuple[str | None, Image.Image | Non
 
 
 disable_amd_patch = True
-input_image = None  # TODO: make truly local
 if __name__ == "__main__":
-    global_params = qdparams()
-    (comment, input_image) = parse_cli(global_params)
-    disable_amd_patch = global_params["disable_amd_patch"].value
+    cli_params = qdparams()
+    (cli_comment, cli_image) = parse_cli(cli_params)
+    disable_amd_patch = cli_params["disable_amd_patch"].value
 
 # TORCH PRELUDE {{{
 #
@@ -741,8 +740,8 @@ if not disable_amd_patch:
     else:
         print(f"# # #\nCould not detect AMD GPU from:\n{torch.cuda.get_device_name()}\n# # #")
 
-import transformers  # noqa: E402
 from compel import Compel, ReturnedEmbeddingsType  # noqa: E402
+from transformers import CLIPTokenizer  # noqa: E402
 
 from diffusers import (  # noqa: E402
     AutoencoderKL,
@@ -809,7 +808,7 @@ class SmartSigint:
     # }}}
 
 
-def get_pipe(model: str, offload: Offload, dtype: DType) -> DiffusionPipeline:
+def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool) -> DiffusionPipeline:
     # {{{
     pipe_args = {
         "add_watermarker": False,
@@ -825,7 +824,7 @@ def get_pipe(model: str, offload: Offload, dtype: DType) -> DiffusionPipeline:
                 pipe_args["torch_dtype"] = torch.bfloat16
             pipe = StableCascadeCombinedPipeline.from_pretrained(model, **pipe_args)
         elif model.endswith(".safetensors"):
-            if input_image is not None:
+            if img2img:
                 try:
                     pipe = StableDiffusionXLImg2ImgPipeline.from_single_file(model, **pipe_args)
                 except:  # noqa: E722
@@ -836,7 +835,7 @@ def get_pipe(model: str, offload: Offload, dtype: DType) -> DiffusionPipeline:
                 except:  # noqa: E722
                     pipe = StableDiffusionPipeline.from_single_file(model, **pipe_args)
         else:
-            if input_image is not None:
+            if img2img:
                 pipe = AutoPipelineForImage2Image.from_pretrained(model, **pipe_args)
             else:
                 pipe = AutoPipelineForText2Image.from_pretrained(model, **pipe_args)
@@ -939,7 +938,7 @@ def apply_loras(loras: list[str], pipe: DiffusionPipeline) -> str | None:
 
 def get_compel(pipe: DiffusionPipeline) -> Compel | None:
     # {{{
-    if hasattr(pipe, "tokenizer") and isinstance(pipe.tokenizer, transformers.models.clip.tokenization_clip.CLIPTokenizer):
+    if hasattr(pipe, "tokenizer") and isinstance(pipe.tokenizer, CLIPTokenizer):
         if hasattr(pipe, "tokenizer_2"):
             compel = Compel(
                 tokenizer=[pipe.tokenizer, pipe.tokenizer_2],
@@ -1032,28 +1031,26 @@ def build_schedulers(params: dict[str, QDParam], default_scheduler: Any) -> list
 
 def get_latent_params(pipe: DiffusionPipeline) -> tuple[int, float, int] | None:
     # {{{
-    latent_params: tuple[int, float, int] | None = None
-    if input_image is None:
-        factor: float | None = None
-        channels: int | None = None
-        default_size: int | None = None
+    factor: float | None = None
+    channels: int | None = None
+    default_size: int | None = None
 
-        if hasattr(pipe, "vae_scale_factor"):
-            factor = pipe.vae_scale_factor
-        if hasattr(pipe, "unet"):
-            channels = pipe.unet.config["in_channels"]
-            default_size = pipe.unet.config["sample_size"]
-        if hasattr(pipe, "transformer"):
-            channels = pipe.transformer.config["in_channels"]
-            default_size = pipe.transformer.config["sample_size"]
-        if hasattr(pipe, "prior_pipe"):
-            factor = pipe.prior_pipe.config["resolution_multiple"]
-            channels = pipe.prior_pipe.prior.config["in_channels"]
+    if hasattr(pipe, "vae_scale_factor"):
+        factor = pipe.vae_scale_factor
+    if hasattr(pipe, "unet"):
+        channels = pipe.unet.config["in_channels"]
+        default_size = pipe.unet.config["sample_size"]
+    if hasattr(pipe, "transformer"):
+        channels = pipe.transformer.config["in_channels"]
+        default_size = pipe.transformer.config["sample_size"]
+    if hasattr(pipe, "prior_pipe"):
+        factor = pipe.prior_pipe.config["resolution_multiple"]
+        channels = pipe.prior_pipe.prior.config["in_channels"]
 
-        if factor is not None and channels is not None:
-            latent_params = (channels, factor, default_size if default_size is not None else round(1024 / factor))
-
-    return latent_params
+    if factor is not None and channels is not None:
+        return (channels, factor, default_size if default_size is not None else round(1024 / factor))
+    else:
+        return None
     # }}}
 
 
@@ -1118,25 +1115,30 @@ def build_jobs(
 
 
 def process_job(
-    params: dict[str, QDParam], pipe: DiffusionPipeline, job_args: dict[str, Any], image_ops: list[dict[str, Any]], batch_meta: dict[str, str]
+    params: dict[str, QDParam],
+    pipe: DiffusionPipeline,
+    job: dict[str, Any],
+    image_ops: list[dict[str, Any]],
+    meta: dict[str, str],
+    input_image: Image.Image | None,
 ):
     # {{{
     torch.cuda.empty_cache()
-    seed = job_args.pop("seed")
+    seed = job.pop("seed")
 
     for param in params.values():
-        if param.name in job_args and param.meta:
-            batch_meta[param.name] = job_args[param.name]
+        if param.name in job and param.meta:
+            meta[param.name] = job[param.name]
 
-    resolution: Resolution | None = job_args.pop("resolution") if "resolution" in job_args else None
-    noise_power = job_args.pop("noise_power") if "noise_power" in job_args else None
-    variance_power = job_args.pop("variance_power") if "variance_power" in job_args else None
-    variance_scale = job_args.pop("variance_scale") if "variance_scale" in job_args else None
-    color = job_args.pop("color") if "color" in job_args else None
-    color_power = job_args.pop("color_power") if "color_power" in job_args else None
+    resolution: Resolution | None = job.pop("resolution") if "resolution" in job else None
+    noise_power = job.pop("noise_power") if "noise_power" in job else None
+    variance_power = job.pop("variance_power") if "variance_power" in job else None
+    variance_scale = job.pop("variance_scale") if "variance_scale" in job else None
+    color = job.pop("color") if "color" in job else None
+    color_power = job.pop("color_power") if "color_power" in job else None
 
-    if "noise_type" in job_args:
-        noise_type = job_args.pop("noise_type")
+    if "noise_type" in job:
+        noise_type = job.pop("noise_type")
         noise_dtype, noise_device = {
             NoiseType.Cpu16: (torch.float16, "cpu"),
             NoiseType.Cpu16B: (torch.bfloat16, "cpu"),
@@ -1148,22 +1150,22 @@ def process_job(
     else:
         noise_dtype, noise_device = None, None
 
-    if "scheduler" in job_args:
-        sched_meta, sched = job_args.pop("scheduler")
-        batch_meta |= sched_meta
+    if "scheduler" in job:
+        sched_meta, sched = job.pop("scheduler")
+        meta |= sched_meta
         pipe.scheduler = sched
 
     # NOISE {{{
     generators = [torch.Generator(noise_device).manual_seed(seed + n) for n in range(params["batch_size"].value)]
     latent_params = get_latent_params(pipe)
 
-    if latent_params is not None:
+    if input_image is None and latent_params is not None:
         channels, factor, default_size = latent_params
         if resolution is not None:
             width, height = round(resolution.width / factor), round(resolution.height / factor)
         else:
             width, height = default_size, default_size
-            job_args["width"], job_args["height"] = round(default_size * factor), round(default_size * factor)
+            job["width"], job["height"] = round(default_size * factor), round(default_size * factor)
         shape = (params["batch_size"].value, channels, height, width)
         latents = torch.zeros(shape, dtype=pipe.dtype, device="cpu")
         for latent, generator in zip(latents, generators):
@@ -1197,43 +1199,45 @@ def process_job(
                 .permute((0, 3, 1, 2))
             )
 
-        job_args["latents"] = latents
+        job["latents"] = latents
 
-    job_args["generator"] = generators
+    job["generator"] = generators
     print("seeds:", " ".join([str(seed + n) for n in range(params["batch_size"].value)]))
     # NOISE }}}
 
     # CONDITIONING {{{
     compel = get_compel(pipe)
     if compel is not None:
-        pos = job_args.pop("prompt") if "prompt" in job_args else ""
-        neg = job_args.pop("negative") if "negative" in job_args else ""
+        pos = job.pop("prompt") if "prompt" in job else ""
+        neg = job.pop("negative") if "negative" in job else ""
         if is_xl(pipe):
             ncond, npool = compel.build_conditioning_tensor(neg)
             pcond, ppool = compel.build_conditioning_tensor(pos)
-            job_args = job_args | {"pooled_prompt_embeds": ppool, "negative_pooled_prompt_embeds": npool}
+            job = job | {"pooled_prompt_embeds": ppool, "negative_pooled_prompt_embeds": npool}
         else:
             pcond = compel.build_conditioning_tensor(pos)
             ncond = compel.build_conditioning_tensor(neg)
         pcond, ncond = compel.pad_conditioning_tensors_to_same_length([pcond, ncond])
-        job_args |= {"prompt_embeds": pcond, "negative_prompt_embeds": ncond}
+        job |= {"prompt_embeds": pcond, "negative_prompt_embeds": ncond}
     # CONDITIONING }}}
 
     # INFERENCE {{{
     pipe_params = signature(pipe).parameters
 
     if input_image is not None:
-        job_args["image"] = input_image
+        if resolution is not None:
+            job["image"] = input_image.resize(resolution.resolution, Image.LANCZOS)
+        else:
+            job["image"] = input_image
+    elif resolution is not None:
+        job["width"], job["height"] = resolution.resolution
 
-    if resolution is not None:
-        job_args["width"], job_args["height"] = resolution.resolution
-
-    if "prior_num_inference_steps" in pipe_params and "steps" in job_args:
-        steps = job_args.pop("steps")
-        job_args["prior_num_inference_steps"] = steps
-        if "decoder_steps" in job_args:
-            decoder_steps = job_args.pop("decoder_steps")
-            job_args["num_inference_steps"] = round(sqrt(abs(steps * decoder_steps))) if decoder_steps < 0 else decoder_steps
+    if "prior_num_inference_steps" in pipe_params and "steps" in job:
+        steps = job.pop("steps")
+        job["prior_num_inference_steps"] = steps
+        if "decoder_steps" in job:
+            decoder_steps = job.pop("decoder_steps")
+            job["num_inference_steps"] = round(sqrt(abs(steps * decoder_steps))) if decoder_steps < 0 else decoder_steps
 
     for f, t in [
         ("steps", ["num_inference_steps"]),
@@ -1243,22 +1247,22 @@ def process_job(
         ("decoder_guidance", ["decoder_guidance_scale"]),
         ("rescale", ["guidance_rescale"]),
     ]:
-        if f in job_args:
+        if f in job:
             for to in t:
-                job_args[to] = job_args[f]
-            del job_args[f]
+                job[to] = job[f]
+            del job[f]
 
     # make sure call doesnt err
-    for k in list(job_args.keys()):
+    for k in list(job.keys()):
         if k not in pipe_params:
-            del job_args[k]
+            del job[k]
 
     filenum = 0
-    for n, image in enumerate(pipe(**job_args).images):
+    for n, image in enumerate(pipe(**job).images):
         pnginfo = PngImagePlugin.PngInfo()
-        for k, v in batch_meta.items():
+        for k, v in meta.items():
             pnginfo.add_text(k, str(v))
-        if "latents" in job_args or n == 0:
+        if "latents" in job or n == 0:
             pnginfo.add_text("seed", str(seed + n))
         else:
             pnginfo.add_text("seed", f"{seed} + {n}")
@@ -1290,9 +1294,9 @@ def process_job(
     # }}}
 
 
-def main(params: dict[str, QDParam], meta: dict[str, str]):
+def main(params: dict[str, QDParam], meta: dict[str, str], image: Image.Image | None):
     # {{{
-    pipe = get_pipe(params["model"].value, params["offload"].value, params["dtype"].value)
+    pipe = get_pipe(params["model"].value, params["offload"].value, params["dtype"].value, image is not None)
 
     if not get_latent_params(pipe):
         print(f'\nModel {params["model"].value} not able to use pre-noised latents.\nNoise options will not be respected.\n')
@@ -1329,17 +1333,18 @@ def main(params: dict[str, QDParam], meta: dict[str, str]):
     pbar = tqdm(desc="Images", total=total_images)
     for job in jobs:
         with SmartSigint(job_name="current batch"):
-            process_job(params, pipe, job, image_ops, meta.copy())
+            process_job(params, pipe, job, image_ops, meta.copy(), image)
             pbar.update(params["batch_size"].value)
 
     # }}}
 
 
 if __name__ == "__main__":
-    params = locals()["global_params"]
-    comment = locals()["comment"]
+    params = locals()["cli_params"]
+    comment = locals()["cli_comment"]
+    image = locals()["cli_image"]
     meta: dict[str, str] = {"model": params["model"].value, "url": "https://github.com/Beinsezii/quickdif"}
     if comment:
         meta["comment"] = comment
 
-    main(params, meta)
+    main(params, meta, image)
