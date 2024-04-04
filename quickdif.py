@@ -2,21 +2,21 @@ import argparse
 import enum
 import functools
 import json
-import math
 import random
 import re
 import signal
 from copy import copy
 from inspect import signature
 from io import BytesIO, UnsupportedOperation
+from math import sqrt
 from pathlib import Path
 from sys import exit
 from typing import Any
 
 import numpy as np
 import tomllib
-import tqdm
 from PIL import Image, PngImagePlugin
+from tqdm import tqdm
 
 
 # FUNCTIONS {{{
@@ -246,8 +246,8 @@ class Resolution:
                 mpx = 1.0 if mpx is None else float(mpx)
                 if method == "^":
                     mpx = mpx * mpx / 10**6
-                self._width = roundint(math.sqrt(hor / ver * mpx * 10**6), rnd)
-                self._height = roundint(math.sqrt(ver / hor * mpx * 10**6), rnd)
+                self._width = roundint(sqrt(hor / ver * mpx * 10**6), rnd)
+                self._height = roundint(sqrt(ver / hor * mpx * 10**6), rnd)
             else:
                 m = re.match(r"^ *(\d+) *[x*]? *(\d+)? *$", resolution)
                 if m is None:
@@ -1091,7 +1091,7 @@ if __name__ != "__main__":  # TODO: this is a hack, pipe shouldn't even be loade
 print(f'Generating {len(jobs)} batches of {params["batch_size"].value} images for {len(jobs) * params["batch_size"].value} total...')
 filenum = 0
 total = len(jobs) * params["batch_size"].value
-bar = tqdm.tqdm(desc="Images", total=total) if total > 1 else None
+pbar = tqdm(desc="Images", total=total)
 for kwargs in jobs:
     with SmartSigint(job_name="current batch"):
         torch.cuda.empty_cache()
@@ -1203,7 +1203,7 @@ for kwargs in jobs:
             kwargs["prior_num_inference_steps"] = steps
             if "decoder_steps" in kwargs:
                 decoder_steps = kwargs.pop("decoder_steps")
-                kwargs["num_inference_steps"] = round(math.sqrt(abs(steps * decoder_steps))) if decoder_steps < 0 else decoder_steps
+                kwargs["num_inference_steps"] = round(sqrt(abs(steps * decoder_steps))) if decoder_steps < 0 else decoder_steps
 
         for f, t in [
             ("steps", ["num_inference_steps"]),
@@ -1256,7 +1256,6 @@ for kwargs in jobs:
 
                 i.save(p, format="PNG", pnginfo=info, compress_level=4)
 
-        if bar:
-            bar.update(params["batch_size"].value)
+        pbar.update(params["batch_size"].value)
         # PROCESS }}}
 # INFERENCE }}}
