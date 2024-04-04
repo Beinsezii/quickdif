@@ -834,10 +834,11 @@ match params["offload"].value:
         raise ValueError
 # PIPE }}}
 
-# ATTENTION {{{
-if not params["compile"].value:
+
+def set_attn(pipe: DiffusionPipeline, attention: Attention):
+    # {{{
     processor = None
-    match params["attention"].value:
+    match attention:
         case Attention.Sdp:
             processor = AttnProcessor2_0()
         case Attention.Default:
@@ -855,8 +856,8 @@ if not params["compile"].value:
             else:
                 print('\nAttention Processor "rocm_flash" not available.\n')
 
-    for id, item in [("pipe", pipe)] + [
-        (id, getattr(pipe, id, None))
+    for item in [pipe] + [
+        getattr(pipe, id, None)
         for id in [
             "unet",
             "vae",
@@ -870,22 +871,13 @@ if not params["compile"].value:
         if item is not None:
             if hasattr(item, "set_attn_processor") and processor is not None:
                 item.set_attn_processor(processor)
+    # }}}
 
-# }}}
 
-# COMPILE {{{
-if params["compile"].value:
-    if hasattr(pipe, "unet"):
-        pipe.unet = torch.compile(pipe.unet)
-    if hasattr(pipe, "transformer"):
-        pipe.transformer = torch.compile(pipe.transformer)
-# COMPILE }}}
-
-# LORA {{{
-adapters = []
-
-if params["lora"].value:
-    for n, lora in enumerate(params["lora"].value):
+def apply_loras(loras: list[str], pipe: DiffusionPipeline) -> str | None:
+    # {{{
+    adapters = []
+    for n, lora in enumerate(loras):
         split = lora.rsplit(":::")
         path = split[0]
         scale = 1.0 if len(split) < 2 else float(split[1])
@@ -901,31 +893,38 @@ if params["lora"].value:
             }
         )
 
-if adapters:
-    pipe.set_adapters(list(map(lambda a: a["name"], adapters)), list(map(lambda a: a["scale"], adapters)))
-    pipe.fuse_lora(list(map(lambda a: a["name"], adapters)))
-    # re-construct args without nulled loras
-    base_meta["lora"] = "\x1f".join(map((lambda a: a["path"] if a["scale"] == 1.0 else f'{a["path"]}:::{a["scale"]}'), adapters))
-# LORA }}}
-
-# TOKENIZER/COMPEL {{{
-if hasattr(pipe, "tokenizer") and isinstance(pipe.tokenizer, transformers.models.clip.tokenization_clip.CLIPTokenizer):
-    if XL:
-        compel = Compel(
-            tokenizer=[pipe.tokenizer, pipe.tokenizer_2],
-            text_encoder=[pipe.text_encoder, pipe.text_encoder_2],
-            returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
-            requires_pooled=[False, True],
-            truncate_long_prompts=False,
-        )
+    if adapters:
+        pipe.set_adapters(list(map(lambda a: a["name"], adapters)), list(map(lambda a: a["scale"], adapters)))
+        pipe.fuse_lora(list(map(lambda a: a["name"], adapters)))
+        # re-construct args without nulled loras
+        return "\x1f".join(map((lambda a: a["path"] if a["scale"] == 1.0 else f'{a["path"]}:::{a["scale"]}'), adapters))
     else:
-        compel = Compel(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder, truncate_long_prompts=False)
-else:
-    compel = None
-# TOKENIZER/COMPEL }}}
+        return None
+    # }}}
 
-# VAE {{{
-if hasattr(pipe, "vae"):
+
+def get_compel(pipe: DiffusionPipeline) -> Compel | None:
+    # {{{
+    if hasattr(pipe, "tokenizer") and isinstance(pipe.tokenizer, transformers.models.clip.tokenization_clip.CLIPTokenizer):
+        if hasattr(pipe, "tokenizer_2"):
+            compel = Compel(
+                tokenizer=[pipe.tokenizer, pipe.tokenizer_2],
+                text_encoder=[pipe.text_encoder, pipe.text_encoder_2],
+                returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
+                requires_pooled=[False, True],
+                truncate_long_prompts=False,
+            )
+        else:
+            compel = Compel(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder, truncate_long_prompts=False)
+    else:
+        compel = None
+
+    return compel
+    # }}}
+
+
+def set_vae(params: dict[str, QDParam], pipe: DiffusionPipeline):
+    # {{{
     if XL and params["xl_vae"].value:
         pipe.vae = AutoencoderKL.from_pretrained("stabilityai/sdxl-vae", torch_dtype=pipe.vae.dtype, use_safetensors=True).to(pipe.vae.device)
     if params["tile"].value:
@@ -934,7 +933,7 @@ if hasattr(pipe, "vae"):
         pipe.vae.enable_slicing()
     if dtype != torch.float16:
         pipe.vae.config.force_upcast = False
-# VAE }}}
+    # }}}
 
 
 def build_schedulers(params: dict[str, QDParam], default_scheduler: Any) -> list[tuple[dict[str, str], type[SchedulerMixin]]]:
@@ -1174,6 +1173,7 @@ def process_job(
     # NOISE }}}
 
     # CONDITIONING {{{
+    compel = get_compel(pipe)
     if compel is not None:
         pos = job_args.pop("prompt") if "prompt" in job_args else ""
         neg = job_args.pop("negative") if "negative" in job_args else ""
@@ -1259,26 +1259,44 @@ def process_job(
 
 def main(params: dict[str, QDParam]):
     # {{{
-    meta = base_meta
+    main_params = params
+    main_meta = base_meta
+    main_pipe = pipe
 
-    if hasattr(pipe, "scheduler"):
-        schedulers = build_schedulers(params, pipe.scheduler)
+    if main_params["lora"].value:
+        lora_string = apply_loras(main_params["lora"].value, main_pipe)
+        if lora_string:
+            main_meta["lora"] = lora_string
+
+    if hasattr(main_pipe, "vae"):
+        set_vae(main_params, main_pipe)
+
+    if main_params["compile"].value:
+        if hasattr(main_pipe, "unet"):
+            main_pipe.unet = torch.compile(main_pipe.unet)
+        if hasattr(main_pipe, "transformer"):
+            main_pipe.transformer = torch.compile(main_pipe.transformer)
+    elif main_params["attention"].value:
+        set_attn(main_pipe, params["attention"].value)
+
+    if hasattr(main_pipe, "scheduler"):
+        schedulers = build_schedulers(main_params, main_pipe.scheduler)
         if len(schedulers) == 1:
             sched_meta, sched = schedulers[0]
-            meta |= sched_meta
-            pipe.scheduler = sched
+            main_meta |= sched_meta
+            main_pipe.scheduler = sched
     else:
         schedulers = []
 
-    jobs, image_ops = build_jobs(params, schedulers)
+    jobs, image_ops = build_jobs(main_params, schedulers)
 
-    total_images = len(jobs) * params["batch_size"].value
-    print(f'\nGenerating {len(jobs)} batches of {params["batch_size"].value} images for {total_images} total...')
+    total_images = len(jobs) * main_params["batch_size"].value
+    print(f'\nGenerating {len(jobs)} batches of {main_params["batch_size"].value} images for {total_images} total...')
     pbar = tqdm(desc="Images", total=total_images)
     for job in jobs:
         with SmartSigint(job_name="current batch"):
-            process_job(params, pipe, job, image_ops, meta.copy())
-            pbar.update(params["batch_size"].value)
+            process_job(main_params, main_pipe, job, image_ops, main_meta.copy())
+            pbar.update(main_params["batch_size"].value)
 
     # }}}
 
