@@ -1054,9 +1054,7 @@ def get_latent_params(pipe: DiffusionPipeline) -> tuple[int, float, int] | None:
     # }}}
 
 
-def build_jobs(
-    params: dict[str, QDParam], schedulers: list[tuple[dict[str, str], type[SchedulerMixin]]]
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def build_jobs(params: dict[str, QDParam], schedulers: list[tuple[dict[str, str], type[SchedulerMixin]]]) -> list[dict[str, Any]]:
     # {{{
     job = {
         "num_images_per_prompt": params["batch_size"].value,
@@ -1082,7 +1080,7 @@ def build_jobs(
                     pass
                 case "pixelate" | "posterize":
                     if param.value:
-                        image_ops = merger(image_ops, param.name, param.value)
+                        image_ops = [i | {param.name: v} for i in image_ops for v in param.value]
                 case _:
                     if param.value:
                         jobs = merger(jobs, param.name, param.value)
@@ -1103,6 +1101,12 @@ def build_jobs(
         case _:
             raise ValueError
 
+    if params["iter"].value is Iter.Shuffle:
+        jobs = [j | {"image_ops": [o]} for j, o in zip(jobs, oversample(image_ops, len(jobs)))]
+    else:
+        # Shouldn't need to copy since image_ops isn't mutated
+        jobs = [j | {"image_ops": image_ops} for j in jobs]
+
     for j in jobs:
         for key in "prompt", "negative":
             if key in j:
@@ -1110,7 +1114,7 @@ def build_jobs(
                 assert len(expands) == 1
                 j[key] = expands[0]
 
-    return (jobs, image_ops)
+    return jobs
     # }}}
 
 
@@ -1118,7 +1122,6 @@ def process_job(
     params: dict[str, QDParam],
     pipe: DiffusionPipeline,
     job: dict[str, Any],
-    image_ops: list[dict[str, Any]],
     meta: dict[str, str],
     input_image: Image.Image | None,
 ):
@@ -1136,6 +1139,7 @@ def process_job(
     variance_scale = job.pop("variance_scale") if "variance_scale" in job else None
     color = job.pop("color") if "color" in job else None
     color_power = job.pop("color_power") if "color_power" in job else None
+    image_ops: list[dict[str, Any]] = job.pop("image_ops")
 
     if "noise_type" in job:
         noise_type = job.pop("noise_type")
@@ -1326,14 +1330,14 @@ def main(params: dict[str, QDParam], meta: dict[str, str], image: Image.Image | 
     else:
         schedulers = []
 
-    jobs, image_ops = build_jobs(params, schedulers)
+    jobs = build_jobs(params, schedulers)
 
     total_images = len(jobs) * params["batch_size"].value
     print(f'\nGenerating {len(jobs)} batches of {params["batch_size"].value} images for {total_images} total...')
     pbar = tqdm(desc="Images", total=total_images)
     for job in jobs:
         with SmartSigint(job_name="current batch"):
-            process_job(params, pipe, job, image_ops, meta.copy(), image)
+            process_job(params, pipe, job, meta.copy(), image)
             pbar.update(params["batch_size"].value)
 
     # }}}
