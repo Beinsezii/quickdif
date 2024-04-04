@@ -720,6 +720,7 @@ from diffusers import (  # noqa: E402
     AutoPipelineForText2Image,
     DDIMScheduler,
     DDPMScheduler,
+    DiffusionPipeline,
     DPMSolverMultistepScheduler,
     EulerAncestralDiscreteScheduler,
     EulerDiscreteScheduler,
@@ -1082,35 +1083,29 @@ for j in jobs:
             assert len(expands) == 1
             j[key] = expands[0]
 
-if __name__ != "__main__":  # TODO: this is a hack, pipe shouldn't even be loaded.
-    jobs = []
-
 # INPUT ARGS }}}
 
-# INFERENCE {{{
-print(f'Generating {len(jobs)} batches of {params["batch_size"].value} images for {len(jobs) * params["batch_size"].value} total...')
-filenum = 0
-total = len(jobs) * params["batch_size"].value
-pbar = tqdm(desc="Images", total=total)
-for kwargs in jobs:
+
+def process_job(params: dict[str, QDParam], pipe: DiffusionPipeline, job_args: dict[str, Any]):
+    # {{{
     with SmartSigint(job_name="current batch"):
         torch.cuda.empty_cache()
         batch_meta = base_meta.copy()
-        seed = kwargs.pop("seed")
+        seed = job_args.pop("seed")
 
         for param in params.values():
-            if param.name in kwargs and param.meta:
-                batch_meta[param.name] = kwargs[param.name]
+            if param.name in job_args and param.meta:
+                batch_meta[param.name] = job_args[param.name]
 
-        resolution: Resolution | None = kwargs.pop("resolution") if "resolution" in kwargs else None
-        noise_power = kwargs.pop("noise_power") if "noise_power" in kwargs else None
-        variance_power = kwargs.pop("variance_power") if "variance_power" in kwargs else None
-        variance_scale = kwargs.pop("variance_scale") if "variance_scale" in kwargs else None
-        color = kwargs.pop("color") if "color" in kwargs else None
-        color_power = kwargs.pop("color_power") if "color_power" in kwargs else None
+        resolution: Resolution | None = job_args.pop("resolution") if "resolution" in job_args else None
+        noise_power = job_args.pop("noise_power") if "noise_power" in job_args else None
+        variance_power = job_args.pop("variance_power") if "variance_power" in job_args else None
+        variance_scale = job_args.pop("variance_scale") if "variance_scale" in job_args else None
+        color = job_args.pop("color") if "color" in job_args else None
+        color_power = job_args.pop("color_power") if "color_power" in job_args else None
 
-        if "noise_type" in kwargs:
-            noise_type = kwargs.pop("noise_type")
+        if "noise_type" in job_args:
+            noise_type = job_args.pop("noise_type")
             noise_dtype, noise_device = {
                 NoiseType.Cpu16: (torch.float16, "cpu"),
                 NoiseType.Cpu16B: (torch.bfloat16, "cpu"),
@@ -1122,8 +1117,8 @@ for kwargs in jobs:
         else:
             noise_dtype, noise_device = None, None
 
-        if "scheduler" in kwargs:
-            sched_meta, sched = kwargs.pop("scheduler")
+        if "scheduler" in job_args:
+            sched_meta, sched = job_args.pop("scheduler")
             batch_meta |= sched_meta
             pipe.scheduler = sched
 
@@ -1136,7 +1131,7 @@ for kwargs in jobs:
                 width, height = round(resolution.width / factor), round(resolution.height / factor)
             else:
                 width, height = default_size, default_size
-                kwargs["width"], kwargs["height"] = round(default_size * factor), round(default_size * factor)
+                job_args["width"], job_args["height"] = round(default_size * factor), round(default_size * factor)
             shape = (params["batch_size"].value, channels, height, width)
             latents = torch.zeros(shape, dtype=dtype, device="cpu")
             for latent, generator in zip(latents, generators):
@@ -1170,40 +1165,40 @@ for kwargs in jobs:
                     .permute((0, 3, 1, 2))
                 )
 
-            kwargs["latents"] = latents
+            job_args["latents"] = latents
 
-        kwargs["generator"] = generators
+        job_args["generator"] = generators
         print("seeds:", " ".join([str(seed + n) for n in range(params["batch_size"].value)]))
         # NOISE }}}
 
         # CONDITIONING {{{
         if compel is not None:
-            pos = kwargs.pop("prompt") if "prompt" in kwargs else ""
-            neg = kwargs.pop("negative") if "negative" in kwargs else ""
+            pos = job_args.pop("prompt") if "prompt" in job_args else ""
+            neg = job_args.pop("negative") if "negative" in job_args else ""
             if XL:
                 ncond, npool = compel.build_conditioning_tensor(neg)
                 pcond, ppool = compel.build_conditioning_tensor(pos)
-                kwargs = kwargs | {"pooled_prompt_embeds": ppool, "negative_pooled_prompt_embeds": npool}
+                job_args = job_args | {"pooled_prompt_embeds": ppool, "negative_pooled_prompt_embeds": npool}
             else:
                 pcond = compel.build_conditioning_tensor(pos)
                 ncond = compel.build_conditioning_tensor(neg)
             pcond, ncond = compel.pad_conditioning_tensors_to_same_length([pcond, ncond])
-            kwargs |= {"prompt_embeds": pcond, "negative_prompt_embeds": ncond}
+            job_args |= {"prompt_embeds": pcond, "negative_prompt_embeds": ncond}
         # CONDITIONING }}}
 
-        # PROCESS {{{
+        # INFERENCE {{{
         if input_image is not None:
-            kwargs["image"] = input_image
+            job_args["image"] = input_image
 
         if resolution is not None:
-            kwargs["width"], kwargs["height"] = resolution.resolution
+            job_args["width"], job_args["height"] = resolution.resolution
 
-        if "prior_num_inference_steps" in pipe_params and "steps" in kwargs:
-            steps = kwargs.pop("steps")
-            kwargs["prior_num_inference_steps"] = steps
-            if "decoder_steps" in kwargs:
-                decoder_steps = kwargs.pop("decoder_steps")
-                kwargs["num_inference_steps"] = round(sqrt(abs(steps * decoder_steps))) if decoder_steps < 0 else decoder_steps
+        if "prior_num_inference_steps" in pipe_params and "steps" in job_args:
+            steps = job_args.pop("steps")
+            job_args["prior_num_inference_steps"] = steps
+            if "decoder_steps" in job_args:
+                decoder_steps = job_args.pop("decoder_steps")
+                job_args["num_inference_steps"] = round(sqrt(abs(steps * decoder_steps))) if decoder_steps < 0 else decoder_steps
 
         for f, t in [
             ("steps", ["num_inference_steps"]),
@@ -1213,21 +1208,22 @@ for kwargs in jobs:
             ("decoder_guidance", ["decoder_guidance_scale"]),
             ("rescale", ["guidance_rescale"]),
         ]:
-            if f in kwargs:
+            if f in job_args:
                 for to in t:
-                    kwargs[to] = kwargs[f]
-                del kwargs[f]
+                    job_args[to] = job_args[f]
+                del job_args[f]
 
         # make sure call doesnt err
-        for k in list(kwargs.keys()):
+        for k in list(job_args.keys()):
             if k not in pipe_params:
-                del kwargs[k]
+                del job_args[k]
 
-        for n, image in enumerate(pipe(**kwargs).images):
+        filenum = 0
+        for n, image in enumerate(pipe(**job_args).images):
             pnginfo = PngImagePlugin.PngInfo()
             for k, v in batch_meta.items():
                 pnginfo.add_text(k, str(v))
-            if "latents" in kwargs or n == 0:
+            if "latents" in job_args or n == 0:
                 pnginfo.add_text("seed", str(seed + n))
             else:
                 pnginfo.add_text("seed", f"{seed} + {n}")
@@ -1255,7 +1251,20 @@ for kwargs in jobs:
                         i = i.resize((w, h), resample=Image.NEAREST)
 
                 i.save(p, format="PNG", pnginfo=info, compress_level=4)
+        # }}}
+    # }}}
 
+
+def main(params: dict[str, QDParam]):
+    # {{{
+    total_images = len(jobs) * params["batch_size"].value
+    print(f'\nGenerating {len(jobs)} batches of {params["batch_size"].value} images for {total_images} total...')
+    pbar = tqdm(desc="Images", total=total_images)
+    for job in jobs:
+        process_job(params, pipe, job)
         pbar.update(params["batch_size"].value)
-        # PROCESS }}}
-# INFERENCE }}}
+    # }}}
+
+
+if __name__ == "__main__":
+    main(params)
