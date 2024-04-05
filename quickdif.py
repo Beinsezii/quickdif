@@ -1387,6 +1387,10 @@ def main(params: dict[str, QDParam], meta: dict[str, str], image: Image.Image | 
             pipe.unet = torch.compile(pipe.unet)
         if hasattr(pipe, "transformer"):
             pipe.transformer = torch.compile(pipe.transformer)
+        if hasattr(pipe, "prior_pipe"):
+            pipe.prior_pipe.prior = torch.compile(pipe.prior_pipe.prior)
+        if hasattr(pipe, "decoder_pipe"):
+            pipe.decoder_pipe.decoder = torch.compile(pipe.decoder_pipe.decoder)
     elif params["attention"].value:
         set_attn(pipe, params["attention"].value)
 
