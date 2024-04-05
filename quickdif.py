@@ -1332,11 +1332,15 @@ def process_job(
             if "power" in ops:
                 # ^2.2 for approx sRGB EOTF
                 okl = lrgb_to_oklab(op_arr**2.2)
+
                 # ≈1/3 cause OKL's top heavy lightness curve
-                okl[:, :, 0] = (okl[:, :, 0] + 0.35) ** ops["power"] - 0.35
-                # 50% strength to chromacity channels
-                okl[:, :, 1:] = okl[:, :, 1:] * 0.5 + ((okl[:, :, 1:] + 1) ** ops["power"] - 1) * 0.5
-                # back to sRGB
+                offset = [0.35, 1, 1]
+                # Halve chromacities' power slope
+                power = [ops["power"], sqrt(ops["power"]), sqrt(ops["power"])]
+
+                okl = (okl + offset) ** power - offset
+
+                # back to sRGB with approx OETF
                 op_arr = oklab_to_lrgb(okl) ** (1 / 2.2)
 
             if "posterize" in ops:
