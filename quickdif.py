@@ -572,7 +572,7 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         QDParam("compile", bool, long="--compile", help="Compile network with torch.compile()"),
         QDParam("tile", bool, long="--tile", help="Tile VAE. Slicing is already used by default so only set tile if creating very large images"),
         QDParam("xl_vae", bool, long="--xl-vae", help="Override the SDXL VAE. Useful for models that use the broken 1.0 vae"),
-        QDParam("disable_amd_patch", bool, long="--disable-amd-patch", help="Do not monkey patch the torch SDPA function on AMD cards"),
+        QDParam("amd_patch", bool, long="--amd-patch", value=True, help="Monkey patch the torch SDPA function with Flash Attention on AMD cards"),
     ]  # ugh autoindent
     return {param.name: param for param in params}
     # }}}
@@ -737,11 +737,11 @@ def parse_cli(params: dict[str, QDParam]) -> tuple[str | None, Image.Image | Non
     # }}}
 
 
-disable_amd_patch = True
+amd_patch = True
 if __name__ == "__main__":
     cli_params = qdparams()
     (cli_comment, cli_image) = parse_cli(cli_params)
-    disable_amd_patch = cli_params["disable_amd_patch"].value
+    amd_patch = cli_params["amd_patch"].value
 
 # TORCH PRELUDE {{{
 #
@@ -752,7 +752,7 @@ torch.set_grad_enabled(False)
 torch.set_float32_matmul_precision("high")
 
 amd_hijack = False
-if not disable_amd_patch:
+if amd_patch:
     if "AMD" in torch.cuda.get_device_name() or "Radeon" in torch.cuda.get_device_name():
         try:
             from flash_attn import flash_attn_func
