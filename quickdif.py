@@ -1403,7 +1403,7 @@ def main(params: dict[str, QDParam], meta: dict[str, str], image: Image.Image | 
 
     total_images = len(jobs) * params["batch_size"].value
     print(f'\nGenerating {len(jobs)} batches of {params["batch_size"].value} images for {total_images} total...')
-    pbar = tqdm(desc="Images", total=total_images)
+    pbar = tqdm(desc="Images", total=total_images, smoothing=0)
     for job in jobs:
         with SmartSigint(job_name="current batch"):
             process_job(params, pipe, job, meta.copy(), image)
