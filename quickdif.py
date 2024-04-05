@@ -1088,11 +1088,11 @@ def get_latent_params(pipe: DiffusionPipeline) -> tuple[int, float, int] | None:
     if hasattr(pipe, "vae_scale_factor"):
         factor = pipe.vae_scale_factor
     if hasattr(pipe, "unet"):
-        channels = pipe.unet.config["in_channels"]
-        default_size = pipe.unet.config["sample_size"]
+        channels = pipe.unet.config.get("in_channels", None)
+        default_size = pipe.unet.config.get("sample_size", None)
     if hasattr(pipe, "transformer"):
-        channels = pipe.transformer.config["in_channels"]
-        default_size = pipe.transformer.config["sample_size"]
+        channels = pipe.transformer.config.get("in_channels", None)
+        default_size = pipe.transformer.config.get("sample_size", None)
     if hasattr(pipe, "prior_pipe"):
         factor = pipe.prior_pipe.config.get("resolution_multiple", None)
         channels = pipe.prior_pipe.prior.config.get("in_channels", None)
