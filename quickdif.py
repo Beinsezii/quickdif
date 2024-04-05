@@ -452,6 +452,14 @@ def qdparams() -> dict[str, QDParam]:
             meta=True,
             help="Power/opacity for variance noise. Variance noise simply adds randomly generated colored zones to encourage new compositions on overfitted models",
         ),
+        QDParam(
+            "power",
+            float,
+            long="--power",
+            multi=True,
+            meta=True,
+            help="Simple filter which scales final image values away from gray based on an exponent",
+        ),
         QDParam("pixelate", float, long="--pixelate", multi=True, meta=True, help="Pixelate image using a divisor. Best used with a pixel art Lora"),
         QDParam("posterize", int, long="--posterize", multi=True, meta=True, help="Set amount of colors per channel. Best used with --pixelate"),
         QDParam(
@@ -820,7 +828,7 @@ def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool) -> Diffu
 
     with SmartSigint(num=2, job_name="model load"):
         if "stabilityai/stable-cascade" in model:
-            if dtype == torch.float16:
+            if pipe_args["torch_dtype"] == torch.float16:
                 pipe_args["torch_dtype"] = torch.bfloat16
             pipe = StableCascadeCombinedPipeline.from_pretrained(model, **pipe_args)
         elif model.endswith(".safetensors"):
@@ -1078,7 +1086,7 @@ def build_jobs(params: dict[str, QDParam], schedulers: list[tuple[dict[str, str]
             match param.name:
                 case "seed" | "sampler" | "spacing" | "lora":
                     pass
-                case "pixelate" | "posterize":
+                case "power" | "pixelate" | "posterize":
                     if param.value:
                         image_ops = [i | {param.name: v} for i in image_ops for v in param.value]
                 case _:
@@ -1262,7 +1270,7 @@ def process_job(
             del job[k]
 
     filenum = 0
-    for n, image in enumerate(pipe(**job).images):
+    for n, image_array in enumerate(pipe(output_type="np", **job).images):
         pnginfo = PngImagePlugin.PngInfo()
         for k, v in meta.items():
             pnginfo.add_text(k, str(v))
@@ -1272,7 +1280,6 @@ def process_job(
             pnginfo.add_text("seed", f"{seed} + {n}")
 
         for ops in image_ops:
-            i = image
             info = copy(pnginfo)
             for k, v in ops.items():
                 info.add_text(k, str(v))
@@ -1281,19 +1288,28 @@ def process_job(
                 filenum += 1
                 p = params["output"].value.joinpath(f"{filenum:05}.png")
 
-            if ops.get("posterize", None) is not None:
+            # Direct array ops
+            op_arr: np.ndarray = np.asarray(image_array)  # mutable reference to make pyright happy
+
+            if "power" in ops:
+                op_arr = (op_arr + 0.5) ** ops["power"] - 0.5
+
+            if "posterize" in ops:
                 if ops["posterize"] > 1:
-                    arr = np.asarray(i).astype(np.float32)
                     factor = float((ops["posterize"] - 1) / 256)
-                    i = Image.fromarray(((arr * factor).round() / factor).clip(0, 255).astype(np.uint8), mode=i.mode)
+                    op_arr = (op_arr * 255 * factor).round() / factor / 255
 
-            if ops.get("pixelate", None):
+            # PIL ops
+            op_pil: Image.Image = Image.fromarray((op_arr * 255).clip(0, 255).astype(np.uint8))
+            del op_arr
+
+            if "pixelate" in ops:
                 if ops["pixelate"] > 1:
-                    w, h = i.width, i.height
-                    i = i.resize((round(w / ops["pixelate"]), round(h / ops["pixelate"])), resample=Image.BOX)
-                    i = i.resize((w, h), resample=Image.NEAREST)
+                    w, h = op_pil.width, op_pil.height
+                    op_pil = op_pil.resize((round(w / ops["pixelate"]), round(h / ops["pixelate"])), resample=Image.BOX)
+                    op_pil = op_pil.resize((w, h), resample=Image.NEAREST)
 
-            i.save(p, format="PNG", pnginfo=info, compress_level=4)
+            op_pil.save(p, format="PNG", pnginfo=info, compress_level=4)
     # }}}
     # }}}
 
