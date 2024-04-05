@@ -88,12 +88,16 @@ def roundint(n: int | float, step: int) -> int:
         return round(n - (n % step))
 
 
+def spowf(array: np.ndarray, pow: int | float | list[int | float]) -> np.ndarray:
+    return np.copysign(abs(array) ** pow, array)
+
+
 def lrgb_to_oklab(array: np.ndarray) -> np.ndarray:
-    return (((array) @ XYZ_M1 @ OKLAB_M1) ** (1 / 3)) @ OKLAB_M2
+    return (spowf((array) @ XYZ_M1 @ OKLAB_M1, 1 / 3)) @ OKLAB_M2
 
 
 def oklab_to_lrgb(array: np.ndarray) -> np.ndarray:
-    return ((array @ npl.inv(OKLAB_M2)) ** 3) @ npl.inv(OKLAB_M1) @ npl.inv(XYZ_M1)
+    return spowf((array @ npl.inv(OKLAB_M2)), 3) @ npl.inv(OKLAB_M1) @ npl.inv(XYZ_M1)
 
 
 # }}}
@@ -1331,17 +1335,17 @@ def process_job(
 
             if "power" in ops:
                 # ^2.2 for approx sRGB EOTF
-                okl = lrgb_to_oklab(op_arr**2.2)
+                okl = lrgb_to_oklab(spowf(op_arr, 2.2))
 
                 # ≈1/3 cause OKL's top heavy lightness curve
                 offset = [0.35, 1, 1]
                 # Halve chromacities' power slope
                 power = [ops["power"], sqrt(ops["power"]), sqrt(ops["power"])]
 
-                okl = (okl + offset) ** power - offset
+                okl = spowf((okl + offset), power) - offset
 
                 # back to sRGB with approx OETF
-                op_arr = oklab_to_lrgb(okl) ** (1 / 2.2)
+                op_arr = spowf(oklab_to_lrgb(okl), 1 / 2.2)
 
             if "posterize" in ops:
                 if ops["posterize"] > 1:
