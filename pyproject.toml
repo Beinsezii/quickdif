@@ -3,6 +3,7 @@ name = "quickdif"
 dynamic = ["version"]
 readme = "README.md"
 license = {file = "LICENSE"}
+authors = [{name = "Beinsezii"}]
 requires-python = ">= 3.11"
 dependencies = [
     "torch >= 2.1",
