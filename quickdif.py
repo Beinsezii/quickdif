@@ -14,12 +14,14 @@ from sys import exit
 from typing import Any
 
 import numpy as np
+import numpy.linalg as npl
 import tomllib
 from PIL import Image, PngImagePlugin
 from tqdm import tqdm
 
-# LATENT COLORS {{{
+# MATRICES {{{
 COLS_XL = {
+    # {{{
     "black": [-2.8232, 0.5033, 0.3139, 0.3359],
     "white": [2.3501, 0.2248, 1.2127, -1.0597],
     "red": [-2.5614, -2.5784, 1.3915, -1.6186],
@@ -28,8 +30,9 @@ COLS_XL = {
     "cyan": [1.6195, 3.3881, 0.5599, 1.0360],
     "magenta": [-0.1252, -0.6654, -1.5711, -1.1750],
     "yellow": [-0.8608, -1.3759, 4.2304, -1.0693],
-}
+}  # }}}
 COLS_FTMSE = {
+    # {{{
     "black": [-0.9953, -2.6024, 1.1153, 1.2966],
     "white": [2.1749, 1.4434, -0.0318, -1.1621],
     "red": [1.2575, -0.8768, -1.8788, 0.7792],
@@ -38,8 +41,35 @@ COLS_FTMSE = {
     "cyan": [0.5828, -0.1041, 2.9347, -0.0978],
     "magenta": [0.7387, -1.5557, -1.3593, -1.4386],
     "yellow": [2.3476, 2.0031, -0.0791, 1.6609],
-}
-# LATENT COLORS }}}
+}  # }}}
+
+XYZ_M1 = np.array(
+    # {{{
+    [
+        [0.4124, 0.3576, 0.1805],
+        [0.2126, 0.7152, 0.0722],
+        [0.0193, 0.1192, 0.9505],
+    ]
+).T  # }}}
+
+OKLAB_M1 = np.array(
+    # {{{
+    [
+        [0.8189330101, 0.0329845436, 0.0482003018],
+        [0.3618667424, 0.9293118715, 0.2643662691],
+        [-0.1288597137, 0.0361456387, 0.6338517070],
+    ]
+)  # }}}
+OKLAB_M2 = np.array(
+    # {{{
+    [
+        [0.2104542553, 1.9779984951, 0.0259040371],
+        [0.7936177850, -2.4285922050, 0.7827717662],
+        [-0.0040720468, 0.4505937099, -0.8086757660],
+    ]
+)  # }}}
+
+# }}}
 
 
 # UTILS {{{
@@ -56,6 +86,14 @@ def roundint(n: int | float, step: int) -> int:
         return round(n + step - (n % step))
     else:
         return round(n - (n % step))
+
+
+def lrgb_to_oklab(array: np.ndarray) -> np.ndarray:
+    return (((array) @ XYZ_M1 @ OKLAB_M1) ** (1 / 3)) @ OKLAB_M2
+
+
+def oklab_to_lrgb(array: np.ndarray) -> np.ndarray:
+    return ((array @ npl.inv(OKLAB_M2)) ** 3) @ npl.inv(OKLAB_M1) @ npl.inv(XYZ_M1)
 
 
 # }}}
@@ -1292,7 +1330,14 @@ def process_job(
             op_arr: np.ndarray = np.asarray(image_array)  # mutable reference to make pyright happy
 
             if "power" in ops:
-                op_arr = (op_arr + 0.5) ** ops["power"] - 0.5
+                # ^2.2 for approx sRGB EOTF
+                okl = lrgb_to_oklab(op_arr**2.2)
+                # ≈1/3 cause OKL's top heavy lightness curve
+                okl[:, :, 0] = (okl[:, :, 0] + 0.35) ** ops["power"] - 0.35
+                # 50% strength to chromacity channels
+                okl[:, :, 1:] = okl[:, :, 1:] * 0.5 + ((okl[:, :, 1:] + 1) ** ops["power"] - 1) * 0.5
+                # back to sRGB
+                op_arr = oklab_to_lrgb(okl) ** (1 / 2.2)
 
             if "posterize" in ops:
                 if ops["posterize"] > 1:
