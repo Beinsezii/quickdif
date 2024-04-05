@@ -93,11 +93,11 @@ def spowf(array: np.ndarray, pow: int | float | list[int | float]) -> np.ndarray
 
 
 def lrgb_to_oklab(array: np.ndarray) -> np.ndarray:
-    return (spowf((array) @ XYZ_M1 @ OKLAB_M1, 1 / 3)) @ OKLAB_M2
+    return (spowf((array) @ (XYZ_M1 @ OKLAB_M1), 1 / 3)) @ OKLAB_M2
 
 
 def oklab_to_lrgb(array: np.ndarray) -> np.ndarray:
-    return spowf((array @ npl.inv(OKLAB_M2)), 3) @ npl.inv(OKLAB_M1) @ npl.inv(XYZ_M1)
+    return spowf((array @ npl.inv(OKLAB_M2)), 3) @ (npl.inv(OKLAB_M1) @ npl.inv(XYZ_M1))
 
 
 # }}}
