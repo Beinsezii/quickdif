@@ -868,27 +868,26 @@ def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool) -> Diffu
         "watermarker": None,
     }
 
-    with SmartSigint(num=2, job_name="model load"):
-        if "stabilityai/stable-cascade" in model:
-            if pipe_args["torch_dtype"] == torch.float16:
-                pipe_args["torch_dtype"] = torch.bfloat16
-            pipe = StableCascadeCombinedPipeline.from_pretrained(model, **pipe_args)
-        elif model.endswith(".safetensors"):
-            if img2img:
-                try:
-                    pipe = StableDiffusionXLImg2ImgPipeline.from_single_file(model, **pipe_args)
-                except:  # noqa: E722
-                    pipe = StableDiffusionImg2ImgPipeline.from_single_file(model, **pipe_args)
-            else:
-                try:
-                    pipe = StableDiffusionXLPipeline.from_single_file(model, **pipe_args)
-                except:  # noqa: E722
-                    pipe = StableDiffusionPipeline.from_single_file(model, **pipe_args)
+    if "stabilityai/stable-cascade" in model:
+        if pipe_args["torch_dtype"] == torch.float16:
+            pipe_args["torch_dtype"] = torch.bfloat16
+        pipe = StableCascadeCombinedPipeline.from_pretrained(model, **pipe_args)
+    elif model.endswith(".safetensors"):
+        if img2img:
+            try:
+                pipe = StableDiffusionXLImg2ImgPipeline.from_single_file(model, **pipe_args)
+            except:  # noqa: E722
+                pipe = StableDiffusionImg2ImgPipeline.from_single_file(model, **pipe_args)
         else:
-            if img2img:
-                pipe = AutoPipelineForImage2Image.from_pretrained(model, **pipe_args)
-            else:
-                pipe = AutoPipelineForText2Image.from_pretrained(model, **pipe_args)
+            try:
+                pipe = StableDiffusionXLPipeline.from_single_file(model, **pipe_args)
+            except:  # noqa: E722
+                pipe = StableDiffusionPipeline.from_single_file(model, **pipe_args)
+    else:
+        if img2img:
+            pipe = AutoPipelineForImage2Image.from_pretrained(model, **pipe_args)
+        else:
+            pipe = AutoPipelineForText2Image.from_pretrained(model, **pipe_args)
 
     pipe.safety_checker = None
     pipe.watermarker = None
@@ -1369,7 +1368,8 @@ def process_job(
 
 def main(params: dict[str, QDParam], meta: dict[str, str], image: Image.Image | None):
     # {{{
-    pipe = get_pipe(params["model"].value, params["offload"].value, params["dtype"].value, image is not None)
+    with SmartSigint(num=2, job_name="model load"):
+        pipe = get_pipe(params["model"].value, params["offload"].value, params["dtype"].value, image is not None)
 
     if not get_latent_params(pipe):
         print(f'\nModel {params["model"].value} not able to use pre-noised latents.\nNoise options will not be respected.\n')
