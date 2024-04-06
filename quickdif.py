@@ -723,7 +723,7 @@ def parse_cli(params: dict[str, QDParam]) -> tuple[str | None, Image.Image | Non
 
     input_image = None
     if args["input"]:
-        input_image = Image.open(args["input"])
+        input_image = Image.open(args["input"]).convert("RGB")
 
     comment = None
     if args.get("comment", ""):
