@@ -5,6 +5,7 @@ import json
 import random
 import re
 import signal
+import tomllib
 from copy import copy
 from inspect import signature
 from io import BytesIO, UnsupportedOperation
@@ -15,7 +16,6 @@ from typing import Any
 
 import numpy as np
 import numpy.linalg as npl
-import tomllib
 from PIL import Image, PngImagePlugin
 from tqdm import tqdm
 
@@ -810,9 +810,17 @@ from diffusers import (  # noqa: E402
     StableDiffusionPipeline,
     StableDiffusionXLImg2ImgPipeline,
     StableDiffusionXLPipeline,
+    Transformer2DModel,
     UniPCMultistepScheduler,
 )
 from diffusers.models.attention_processor import AttnProcessor2_0  # noqa: E402
+
+try:
+    from sigma import PixArtSigmaPipeline, pixart_sigma_init_patched_inputs
+
+    sigma_import = True
+except ImportError:
+    sigma_import = False
 
 try:
     from attn_custom import SubQuadraticCrossAttnProcessor as subquad_processor
@@ -872,6 +880,21 @@ def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool) -> Diffu
         if pipe_args["torch_dtype"] == torch.float16:
             pipe_args["torch_dtype"] = torch.bfloat16
         pipe = StableCascadeCombinedPipeline.from_pretrained(model, **pipe_args)
+    elif "PixArt-Sigma-XL-2-1024-MS" in model:
+        if sigma_import:
+            setattr(Transformer2DModel, "_init_patched_inputs", pixart_sigma_init_patched_inputs)
+            transformer = Transformer2DModel.from_pretrained(
+                "niklasku/PixArt-Sigma-XL-2-1024-MS",  # the official one is broken...
+                use_safetensors=True,
+                torch_dtype=pipe_args["torch_dtype"],
+            )
+            pipe = PixArtSigmaPipeline.from_pretrained(
+                "PixArt-alpha/pixart_sigma_sdxlvae_T5_diffusers",
+                transformer=transformer,
+                **pipe_args,
+            )
+        else:
+            raise ValueError(f"Model is {model} but Pixart Sigma pipeline not found!")
     elif model.endswith(".safetensors"):
         if img2img:
             try:
@@ -1236,12 +1259,21 @@ def process_job(
             latent += noise.to("cpu")
 
         # Colored latents
-        if is_xl(pipe):
-            cols = COLS_XL
-        elif is_sd(pipe) or isinstance(pipe, PixArtAlphaPipeline):
-            cols = COLS_FTMSE
+        # TODO: flatten
+        if sigma_import:
+            if is_xl(pipe) or isinstance(pipe, PixArtSigmaPipeline):
+                cols = COLS_XL
+            elif is_sd(pipe) or isinstance(pipe, PixArtAlphaPipeline):
+                cols = COLS_FTMSE
+            else:
+                cols = None
         else:
-            cols = None
+            if is_xl(pipe):
+                cols = COLS_XL
+            elif is_sd(pipe) or isinstance(pipe, PixArtAlphaPipeline):
+                cols = COLS_FTMSE
+            else:
+                cols = None
         if cols and color_power is not None and color is not None and color_power != 0:
             sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config).init_noise_sigma
             latents += (
