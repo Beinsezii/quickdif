@@ -884,6 +884,8 @@ def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool) -> Diffu
         if sigma_import:
             setattr(Transformer2DModel, "_init_patched_inputs", pixart_sigma_init_patched_inputs)
             transformer = Transformer2DModel.from_pretrained(
+                # "PixArt-alpha/PixArt-Sigma-XL-2-1024-MS",
+                # subfolder="transformer",
                 "niklasku/PixArt-Sigma-XL-2-1024-MS",  # the official one is broken...
                 use_safetensors=True,
                 torch_dtype=pipe_args["torch_dtype"],
