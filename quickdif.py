@@ -804,23 +804,16 @@ from diffusers import (  # noqa: E402
     EulerAncestralDiscreteScheduler,
     EulerDiscreteScheduler,
     PixArtAlphaPipeline,
+    PixArtSigmaPipeline,
     SchedulerMixin,
     StableCascadeCombinedPipeline,
     StableDiffusionImg2ImgPipeline,
     StableDiffusionPipeline,
     StableDiffusionXLImg2ImgPipeline,
     StableDiffusionXLPipeline,
-    Transformer2DModel,
     UniPCMultistepScheduler,
 )
 from diffusers.models.attention_processor import AttnProcessor2_0  # noqa: E402
-
-try:
-    from sigma import PixArtSigmaPipeline, pixart_sigma_init_patched_inputs
-
-    sigma_import = True
-except ImportError:
-    sigma_import = False
 
 try:
     from attn_custom import SubQuadraticCrossAttnProcessor as subquad_processor
@@ -880,22 +873,8 @@ def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool) -> Diffu
         if pipe_args["torch_dtype"] == torch.float16:
             pipe_args["torch_dtype"] = torch.bfloat16
         pipe = StableCascadeCombinedPipeline.from_pretrained(model, **pipe_args)
-    elif "PixArt-Sigma-XL-2-1024-MS" in model:
-        if sigma_import:
-            setattr(Transformer2DModel, "_init_patched_inputs", pixart_sigma_init_patched_inputs)
-            transformer = Transformer2DModel.from_pretrained(
-                "PixArt-alpha/PixArt-Sigma-XL-2-1024-MS",
-                subfolder="transformer",
-                use_safetensors=True,
-                torch_dtype=pipe_args["torch_dtype"],
-            )
-            pipe = PixArtSigmaPipeline.from_pretrained(
-                "PixArt-alpha/pixart_sigma_sdxlvae_T5_diffusers",
-                transformer=transformer,
-                **pipe_args,
-            )
-        else:
-            raise ValueError(f"Model is {model} but Pixart Sigma pipeline not found!")
+    elif "PixArt-Sigma" in model:
+        pipe = PixArtSigmaPipeline.from_pretrained(model, **pipe_args)
     elif model.endswith(".safetensors"):
         if img2img:
             try:
