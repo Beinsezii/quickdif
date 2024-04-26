@@ -806,7 +806,6 @@ from diffusers import (  # noqa: E402
     PixArtAlphaPipeline,
     PixArtSigmaPipeline,
     SchedulerMixin,
-    StableCascadeCombinedPipeline,
     StableDiffusionImg2ImgPipeline,
     StableDiffusionPipeline,
     StableDiffusionXLImg2ImgPipeline,
@@ -869,11 +868,7 @@ def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool) -> Diffu
         "watermarker": None,
     }
 
-    if "stabilityai/stable-cascade" in model:
-        if pipe_args["torch_dtype"] == torch.float16:
-            pipe_args["torch_dtype"] = torch.bfloat16
-        pipe = StableCascadeCombinedPipeline.from_pretrained(model, **pipe_args)
-    elif "PixArt-Sigma" in model:
+    if "PixArt-Sigma" in model:
         pipe = PixArtSigmaPipeline.from_pretrained(model, **pipe_args)
     elif model.endswith(".safetensors"):
         if img2img:
