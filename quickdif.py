@@ -1240,20 +1240,12 @@ def process_job(
 
         # Colored latents
         # TODO: flatten
-        if sigma_import:
-            if is_xl(pipe) or isinstance(pipe, PixArtSigmaPipeline):
-                cols = COLS_XL
-            elif is_sd(pipe) or isinstance(pipe, PixArtAlphaPipeline):
-                cols = COLS_FTMSE
-            else:
-                cols = None
+        if is_xl(pipe) or isinstance(pipe, PixArtSigmaPipeline):
+            cols = COLS_XL
+        elif is_sd(pipe) or isinstance(pipe, PixArtAlphaPipeline):
+            cols = COLS_FTMSE
         else:
-            if is_xl(pipe):
-                cols = COLS_XL
-            elif is_sd(pipe) or isinstance(pipe, PixArtAlphaPipeline):
-                cols = COLS_FTMSE
-            else:
-                cols = None
+            cols = None
         if cols and color_power is not None and color is not None and color_power != 0:
             sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config).init_noise_sigma
             latents += (
