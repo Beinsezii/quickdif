@@ -1,8 +1,9 @@
 *.json
-*.toml
-*.png
 *.latent
+*.png
 *.tar*
+*.toml
+*.whl
 checkpoints
 comments
 diffusers
