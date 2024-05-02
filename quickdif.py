@@ -748,8 +748,8 @@ if __name__ == "__main__":
 # Load Torch and libs that depend on it after the CLI cause it's laggy.
 import torch  # noqa: E402
 
-torch.set_grad_enabled(False)
-torch.set_float32_matmul_precision("high")
+# torch.set_grad_enabled(False)
+# torch.set_float32_matmul_precision("high")
 
 amd_hijack = False
 if amd_patch:
@@ -1165,6 +1165,7 @@ def build_jobs(params: dict[str, QDParam], schedulers: list[tuple[dict[str, str]
     # }}}
 
 
+@torch.inference_mode
 def process_job(
     params: dict[str, QDParam],
     pipe: DiffusionPipeline,
