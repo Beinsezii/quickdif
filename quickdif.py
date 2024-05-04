@@ -597,21 +597,18 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
     def __contains__(self, key: str) -> bool:
         return key in self.labels()
 
-    def __setitem__(*args):
-        raise ValueError
-
     def __setattr__(*args):  # Effectively make the class static
         raise ValueError
 
     # }}}
 
 
-def build_parser(paremeters: Parameters) -> argparse.ArgumentParser:
+def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
     # {{{
     parser = argparse.ArgumentParser(
         description="Quick and easy inference for a variety of Diffusers models. Not all models support all options", add_help=False
     )
-    for param in paremeters.params():
+    for param in parameters.params():
         args = [param.short] if param.short else []
         args.append(param.long if param.long else param.name)
 
