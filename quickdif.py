@@ -333,18 +333,18 @@ class QDParam:
         typing: type,
         value: Any = None,
         short: str | None = None,
-        long: str | None = None,
         help: str | None = None,
         multi: bool = False,
         meta: bool = False,
+        positional: bool = False,
     ):
         self.name = name
         self.typing = typing
         self.help = help
         self.short = short
-        self.long = long
         self.multi = multi
         self.meta = meta
+        self.positional = positional
 
         self.value = value
         self.default = copy(self.value)
@@ -381,14 +381,13 @@ class QDParam:
 class Parameters:
     # {{{
     ### Batching
-    prompt = QDParam("prompt", str, multi=True, meta=True, help="Positive prompt")
-    negative = QDParam("negative", str, short="-n", long="--negative", multi=True, meta=True, help="Negative prompt")
-    seed = QDParam("seed", int, short="-e", long="--seed", multi=True, meta=True, help="Seed for RNG")
+    prompt = QDParam("prompt", str, multi=True, meta=True, positional=True, help="Positive prompt")
+    negative = QDParam("negative", str, short="-n", multi=True, meta=True, help="Negative prompt")
+    seed = QDParam("seed", int, short="-e", multi=True, meta=True, help="Seed for RNG")
     resolution = QDParam(
         "resolution",
         Resolution,
         short="-r",
-        long="--resolution",
         multi=True,
         help="Resolution in either [width]x[height] or aspect_x:aspect_y[:round][@megapixels|^square] formats.",
     )
@@ -396,7 +395,6 @@ class Parameters:
         "steps",
         int,
         short="-s",
-        long="--steps",
         value=30,
         multi=True,
         meta=True,
@@ -406,7 +404,6 @@ class Parameters:
         "decoder_steps",
         int,
         short="-ds",
-        long="--decoder-steps",
         value=-8,
         multi=True,
         meta=True,
@@ -416,7 +413,6 @@ class Parameters:
         "guidance",
         float,
         short="-g",
-        long="--guidance",
         value=5.0,
         multi=True,
         meta=True,
@@ -426,7 +422,6 @@ class Parameters:
         "decoder_guidance",
         float,
         short="-dg",
-        long="--decoder-guidance",
         multi=True,
         meta=True,
         help="Guidance for the Decoder stage if applicable",
@@ -435,20 +430,16 @@ class Parameters:
         "rescale",
         float,
         short="-G",
-        long="--rescale",
         value=0.0,
         multi=True,
         meta=True,
         help="Rescale the noise during guidance. Moderate values may help produce more natural images when using strong guidance",
     )
-    denoise = QDParam(
-        "denoise", float, short="-d", long="--denoise", multi=True, meta=True, help="Denoising amount for Img2Img. Higher values will change more"
-    )
+    denoise = QDParam("denoise", float, short="-d", multi=True, meta=True, help="Denoising amount for Img2Img. Higher values will change more")
     noise_type = QDParam(
         "noise_type",
         NoiseType,
         short="-nt",
-        long="--noise-type",
         value=NoiseType.Cpu32,
         multi=True,
         meta=True,
@@ -458,7 +449,6 @@ class Parameters:
         "noise_power",
         float,
         short="-np",
-        long="--noise-power",
         multi=True,
         meta=True,
         help="Multiplier to the initial latent noise if applicable. <1 for smoother, >1 for more details",
@@ -467,18 +457,16 @@ class Parameters:
         "color",
         LatentColor,
         short="-C",
-        long="--color",
         value=LatentColor.Black,
         multi=True,
         meta=True,
         help="Color of initial latent noise if applicable. Currently only for XL and SD-FT-MSE latent spaces",
     )
-    color_power = QDParam("color_power", float, short="-c", long="--color-power", multi=True, meta=True, help="Power/opacity of colored latent noise")
+    color_power = QDParam("color_power", float, short="-c", multi=True, meta=True, help="Power/opacity of colored latent noise")
     variance_scale = QDParam(
         "variance_scale",
         int,
         short="-vs",
-        long="--variance-scale",
         value=2,
         multi=True,
         meta=True,
@@ -488,7 +476,6 @@ class Parameters:
         "variance_power",
         float,
         short="-vp",
-        long="--variance-power",
         multi=True,
         meta=True,
         help="Power/opacity for variance noise. Variance noise simply adds randomly generated colored zones to encourage new compositions on overfitted models",
@@ -496,22 +483,16 @@ class Parameters:
     power = QDParam(
         "power",
         float,
-        long="--power",
         multi=True,
         meta=True,
         help="Simple filter which scales final image values away from gray based on an exponent",
     )
-    pixelate = QDParam(
-        "pixelate", float, long="--pixelate", multi=True, meta=True, help="Pixelate image using a divisor. Best used with a pixel art Lora"
-    )
-    posterize = QDParam(
-        "posterize", int, long="--posterize", multi=True, meta=True, help="Set amount of colors per channel. Best used with --pixelate"
-    )
+    pixelate = QDParam("pixelate", float, multi=True, meta=True, help="Pixelate image using a divisor. Best used with a pixel art Lora")
+    posterize = QDParam("posterize", int, multi=True, meta=True, help="Set amount of colors per channel. Best used with --pixelate")
     sampler = QDParam(
         "sampler",
         Sampler,
         short="-S",
-        long="--sampler",
         value=Sampler.Default,
         multi=True,
         meta=True,
@@ -523,24 +504,22 @@ a - Use ancestral sampling;
 2/3 - Use 2nd/3rd order sampling;
 Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
     )
-    spacing = QDParam("spacing", Spacing, long="--spacing", value=Spacing.Trailing, multi=True, meta=True, help="Sampler timestep spacing")
+    spacing = QDParam("spacing", Spacing, value=Spacing.Trailing, multi=True, meta=True, help="Sampler timestep spacing")
     ### Global
     model = QDParam(
         "model",
         str,
         short="-m",
-        long="--model",
         value="stabilityai/stable-diffusion-xl-base-1.0",
         meta=True,
         help="Safetensor file or HuggingFace model ID",
     )
-    lora = QDParam("lora", str, short="-l", long="--lora", meta=True, multi=True, help='Apply Loras, ex. "ms_paint.safetensors:::0.6"')
-    batch_count = QDParam("batch_count", int, short="-b", long="--batch-count", value=1, help="Behavior dependant on 'iter'")
-    batch_size = QDParam("batch_size", int, short="-B", long="--batch-size", value=1, help="Amount of images to produce in each job")
+    lora = QDParam("lora", str, short="-l", meta=True, multi=True, help='Apply Loras, ex. "ms_paint.safetensors:::0.6"')
+    batch_count = QDParam("batch_count", int, short="-b", value=1, help="Behavior dependant on 'iter'")
+    batch_size = QDParam("batch_size", int, short="-B", value=1, help="Amount of images to produce in each job")
     iter = QDParam(
         "iter",
         Iter,
-        long="--iter",
         value=Iter.Basic,
         help="""Controls how jobs are created:
 'basic' - Run every combination of parameters 'batch_count' times, incrementing seed each 'batch_count';
@@ -552,7 +531,6 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         "output",
         Path,
         short="-o",
-        long="--output",
         value=Path("/tmp/quickdif/" if Path("/tmp/").exists() else "./output/"),
         help="Output directory for images",
     )
@@ -560,24 +538,20 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         "dtype",
         DType,
         short="-dt",
-        long="--dtype",
         value=DType.FP16,
         help="Data format for inference. Should be left at FP16 unless the device or model does not work properly",
     )
     offload = QDParam(
         "offload",
         Offload,
-        long="--offload",
         value=Offload.NONE,
         help="Set amount of CPU offload. In most UIs, 'model' is equivalent to --med-vram while 'sequential' is equivalent to --low-vram",
     )
-    attention = QDParam("attention", Attention, value=Attention.Default, long="--attention", help="Select attention processor to use")
-    compile = QDParam("compile", bool, long="--compile", help="Compile network with torch.compile()")
-    tile = QDParam("tile", bool, long="--tile", help="Tile VAE. Slicing is already used by default so only set tile if creating very large images")
-    xl_vae = QDParam("xl_vae", bool, long="--xl-vae", help="Override the SDXL VAE. Useful for models that use the broken 1.0 vae")
-    amd_patch = QDParam(
-        "amd_patch", bool, long="--amd-patch", value=True, help="Monkey patch the torch SDPA function with Flash Attention on AMD cards"
-    )
+    attention = QDParam("attention", Attention, value=Attention.Default, help="Select attention processor to use")
+    compile = QDParam("compile", bool, help="Compile network with torch.compile()")
+    tile = QDParam("tile", bool, help="Tile VAE. Slicing is already used by default so only set tile if creating very large images")
+    xl_vae = QDParam("xl_vae", bool, help="Override the SDXL VAE. Useful for models that use the broken 1.0 vae")
+    amd_patch = QDParam("amd_patch", bool, value=True, help="Monkey patch the torch SDPA function with Flash Attention on AMD cards")
 
     def pairs(self) -> list[tuple[str, QDParam]]:
         return [(k, v) for k, v in getmembers(self) if isinstance(v, QDParam)]
@@ -609,8 +583,11 @@ def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
         description="Quick and easy inference for a variety of Diffusers models. Not all models support all options", add_help=False
     )
     for param in parameters.params():
-        args = [param.short] if param.short else []
-        args.append(param.long if param.long else param.name)
+        if param.positional:
+            flags = [param.name]
+        else:
+            flags = [param.short] if param.short else []
+            flags.append("--" + param.name.replace("_", "-"))
 
         kwargs = {}
 
@@ -637,7 +614,7 @@ def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
             else:
                 kwargs["nargs"] = "?"
 
-        parser.add_argument(*args, **kwargs)
+        parser.add_argument(*flags, **kwargs)
 
     parser.add_argument("-i", "--input", type=argparse.FileType(mode="rb"), help="Input image")
     parser.add_argument(
@@ -647,7 +624,8 @@ def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
     # It would be nice to write toml but I don't think its worth a 3rd party lib
     # parser.add_argument("--toml", type=argparse.FileType(mode="a+b"), help="Output settings to TOML")
     parser.add_argument("--comment", type=str, help="Add a comment to the image.")
-    parser.add_argument("--print", action="store_true", help="Print out generation params and exit.")
+    parser.add_argument("--print", action="store_true", help="Print out generation params and exit")
+    parser.add_argument("-.", action="count", help="End the current multi-value optional input")
     parser.add_argument("--help", action="help")
 
     return parser
