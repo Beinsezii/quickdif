@@ -579,8 +579,23 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         "amd_patch", bool, long="--amd-patch", value=True, help="Monkey patch the torch SDPA function with Flash Attention on AMD cards"
     )
 
-    def __getitem__(self, key: str) -> QDParam:
-        return getattr(self, key)
+    def pairs(self) -> list[tuple[str, QDParam]]:
+        return [(k, v) for k, v in getmembers(self) if isinstance(v, QDParam)]
+
+    def labels(self) -> list[str]:
+        return list(map(lambda kv: kv[0], self.pairs()))
+
+    def params(self) -> list[QDParam]:
+        return list(map(lambda kv: kv[1], self.pairs()))
+
+    def get(self, key: str) -> QDParam:  # not __getitem__ because direct field access should be used when possible
+        for k, v in self.pairs():
+            if k == key:
+                return v
+        raise ValueError
+
+    def __contains__(self, key: str) -> bool:
+        return key in self.labels()
 
     def __setitem__(*args):
         raise ValueError
@@ -588,31 +603,15 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
     def __setattr__(*args):  # Effectively make the class static
         raise ValueError
 
-    def __contains__(self, key: str) -> bool:
-        return hasattr(self, key)
-
-    def items(self) -> list[tuple[str, QDParam]]:
-        return [(k, v) for k, v in getmembers(self) if isinstance(v, QDParam)]
-
-    def keys(self) -> list[str]:
-        return list(map(lambda kv: kv[0], self.items()))
-
-    def values(self) -> list[QDParam]:
-        return list(map(lambda kv: kv[1], self.items()))
-
     # }}}
 
 
-def build_parser(params: Parameters) -> argparse.ArgumentParser:
+def build_parser(paremeters: Parameters) -> argparse.ArgumentParser:
     # {{{
-    print(params.keys())
-    print(params.values())
     parser = argparse.ArgumentParser(
         description="Quick and easy inference for a variety of Diffusers models. Not all models support all options", add_help=False
     )
-    for param in params.values():
-        print(param.short)
-        print(param)
+    for param in paremeters.params():
         args = [param.short] if param.short else []
         args.append(param.long if param.long else param.name)
 
@@ -658,9 +657,9 @@ def build_parser(params: Parameters) -> argparse.ArgumentParser:
     # }}}
 
 
-def parse_cli(params: Parameters) -> tuple[str | None, Image.Image | None]:
+def parse_cli(parameters: Parameters) -> tuple[str | None, Image.Image | None]:
     # {{{
-    args = vars(build_parser(params).parse_args())
+    args = vars(build_parser(parameters).parse_args())
 
     for ext in "json", "toml":
         default = Path(__file__).parent.joinpath(Path(f"quickdif.{ext}"))
@@ -682,11 +681,11 @@ def parse_cli(params: Parameters) -> tuple[str | None, Image.Image | None]:
                 ]:
                     try:
                         for k, v in f(data).items():
-                            if k in params:
+                            if k in parameters:
                                 try:
-                                    params[k].value = v
+                                    parameters.get(k).value = v
                                 except ValueError:
-                                    print(f"Config value '{v}' cannot be assigned to parameter '{params[k].name}', ignoring")
+                                    print(f"Config value '{v}' cannot be assigned to parameter '{parameters.get(k).name}', ignoring")
                             else:
                                 print(f'Unknown key in serial config "{k}"')
                         break
@@ -694,30 +693,30 @@ def parse_cli(params: Parameters) -> tuple[str | None, Image.Image | None]:
                         pass
             except UnicodeDecodeError:
                 with Image.open(BytesIO(data)) as meta_image:
-                    params["resolution"].value = (meta_image.width, meta_image.height)
+                    parameters.resolution.value = (meta_image.width, meta_image.height)
                     for k, v in getattr(meta_image, "text", {}).items():
-                        if k in params:
+                        if k in parameters:
                             if k == "lora":
-                                params[k].value = v.split("\x1f")
-                            elif params[k].meta:
+                                parameters.get(k).value = v.split("\x1f")
+                            elif parameters.get(k).meta:
                                 try:
-                                    params[k].value = v
+                                    parameters.get(k).value = v
                                 except ValueError:
-                                    print(f"Config value '{v}' cannot be assigned to parameter '{params[k].name}', ignoring")
+                                    print(f"Config value '{v}' cannot be assigned to parameter '{parameters.get(k).name}', ignoring")
 
     for id, val in args.items():
         if (
-            id in params
+            id in parameters
             and val is not None
-            and not (isinstance(val, list) and len(val) == 0 and params[id].long is None and params[id].short is None)
+            and not (isinstance(val, list) and len(val) == 0 and parameters.get(id).long is None and parameters.get(id).short is None)
         ):
-            params[id].value = val
+            parameters.get(id).value = val
 
-    args = {k: v for k, v in args.items() if k not in params}
+    args = {k: v for k, v in args.items() if k not in parameters}
 
     if args.get("json", None) is not None:
         dump = {}
-        for k, v in params.items():
+        for k, v in parameters.pairs():
             if v.value != v.default:
                 v = v.value
                 if isinstance(v, Path):
@@ -736,17 +735,17 @@ def parse_cli(params: Parameters) -> tuple[str | None, Image.Image | None]:
         exit()
 
     for key in "prompt", "negative":
-        if params[key].value is not None:
-            params[key].value = [expanded for nested in [pexpand(p) for p in params[key].value] for expanded in nested]
+        if parameters.get(key).value is not None:
+            parameters.get(key).value = [expanded for nested in [pexpand(p) for p in parameters.get(key).value] for expanded in nested]
 
     if args.get("print", False):
-        print("\n".join([f"{p.name}: {p.value}" for p in params.values()]))
+        print("\n".join([f"{p.name}: {p.value}" for p in parameters.params()]))
         exit()
 
-    if params["output"].value.is_dir():
+    if parameters.output.value.is_dir():
         pass
-    elif not params["output"].value.exists():
-        params["output"].value.mkdir()
+    elif not parameters.output.value.exists():
+        parameters.output.value.mkdir()
     else:
         raise ValueError("out must be directory")
 
@@ -770,7 +769,7 @@ amd_patch = True
 if __name__ == "__main__":
     cli_params = Parameters()
     (cli_comment, cli_image) = parse_cli(cli_params)
-    amd_patch = cli_params["amd_patch"].value
+    amd_patch = cli_params.amd_patch.value
 
 # TORCH PRELUDE {{{
 #
@@ -1032,11 +1031,11 @@ def get_compel(pipe: DiffusionPipeline) -> Compel | None:
     # }}}
 
 
-def set_vae(params: Parameters, pipe: DiffusionPipeline):
+def set_vae(parameters: Parameters, pipe: DiffusionPipeline):
     # {{{
-    if is_xl(pipe) and params["xl_vae"].value:
+    if is_xl(pipe) and parameters.xl_vae.value:
         pipe.vae = AutoencoderKL.from_pretrained("stabilityai/sdxl-vae", torch_dtype=pipe.vae.dtype, use_safetensors=True).to(pipe.vae.device)
-    if params["tile"].value:
+    if parameters.tile.value:
         pipe.vae.enable_tiling()
     else:
         pipe.vae.enable_slicing()
@@ -1045,7 +1044,7 @@ def set_vae(params: Parameters, pipe: DiffusionPipeline):
     # }}}
 
 
-def build_schedulers(params: Parameters, default_scheduler: Any) -> list[tuple[dict[str, str], type[SchedulerMixin]]]:
+def build_schedulers(parameters: Parameters, default_scheduler: Any) -> list[tuple[dict[str, str], type[SchedulerMixin]]]:
     # {{{
     sampler_args = {
         "steps_offset": 0,
@@ -1083,18 +1082,18 @@ def build_schedulers(params: Parameters, default_scheduler: Any) -> list[tuple[d
                 raise AssertionError(f"kwarg '{k}' not valid for requested scheduler for '{name}'.\nParameters: {list(sig)}")
 
     builders: list[tuple[dict[str, str], Any, dict[str, Any]]] = []
-    if not params["sampler"].value:
-        params["sampler"].value = [Sampler.Default]
-    if params["sampler"].value:
-        for s in params["sampler"].value:
+    if not parameters.sampler.value:
+        parameters.sampler.value = [Sampler.Default]
+    if parameters.sampler.value:
+        for s in parameters.sampler.value:
             sched, kwargs = sampler_map[s]
             builders.append(({"sampler": s}, sched, kwargs))
 
-    if params["spacing"].value:
+    if parameters.spacing.value:
         builders = [
             (sched_meta | {"spacing": space}, sched, kwargs | {"timestep_spacing": space})
             for sched_meta, sched, kwargs in builders
-            for space in params["spacing"].value
+            for space in parameters.spacing.value
         ]
 
     for sched_meta, _, _ in builders:
@@ -1130,18 +1129,18 @@ def get_latent_params(pipe: DiffusionPipeline) -> tuple[int, float, int] | None:
     # }}}
 
 
-def build_jobs(params: Parameters, schedulers: list[tuple[dict[str, str], type[SchedulerMixin]]]) -> list[dict[str, Any]]:
+def build_jobs(parameters: Parameters, schedulers: list[tuple[dict[str, str], type[SchedulerMixin]]]) -> list[dict[str, Any]]:
     # {{{
     job = {
-        "num_images_per_prompt": params["batch_size"].value,
+        "num_images_per_prompt": parameters.batch_size.value,
         "clean_caption": False,  # stop IF nag. what does this even do
     }
 
-    if not params["negative"].value:
-        params["negative"].value = [""]
+    if not parameters.negative.value:
+        parameters.negative.value = [""]
 
-    if params["iter"].value is Iter.Shuffle:
-        jobs = [job] * params["batch_count"].value
+    if parameters.iter.value is Iter.Shuffle:
+        jobs = [job] * parameters.batch_count.value
         merger = lambda items, name, vals: [i | {name: v} for i, v in zip(items, oversample(vals, len(items)))]  # noqa: E731
     else:
         jobs = [job]
@@ -1149,7 +1148,7 @@ def build_jobs(params: Parameters, schedulers: list[tuple[dict[str, str], type[S
 
     image_ops = [{}]
 
-    for param in params.values():
+    for param in parameters.params():
         if param.multi:
             match param.name:
                 case "seed" | "sampler" | "spacing" | "lora":
@@ -1165,19 +1164,19 @@ def build_jobs(params: Parameters, schedulers: list[tuple[dict[str, str], type[S
         jobs = merger(jobs, "scheduler", schedulers)
 
     i32max = 2**31 - 1
-    seeds = [torch.randint(high=i32max, low=-i32max, size=(1,)).item()] if not params["seed"].value else params["seed"].value
-    seeds = [s + c * params["batch_size"].value for c in range(params["batch_count"].value) for s in seeds]
-    match params["iter"].value:
+    seeds = [torch.randint(high=i32max, low=-i32max, size=(1,)).item()] if not parameters.seed.value else parameters.seed.value
+    seeds = [s + c * parameters.batch_size.value for c in range(parameters.batch_count.value) for s in seeds]
+    match parameters.iter.value:
         case Iter.Shuffle:
             jobs = merger(jobs, "seed", seeds)
         case Iter.Walk:
-            jobs = [j | {"seed": s + (n * params["batch_size"].value * params["batch_count"].value)} for s in seeds for n, j in enumerate(jobs)]
+            jobs = [j | {"seed": s + (n * parameters.batch_size.value * parameters.batch_count.value)} for s in seeds for n, j in enumerate(jobs)]
         case Iter.Basic:
             jobs = [j | {"seed": s} for s in seeds for j in jobs]
         case _:
             raise ValueError
 
-    if params["iter"].value is Iter.Shuffle:
+    if parameters.iter.value is Iter.Shuffle:
         jobs = [j | {"image_ops": [o]} for j, o in zip(jobs, oversample(image_ops, len(jobs)))]
     else:
         # Shouldn't need to copy since image_ops isn't mutated
@@ -1196,7 +1195,7 @@ def build_jobs(params: Parameters, schedulers: list[tuple[dict[str, str], type[S
 
 @torch.inference_mode()
 def process_job(
-    params: Parameters,
+    parameters: Parameters,
     pipe: DiffusionPipeline,
     job: dict[str, Any],
     meta: dict[str, str],
@@ -1206,7 +1205,7 @@ def process_job(
     torch.cuda.empty_cache()
     seed = job.pop("seed")
 
-    for param in params.values():
+    for param in parameters.params():
         if param.name in job and param.meta:
             meta[param.name] = job[param.name]
 
@@ -1237,7 +1236,7 @@ def process_job(
         pipe.scheduler = sched
 
     # NOISE {{{
-    generators = [torch.Generator(noise_device).manual_seed(seed + n) for n in range(params["batch_size"].value)]
+    generators = [torch.Generator(noise_device).manual_seed(seed + n) for n in range(parameters.batch_size.value)]
     latent_params = get_latent_params(pipe)
 
     if input_image is None and latent_params is not None:
@@ -1247,7 +1246,7 @@ def process_job(
         else:
             width, height = default_size, default_size
             job["width"], job["height"] = round(default_size * factor), round(default_size * factor)
-        shape = (params["batch_size"].value, channels, height, width)
+        shape = (parameters.batch_size.value, channels, height, width)
         latents = torch.zeros(shape, dtype=pipe.dtype, device="cpu")
         for latent, generator in zip(latents, generators):
             # Variance
@@ -1284,7 +1283,7 @@ def process_job(
         job["latents"] = latents
 
     job["generator"] = generators
-    print("seeds:", " ".join([str(seed + n) for n in range(params["batch_size"].value)]))
+    print("seeds:", " ".join([str(seed + n) for n in range(parameters.batch_size.value)]))
     # NOISE }}}
 
     # CONDITIONING {{{
@@ -1353,10 +1352,10 @@ def process_job(
             info = copy(pnginfo)
             for k, v in ops.items():
                 info.add_text(k, str(v))
-            p = params["output"].value.joinpath(f"{filenum:05}.png")
+            p = parameters.output.value.joinpath(f"{filenum:05}.png")
             while p.exists():
                 filenum += 1
-                p = params["output"].value.joinpath(f"{filenum:05}.png")
+                p = parameters.output.value.joinpath(f"{filenum:05}.png")
 
             # Direct array ops
             op_arr: np.ndarray = np.asarray(image_array)  # mutable reference to make pyright happy
@@ -1396,23 +1395,23 @@ def process_job(
 
 
 @torch.inference_mode()
-def main(params: Parameters, meta: dict[str, str], image: Image.Image | None):
+def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None):
     # {{{
     with SmartSigint(num=2, job_name="model load"):
-        pipe = get_pipe(params["model"].value, params["offload"].value, params["dtype"].value, image is not None)
+        pipe = get_pipe(parameters.model.value, parameters.offload.value, parameters.dtype.value, image is not None)
 
     if not get_latent_params(pipe):
-        print(f'\nModel {params["model"].value} not able to use pre-noised latents.\nNoise options will not be respected.\n')
+        print(f"\nModel {parameters.model.value} not able to use pre-noised latents.\nNoise options will not be respected.\n")
 
-    if params["lora"].value:
-        lora_string = apply_loras(params["lora"].value, pipe)
+    if parameters.lora.value:
+        lora_string = apply_loras(parameters.lora.value, pipe)
         if lora_string:
             meta["lora"] = lora_string
 
     if hasattr(pipe, "vae"):
-        set_vae(params, pipe)
+        set_vae(parameters, pipe)
 
-    if params["compile"].value:
+    if parameters.compile.value:
         if hasattr(pipe, "unet"):
             pipe.unet = torch.compile(pipe.unet)
         if hasattr(pipe, "transformer"):
@@ -1421,11 +1420,11 @@ def main(params: Parameters, meta: dict[str, str], image: Image.Image | None):
             pipe.prior_pipe.prior = torch.compile(pipe.prior_pipe.prior)
         if hasattr(pipe, "decoder_pipe"):
             pipe.decoder_pipe.decoder = torch.compile(pipe.decoder_pipe.decoder)
-    elif params["attention"].value:
-        set_attn(pipe, params["attention"].value)
+    elif parameters.attention.value:
+        set_attn(pipe, parameters.attention.value)
 
     if hasattr(pipe, "scheduler"):
-        schedulers = build_schedulers(params, pipe.scheduler)
+        schedulers = build_schedulers(parameters, pipe.scheduler)
         if len(schedulers) == 1:
             sched_meta, sched = schedulers[0]
             meta |= sched_meta
@@ -1433,25 +1432,25 @@ def main(params: Parameters, meta: dict[str, str], image: Image.Image | None):
     else:
         schedulers = []
 
-    jobs = build_jobs(params, schedulers)
+    jobs = build_jobs(parameters, schedulers)
 
-    total_images = len(jobs) * params["batch_size"].value
-    print(f'\nGenerating {len(jobs)} batches of {params["batch_size"].value} images for {total_images} total...')
+    total_images = len(jobs) * parameters.batch_size.value
+    print(f"\nGenerating {len(jobs)} batches of {parameters.batch_size.value} images for {total_images} total...")
     pbar = tqdm(desc="Images", total=total_images, smoothing=0)
     for job in jobs:
         with SmartSigint(job_name="current batch"):
-            process_job(params, pipe, job, meta.copy(), image)
-            pbar.update(params["batch_size"].value)
+            process_job(parameters, pipe, job, meta.copy(), image)
+            pbar.update(parameters.batch_size.value)
 
     # }}}
 
 
 if __name__ == "__main__":
-    params = locals()["cli_params"]
+    parameters = locals()["cli_params"]
     comment = locals()["cli_comment"]
     image = locals()["cli_image"]
-    meta: dict[str, str] = {"model": params["model"].value, "url": "https://github.com/Beinsezii/quickdif"}
+    meta: dict[str, str] = {"model": parameters.model.value, "url": "https://github.com/Beinsezii/quickdif"}
     if comment:
         meta["comment"] = comment
 
-    main(params, meta, image)
+    main(parameters, meta, image)
