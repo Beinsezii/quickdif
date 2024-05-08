@@ -372,6 +372,9 @@ class Grid:
         grids: list[list[list[tuple[dict[str, Any], Image.Image]]]] = []
         others: list[Image.Image] = []
 
+        if self.x is None and self.y is None:
+            return (results, list(map(lambda t: t[1], images)))
+
         for meta, img in images:
             if self.x is not None:
                 if self.x not in meta:
@@ -804,11 +807,7 @@ def parse_cli(parameters: Parameters) -> tuple[str | None, Image.Image | None]:
                                     print(f"Config value '{v}' cannot be assigned to parameter '{parameters.get(k).name}', ignoring")
 
     for id, val in args.items():
-        if (
-            id in parameters
-            and val is not None
-            and not (isinstance(val, list) and len(val) == 0 and parameters.get(id).positional)
-        ):
+        if id in parameters and val is not None and not (isinstance(val, list) and len(val) == 0 and parameters.get(id).positional):
             parameters.get(id).value = val
 
     args = {k: v for k, v in args.items() if k not in parameters}
