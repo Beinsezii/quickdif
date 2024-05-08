@@ -9,13 +9,13 @@ Quick and easy CLI inference that just works™ for a variety of Diffusers model
   - Some more advanced tweaks like multi-Lora, colored latents, and variance masks
   - Extremely small 1-shot script using `accelerate` for hot loading models
   - Load settings from JSON, TOML, PNG
+  - Output as grid
 
 ## Not Including
   - ControlNet + other Stable Diffusion extensions
   - Other diffusion models may or may not work properly
   - Multi-stage models: DFIF Stage 2, SDXL Refiner
   - Server/API for a perpetual instance
-  - Output as grid
   - 100% maximum optimization
   - 1-click installer
 

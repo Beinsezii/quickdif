@@ -16,7 +16,7 @@ from typing import Any
 
 import numpy as np
 import numpy.linalg as npl
-from PIL import Image, PngImagePlugin
+from PIL import Image, ImageDraw, PngImagePlugin
 from tqdm import tqdm
 
 # MATRICES {{{
@@ -325,6 +325,129 @@ class Resolution:
     # }}}
 
 
+class Grid:
+    # {{{
+    def __init__(self, axes: None | str | tuple[str, str]):
+        self._x = None
+        self._y = None
+        self._str = None
+        if isinstance(axes, str):
+            items = axes.split()
+            assert len(items) <= 2
+            self._x = None if len(items) < 1 else items[0]
+            self._y = None if len(items) < 2 else items[1]
+            self._str = axes
+        elif isinstance(axes, tuple):
+            self._x, self._y = axes
+
+        params = Parameters()
+        if self._x is not None:
+            self._x = self._x.casefold()
+            if self._x == "none":
+                self._x = None
+            else:
+                assert params.get(self._x).meta or self._x == "resolution"
+        if self._y is not None:
+            self._y = self._y.casefold()
+            if self._y == "none":
+                self._y = None
+            else:
+                assert params.get(self._y).meta or self._y == "resolution"
+
+    @property
+    def x(self) -> str | None:
+        return self._x
+
+    @property
+    def y(self) -> str | None:
+        return self._y
+
+    @property
+    def axes(self) -> tuple[str | None, str | None]:
+        return (self.x, self.y)
+
+    def fold(self, images: list[tuple[dict[str, Any], Image.Image]]) -> tuple[list[Image.Image], list[Image.Image]]:
+        results: list[Image.Image] = []
+        # n, x, y
+        grids: list[list[list[tuple[dict[str, Any], Image.Image]]]] = []
+        others: list[Image.Image] = []
+
+        for meta, img in images:
+            if self.x is not None:
+                if self.x not in meta:
+                    others.append(img)
+                    continue
+            if self.y is not None:
+                if self.y not in meta:
+                    others.append(img)
+                    continue
+
+            # Arrange in grid
+            n = 0
+            while True:
+                if len(grids) < (n + 1):
+                    grids.append([[(meta, img)]])
+                    break
+
+                # add X
+                if self.x is not None:
+                    if not any(map(lambda gx: meta[self.x] == gx[0][0][self.x], grids[n])):
+                        grids[n].append([(meta, img)])
+                        break
+
+                # add Y
+                if self.y is not None:
+                    do_break = False
+                    for gx in grids[n]:
+                        if not any(map(lambda gy: meta[self.y] == gy[0][self.y], gx)):
+                            gx.append((meta, img))
+                            do_break = True
+                            break
+                    if do_break:  # gotta love no outer breaks
+                        break
+
+                n += 1
+
+        # Compile results
+        base_style = {"fill": (255, 255, 255), "stroke_fill": (0, 0, 0)}
+        for g in grids:
+            cells_x = cells_y = cell_w = cell_h = 0
+            for x in g:
+                cells_x += 1
+                cells_y = max(cells_y, len(x))
+                for y in x:
+                    cell_w = max(cell_w, y[1].width)
+                    cell_h = max(cell_h, y[1].height)
+
+            style = base_style | {"font_size": cell_w // 25}
+            pad = style["font_size"] // 4
+            style["stroke_width"] = max(1, style["font_size"] // 10)
+
+            canvas = Image.new("RGB", (cells_x * cell_w, cells_y * cell_h), (0, 0, 0))
+            for nx, ix in enumerate(g):
+                for ny, iy in enumerate(ix):
+                    canvas.paste(iy[1], (nx * cell_w + (cell_w - iy[1].width) // 2, ny * cell_h + (cell_h - iy[1].height) // 2))
+                    # X labels
+                    if ny == 0 and self.x is not None:
+                        draw = ImageDraw.Draw(canvas)
+                        draw.text((nx * cell_w + pad, ny * cell_h), f"{self.x} : {iy[0][self.x]}", **style)
+                    # Y labels
+                    if nx == 0 and self.y is not None:
+                        draw = ImageDraw.Draw(canvas)
+                        draw.text((nx * cell_w + pad, (ny + 1) * cell_h - 5), f"{self.y} : {iy[0][self.y]}", anchor="lb", **style)
+            results.append(canvas)
+
+        return results, others
+
+    def __repr__(self):
+        return str(self.x) + " " + str(self.y)
+
+    def __str__(self):
+        return self._str if self._str is not None else self.__repr__()
+
+    # }}}
+
+
 class QDParam:
     # {{{
     def __init__(
@@ -526,6 +649,7 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
 'walk' - Run every combination of parameters 'batch_count' times, incrementing seed for every individual job;
 'shuffle' - Pick randomly from all given parameters 'batch_count' times""",
     )
+    grid = QDParam("grid", Grid)
     ### System
     output = QDParam(
         "output",
@@ -683,7 +807,7 @@ def parse_cli(parameters: Parameters) -> tuple[str | None, Image.Image | None]:
         if (
             id in parameters
             and val is not None
-            and not (isinstance(val, list) and len(val) == 0 and parameters.get(id).long is None and parameters.get(id).short is None)
+            and not (isinstance(val, list) and len(val) == 0 and parameters.get(id).positional)
         ):
             parameters.get(id).value = val
 
@@ -1175,8 +1299,9 @@ def process_job(
     job: dict[str, Any],
     meta: dict[str, str],
     input_image: Image.Image | None,
-):
+) -> list[tuple[dict[str, Any], Image.Image]]:
     # {{{
+
     torch.cuda.empty_cache()
     seed = job.pop("seed")
 
@@ -1313,6 +1438,7 @@ def process_job(
         if k not in pipe_params:
             del job[k]
 
+    results: list[tuple[dict[str, Any], Image.Image]] = []
     filenum = 0
     for n, image_array in enumerate(pipe(output_type="np", **job).images):
         pnginfo = PngImagePlugin.PngInfo()
@@ -1365,6 +1491,8 @@ def process_job(
                     op_pil = op_pil.resize((w, h), resample=Image.NEAREST)
 
             op_pil.save(p, format="PNG", pnginfo=info, compress_level=4)
+            results.append((meta | ops | {"seed": seed + n, "resolution": op_pil.size}, op_pil))
+    return results
     # }}}
     # }}}
 
@@ -1412,11 +1540,25 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
     total_images = len(jobs) * parameters.batch_size.value
     print(f"\nGenerating {len(jobs)} batches of {parameters.batch_size.value} images for {total_images} total...")
     pbar = tqdm(desc="Images", total=total_images, smoothing=0)
+    images = []
     for job in jobs:
         with SmartSigint(job_name="current batch"):
-            process_job(parameters, pipe, job, meta.copy(), image)
+            results = process_job(parameters, pipe, job, meta.copy(), image)
+            if parameters.grid.value is not None:
+                images += results
             pbar.update(parameters.batch_size.value)
 
+    if parameters.grid.value is not None:
+        filenum = 0
+        grids, others = parameters.grid.value.fold(images)
+        for i in grids:
+            p = parameters.output.value.joinpath(f"grid_{filenum:05}.png")
+            while p.exists():
+                filenum += 1
+                p = parameters.output.value.joinpath(f"grid_{filenum:05}.png")
+            i.save(p)
+        if len(others) > 0:
+            print(f"###\n{len(others)} images not included in grid output\n###")
     # }}}
 
 
