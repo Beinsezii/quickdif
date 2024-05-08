@@ -327,15 +327,16 @@ class Resolution:
 
 class Grid:
     # {{{
-    def __init__(self, axes: None | str | tuple[str, str]):
+    def __init__(self, axes: None | str | tuple[str | None, str | None]):
         self._x = None
         self._y = None
         self._str = None
         if isinstance(axes, str):
-            items = axes.split()
-            assert len(items) <= 2
-            self._x = None if len(items) < 1 else items[0]
-            self._y = None if len(items) < 2 else items[1]
+            m = re.match(r"^ *([A-Za-z_]+)? *?([,:]?) *([A-Za-z_]+)? *$", axes)
+            if m is None:
+                raise ValueError
+            assert m.group(1) is not None or m.group(3) is not None
+            self._x, self._y = m.group(1), m.group(3)
             self._str = axes
         elif isinstance(axes, tuple):
             self._x, self._y = axes
@@ -443,7 +444,7 @@ class Grid:
         return results, others
 
     def __repr__(self):
-        return str(self.x) + " " + str(self.y)
+        return str(self.x) + ", " + str(self.y)
 
     def __str__(self):
         return self._str if self._str is not None else self.__repr__()
@@ -817,7 +818,7 @@ def parse_cli(parameters: Parameters) -> tuple[str | None, Image.Image | None]:
         for k, v in parameters.pairs():
             if v.value != v.default:
                 v = v.value
-                if isinstance(v, Path):
+                if isinstance(v, Path) or isinstance(v, Grid):
                     v = str(v)
                 elif isinstance(v, list):
                     if all(map(lambda x: isinstance(x, Resolution), v)):
