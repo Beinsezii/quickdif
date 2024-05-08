@@ -653,7 +653,7 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
 'walk' - Run every combination of parameters 'batch_count' times, incrementing seed for every individual job;
 'shuffle' - Pick randomly from all given parameters 'batch_count' times""",
     )
-    grid = QDParam("grid", Grid)
+    grid = QDParam("grid", Grid, help="Compile the images into a final grid using up to two parameters, formatted [X or none] ,: [Y or none]")
     ### System
     output = QDParam(
         "output",
