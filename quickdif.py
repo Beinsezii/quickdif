@@ -255,6 +255,7 @@ class Attention(enum.StrEnum):
     Sdp = enum.auto()
     SubQuad = enum.auto()
     RocmFlash = enum.auto()
+    TritonFlash = enum.auto()
 
 
 @enum.unique
@@ -950,6 +951,11 @@ try:
     from attn_custom import FlashAttnProcessor as rocm_flash_processor
 except ImportError:
     rocm_flash_processor = None
+
+try:
+    from attn_custom import TritonAttnProcessor as triton_flash_processor
+except ImportError:
+    triton_flash_processor = None
 # }}}
 
 
@@ -1057,11 +1063,18 @@ def set_attn(pipe: DiffusionPipeline, attention: Attention):
                 print('\nAttention Processor "subquad" not available.\n')
         case Attention.RocmFlash:
             if amd_hijack:
-                print('\nIgnoring attention procesor "rocm_flash" as SDPA was patched.\n')
+                print('\nIgnoring attention procesor "rocmflash" as SDPA was patched.\n')
             elif rocm_flash_processor is not None:
                 processor = rocm_flash_processor()
             else:
-                print('\nAttention Processor "rocm_flash" not available.\n')
+                print('\nAttention Processor "rocmflash" not available.\n')
+        case Attention.TritonFlash:
+            if amd_hijack:
+                print('\nIgnoring attention procesor "tritonflash" as SDPA was patched.\n')
+            elif triton_flash_processor is not None:
+                processor = triton_flash_processor()
+            else:
+                print('\nAttention Processor "tritonflash" not available.\n')
 
     for item in [pipe] + [
         getattr(pipe, id, None)
