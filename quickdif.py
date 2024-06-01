@@ -1114,19 +1114,24 @@ def apply_loras(loras: list[str], pipe: DiffusionPipeline) -> str | None:
 
 def get_compel(pipe: DiffusionPipeline) -> Compel | None:
     # {{{
-    if hasattr(pipe, "tokenizer") and isinstance(pipe.tokenizer, CLIPTokenizer):
-        if hasattr(pipe, "tokenizer_2"):
-            compel = Compel(
-                tokenizer=[pipe.tokenizer, pipe.tokenizer_2],
-                text_encoder=[pipe.text_encoder, pipe.text_encoder_2],
-                returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
-                requires_pooled=[False, True],
-                truncate_long_prompts=False,
-            )
+    try:
+        if hasattr(pipe, "tokenizer") and isinstance(pipe.tokenizer, CLIPTokenizer):
+            if hasattr(pipe, "tokenizer_2"):
+                compel = Compel(
+                    tokenizer=[pipe.tokenizer, pipe.tokenizer_2],
+                    text_encoder=[pipe.text_encoder, pipe.text_encoder_2],
+                    returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
+                    requires_pooled=[False, True],
+                    truncate_long_prompts=False,
+                )
+            else:
+                compel = Compel(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder, truncate_long_prompts=False)
         else:
-            compel = Compel(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder, truncate_long_prompts=False)
-    else:
+            compel = None
+
+    except Exception as e:
         compel = None
+        print(f"Compel not enabled:\n{e}\nRich prompting not available.")
 
     return compel
     # }}}
@@ -1389,11 +1394,7 @@ def process_job(
     # NOISE }}}
 
     # CONDITIONING {{{
-    try:
-        compel = get_compel(pipe)
-    except Exception as e:
-        compel = None
-        print(f"Compel not enabled:\n{e}\nRich prompting not available.")
+    compel = get_compel(pipe)
     if compel is not None:
         pos = job.pop("prompt") if "prompt" in job else ""
         neg = job.pop("negative") if "negative" in job else ""
