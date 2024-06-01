@@ -995,17 +995,19 @@ def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool) -> Diffu
         "watermarker": None,
     }
 
-    if "PixArt-Sigma" in model:
-        pipe = PixArtSigmaPipeline.from_pretrained(model, **pipe_args)
-    elif model.endswith(".safetensors"):
+    if model.endswith(".safetensors"):
         if img2img:
             try:
                 pipe = StableDiffusionXLImg2ImgPipeline.from_single_file(model, **pipe_args)
+                if pipe.text_encoder_2 is None:
+                    raise ValueError
             except:  # noqa: E722
                 pipe = StableDiffusionImg2ImgPipeline.from_single_file(model, **pipe_args)
         else:
             try:
                 pipe = StableDiffusionXLPipeline.from_single_file(model, **pipe_args)
+                if pipe.text_encoder_2 is None:
+                    raise ValueError
             except:  # noqa: E722
                 pipe = StableDiffusionPipeline.from_single_file(model, **pipe_args)
     else:
@@ -1387,7 +1389,11 @@ def process_job(
     # NOISE }}}
 
     # CONDITIONING {{{
-    compel = get_compel(pipe)
+    try:
+        compel = get_compel(pipe)
+    except Exception as e:
+        compel = None
+        print(f"Compel not enabled:\n{e}\nRich prompting not available.")
     if compel is not None:
         pos = job.pop("prompt") if "prompt" in job else ""
         neg = job.pop("negative") if "negative" in job else ""

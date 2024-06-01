@@ -1,7 +1,7 @@
 torch >= 2.1
-# diffusers >= 0.27
+diffusers >= 0.28
 # diffusers @ git+https://github.com/Beinsezii/diffusers.git@quickdif
-diffusers @ git+https://github.com/huggingface/diffusers.git
+# diffusers @ git+https://github.com/huggingface/diffusers.git
 peft
 transformers
 accelerate
