@@ -680,6 +680,7 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
     tile = QDParam("tile", bool, help="Tile VAE. Slicing is already used by default so only set tile if creating very large images")
     xl_vae = QDParam("xl_vae", bool, help="Override the SDXL VAE. Useful for models that use the broken 1.0 vae")
     amd_patch = QDParam("amd_patch", bool, value=True, help="Monkey patch the torch SDPA function with Flash Attention on AMD cards")
+    comment = QDParam("comment", str, meta=True, help="Add a comment to the image.")
 
     def pairs(self) -> list[tuple[str, QDParam]]:
         return [(k, v) for k, v in getmembers(self) if isinstance(v, QDParam)]
@@ -751,7 +752,6 @@ def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
     parser.add_argument("--json", type=argparse.FileType(mode="a+b"), help="Output settings to JSON")
     # It would be nice to write toml but I don't think its worth a 3rd party lib
     # parser.add_argument("--toml", type=argparse.FileType(mode="a+b"), help="Output settings to TOML")
-    parser.add_argument("--comment", type=str, help="Add a comment to the image.")
     parser.add_argument("--print", action="store_true", help="Print out generation params and exit")
     parser.add_argument("-.", action="count", help="End the current multi-value optional input")
     parser.add_argument("--help", action="help")
@@ -760,7 +760,7 @@ def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
     # }}}
 
 
-def parse_cli(parameters: Parameters) -> tuple[str | None, Image.Image | None]:
+def parse_cli(parameters: Parameters) -> Image.Image | None:
     # {{{
     args = vars(build_parser(parameters).parse_args())
 
@@ -852,22 +852,14 @@ def parse_cli(parameters: Parameters) -> tuple[str | None, Image.Image | None]:
     if args["input"]:
         input_image = Image.open(args["input"]).convert("RGB")
 
-    comment = None
-    if args.get("comment", ""):
-        try:
-            with open(args["comment"], "r") as f:
-                comment = f.read()
-        except Exception:
-            comment = args["comment"]
-
-    return (comment, input_image)
+    return input_image
     # }}}
 
 
 amd_patch = True
 if __name__ == "__main__":
     cli_params = Parameters()
-    (cli_comment, cli_image) = parse_cli(cli_params)
+    cli_image = parse_cli(cli_params)
     amd_patch = cli_params.amd_patch.value
 
 # TORCH PRELUDE {{{
@@ -1569,10 +1561,9 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
 
 if __name__ == "__main__":
     parameters = locals()["cli_params"]
-    comment = locals()["cli_comment"]
     image = locals()["cli_image"]
     meta: dict[str, str] = {"model": parameters.model.value, "url": "https://github.com/Beinsezii/quickdif"}
-    if comment:
-        meta["comment"] = comment
+    if parameters.comment.value:
+        meta["comment"] = meta["comment"] = parameters.comment.value
 
     main(parameters, meta, image)
