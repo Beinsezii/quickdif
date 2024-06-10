@@ -999,15 +999,13 @@ def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool) -> Diffu
         if img2img:
             try:
                 pipe = StableDiffusionXLImg2ImgPipeline.from_single_file(model, **pipe_args)
-                if pipe.text_encoder_2 is None:
-                    raise ValueError
+                assert pipe.text_encoder_2 is not None
             except:  # noqa: E722
                 pipe = StableDiffusionImg2ImgPipeline.from_single_file(model, **pipe_args)
         else:
             try:
                 pipe = StableDiffusionXLPipeline.from_single_file(model, **pipe_args)
-                if pipe.text_encoder_2 is None:
-                    raise ValueError
+                assert pipe.text_encoder_2 is not None
             except:  # noqa: E722
                 pipe = StableDiffusionPipeline.from_single_file(model, **pipe_args)
     else:
