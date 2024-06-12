@@ -2,7 +2,7 @@
 Quick and easy CLI inference that just works™ for a variety of Diffusers models
 
 ## Including
-  - Verified working with Stable Diffusion (1.5/2.1/XL Base), Stable Cascade/Wuerstchen, Kandinsky22, Pixart
+  - Verified working with Stable Diffusion (1.5/2.1/XL Base/3), Stable Cascade/Wuerstchen, Kandinsky22, Pixart
   - Supports many common settings found in GUIs
   - Iterate over parameters like prompt or CFG
   - Expand prompts with `photo of {all|of|these}` or `photo of [one|of|these]`
