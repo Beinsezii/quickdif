@@ -1036,6 +1036,10 @@ def is_sd(pipe: DiffusionPipeline) -> bool:
     return isinstance(pipe, StableDiffusionPipeline) or isinstance(pipe, StableDiffusionImg2ImgPipeline)
 
 
+def is_sd3(pipe: DiffusionPipeline) -> bool:
+    return isinstance(pipe, StableDiffusion3Pipeline) or isinstance(pipe, StableDiffusion3Img2ImgPipeline)
+
+
 def set_attn(pipe: DiffusionPipeline, attention: Attention):
     # {{{
     processor = None
@@ -1107,7 +1111,7 @@ def apply_loras(loras: list[str], pipe: DiffusionPipeline) -> str | None:
 def get_compel(pipe: DiffusionPipeline) -> Compel | None:
     # {{{
     # Compel thinks it supports it but it doesn't.
-    if isinstance(pipe, StableDiffusion3Pipeline) or isinstance(pipe, StableDiffusion3Img2ImgPipeline):
+    if is_sd3(pipe):
         return None
     try:
         if hasattr(pipe, "tokenizer") and isinstance(pipe.tokenizer, CLIPTokenizer):
@@ -1528,7 +1532,7 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
     elif parameters.attention.value:
         set_attn(pipe, parameters.attention.value)
 
-    if hasattr(pipe, "scheduler"):
+    if hasattr(pipe, "scheduler") and not is_sd3(pipe):
         schedulers = build_schedulers(parameters, pipe.scheduler)
         if len(schedulers) == 1:
             sched_meta, sched = schedulers[0]
