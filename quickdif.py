@@ -925,6 +925,8 @@ from diffusers import (  # noqa: E402
     PixArtAlphaPipeline,
     PixArtSigmaPipeline,
     SchedulerMixin,
+    StableDiffusion3Img2ImgPipeline,
+    StableDiffusion3Pipeline,
     StableDiffusionImg2ImgPipeline,
     StableDiffusionPipeline,
     StableDiffusionXLImg2ImgPipeline,
