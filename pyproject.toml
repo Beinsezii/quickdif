@@ -10,12 +10,15 @@ dependencies = [
     # "diffusers >= 0.28",
     "diffusers @ git+https://github.com/Beinsezii/diffusers.git@quickdif",
     # "diffusers @ git+https://github.com/huggingface/diffusers.git",
+    "accelerate",
+    "compel",
     "peft",
     "transformers",
-    "accelerate",
-    "omegaconf",
-    "sentencepiece",
-    "compel",
+    # Dependencies I don't explicitly use but aren't automatically pulled...
+    "omegaconf", # Compel or pixart I forgot
+    "protobuf", # T5 SD3
+    "sentencepiece", # Also compel or pixart I think
+    "setuptools", # Why, diffusers? Why do you do this?
 ]
 
 [build-system]
