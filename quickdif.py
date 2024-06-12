@@ -1106,6 +1106,9 @@ def apply_loras(loras: list[str], pipe: DiffusionPipeline) -> str | None:
 
 def get_compel(pipe: DiffusionPipeline) -> Compel | None:
     # {{{
+    # Compel thinks it supports it but it doesn't.
+    if isinstance(pipe, StableDiffusion3Pipeline) or isinstance(pipe, StableDiffusion3Img2ImgPipeline):
+        return None
     try:
         if hasattr(pipe, "tokenizer") and isinstance(pipe.tokenizer, CLIPTokenizer):
             if hasattr(pipe, "tokenizer_2"):
