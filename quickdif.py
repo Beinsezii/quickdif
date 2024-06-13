@@ -73,6 +73,17 @@ OKLAB_M2 = np.array(
 
 
 # UTILS {{{
+def get_suffix(string: str, separator: str = ":::", typing: type = str, default: Any = None) -> tuple[str, Any | None]:
+    split = string.rsplit(separator, 1)
+    match len(split):
+        case 1:
+            return (string, default)
+        case 2:
+            return split[0], typing(split[1])
+        case _:
+            raise ValueError(f"Unable to parse separators `{separator}` for value {string}")
+
+
 def oversample(population: list, k: int):
     samples = []
     while len(samples) < k:
@@ -639,7 +650,7 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         short="-m",
         value="stabilityai/stable-diffusion-xl-base-1.0",
         meta=True,
-        help="Safetensor file or HuggingFace model ID",
+        help='Safetensor file or HuggingFace model ID. Append `:::` to denote revision',
     )
     lora = QDParam("lora", str, short="-l", meta=True, multi=True, help='Apply Loras, ex. "ms_paint.safetensors:::0.6"')
     batch_count = QDParam("batch_count", int, short="-b", value=1, help="Behavior dependant on 'iter'")
@@ -990,6 +1001,10 @@ def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool) -> Diffu
         "watermarker": None,
     }
 
+    model, revision = get_suffix(model)
+    if revision is not None:
+        pipe_args["revision"] = revision
+
     if model.endswith(".safetensors"):
         if img2img:
             try:
@@ -1084,9 +1099,7 @@ def apply_loras(loras: list[str], pipe: DiffusionPipeline) -> str | None:
     # {{{
     adapters = []
     for n, lora in enumerate(loras):
-        split = lora.rsplit(":::")
-        path = split[0]
-        scale = 1.0 if len(split) < 2 else float(split[1])
+        path, scale = get_suffix(lora, typing=float, default=1.0)
         if scale == 0.0:
             continue
         name = f"LA{n}"
