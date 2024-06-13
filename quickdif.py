@@ -650,7 +650,7 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         short="-m",
         value="stabilityai/stable-diffusion-xl-base-1.0",
         meta=True,
-        help='Safetensor file or HuggingFace model ID. Append `:::` to denote revision',
+        help="Safetensor file or HuggingFace model ID. Append `:::` to denote revision",
     )
     lora = QDParam("lora", str, short="-l", meta=True, multi=True, help='Apply Loras, ex. "ms_paint.safetensors:::0.6"')
     batch_count = QDParam("batch_count", int, short="-b", value=1, help="Behavior dependant on 'iter'")
@@ -1007,17 +1007,28 @@ def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool) -> Diffu
 
     if model.endswith(".safetensors"):
         if img2img:
-            try:
-                pipe = StableDiffusionXLImg2ImgPipeline.from_single_file(model, **pipe_args)
-                assert pipe.text_encoder_2 is not None
-            except:  # noqa: E722
-                pipe = StableDiffusionImg2ImgPipeline.from_single_file(model, **pipe_args)
+            sd_pipe = StableDiffusionImg2ImgPipeline
+            xl_pipe = StableDiffusionXLImg2ImgPipeline
+            s3_pipe = StableDiffusion3Img2ImgPipeline
         else:
+            sd_pipe = StableDiffusionPipeline
+            xl_pipe = StableDiffusionXLPipeline
+            s3_pipe = StableDiffusion3Pipeline
+
+        try:
+            pipe = xl_pipe.from_single_file(model, **pipe_args)
+            assert pipe.text_encoder_2 is not None
+        except:  # noqa: E722
             try:
-                pipe = StableDiffusionXLPipeline.from_single_file(model, **pipe_args)
-                assert pipe.text_encoder_2 is not None
+                pipe = sd_pipe.from_single_file(model, **pipe_args)
             except:  # noqa: E722
-                pipe = StableDiffusionPipeline.from_single_file(model, **pipe_args)
+                try:
+                    pipe = s3_pipe.from_single_file(model, **pipe_args)
+                except Exception as e:
+                    if str(e).startswith("Failed to load T5EncoderModel."): # better way?
+                        pipe = s3_pipe.from_single_file(model, text_encoder_3=None, tokenizer_3=None, **pipe_args)
+                    else:
+                        raise Exception(f'Could not load "{model}" as `{sd_pipe.__name__}`, `{xl_pipe.__name__}`, or `{s3_pipe.__name__}`')
     else:
         if img2img:
             pipe = AutoPipelineForImage2Image.from_pretrained(model, **pipe_args)
