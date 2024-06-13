@@ -922,6 +922,7 @@ from diffusers import (  # noqa: E402
     DPMSolverMultistepScheduler,
     EulerAncestralDiscreteScheduler,
     EulerDiscreteScheduler,
+    HunyuanDiTPipeline,
     PixArtAlphaPipeline,
     PixArtSigmaPipeline,
     SchedulerMixin,
@@ -1370,21 +1371,23 @@ def process_job(
 
         # Colored latents
         # TODO: flatten
-        if is_xl(pipe) or isinstance(pipe, PixArtSigmaPipeline):
-            cols = COLS_XL
-        elif is_sd(pipe) or isinstance(pipe, PixArtAlphaPipeline):
-            cols = COLS_FTMSE
-        else:
-            cols = None
-        if cols and color_power is not None and color is not None and color_power != 0:
-            sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config).init_noise_sigma
-            latents += (
-                torch.tensor(cols[color], dtype=pipe.dtype, device="cpu")
-                .mul(color_power)
-                .div(sigma)
-                .expand([shape[0], shape[2], shape[3], shape[1]])
-                .permute((0, 3, 1, 2))
-            )
+        if color_power is not None and color is not None and color_power != 0:
+            if is_xl(pipe) or isinstance(pipe, PixArtSigmaPipeline) or isinstance(pipe, HunyuanDiTPipeline):
+                cols = COLS_XL
+            elif is_sd(pipe) or isinstance(pipe, PixArtAlphaPipeline):
+                cols = COLS_FTMSE
+            else:
+                cols = None
+                print(f"# # #\nParameter `color_power` cannot be used for {type(pipe).__name__}\n# # #")
+            if cols:
+                sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config).init_noise_sigma
+                latents += (
+                    torch.tensor(cols[color], dtype=pipe.dtype, device="cpu")
+                    .mul(color_power)
+                    .div(sigma)
+                    .expand([shape[0], shape[2], shape[3], shape[1]])
+                    .permute((0, 3, 1, 2))
+                )
 
         job["latents"] = latents
 
