@@ -2,27 +2,37 @@
 Quick and easy CLI inference that just works™ for a variety of Diffusers models
 
 ## Including
-  - Verified working with Stable Diffusion (1.5/2.1/XL Base/3), Stable Cascade/Wuerstchen, Kandinsky22, Pixart
-  - Supports many common settings found in GUIs
-  - Iterate over parameters like prompt or CFG
-  - Expand prompts with `photo of {all|of|these}` or `photo of [one|of|these]`
-  - Some more advanced tweaks like multi-Lora, colored latents, and variance masks
-  - Extremely small 1-shot script using `accelerate` for hot loading models
-  - Load settings from JSON, TOML, PNG
-  - Output as grid
+  * Verified working across many models
+    + Stable Diffusion (1.5/2.1)
+    + Stable Diffusion XL Base
+      - No refiner
+    + Stable Diffusion 3
+    + Stable Cascade
+    + Wuerstchen
+    + Kandinsky22
+    + Pixart (Alpha/Sigma)
+    + Hunyuan
+    * Other diffusion models will likely work to varying degrees so long as they're in the Diffusers format
+  * Multi-lora fusion using `peft` for minimal performance loss
+  * Extremely small 1-shot script using `accelerate` for hot loading models
+  * Features all of the most common generation parameters
+  * Includes many advanced generation parameters such as latent augmentation
+  * Iterate over most parameters and create grids
+  * Expand prompts with `photo of {all|of|these}` or `photo of [one|of|these]`
+  * Load settings from JSON, TOML, PNG
+  * Targeted AMD/ROCm optimizations
+    * NVIDIA/CUDA does not need additional optimizations
 
 ## Not Including
   - ControlNet + other Stable Diffusion extensions
-  - Other diffusion models may or may not work properly
   - Multi-stage models: DFIF Stage 2, SDXL Refiner
   - Server/API for a perpetual instance
-  - 100% maximum optimization
+  - 100% maximum throughput
   - 1-click installer
+  - MacOS/MPS and Intel OneAPI may not function properly
 
 ## Installation
-You must have a recent Python version installed, at least 3.11+.
-
-In essence you just need to install the pip packages from `requirements.txt` to your environment of choice, then you can run the quickdif script
+This project only supports `pip` based installs on Python 3.11+
 
 #### Basic setup
 ```sh
@@ -42,13 +52,23 @@ In essence you just need to install the pip packages from `requirements.txt` to 
 # replace with appropriate activation script for other shells
 > source ./venv/bin/activate
 # It's recommended to first install torch using the recommended commands from https://pytorch.org/get-started/locally/
-> pip3 install torch --index-url https://download.pytorch.org/whl/rocm5.6 # AMD example
+> pip install torch --index-url https://download.pytorch.org/whl/rocm6.0 # AMD example
 # finally
-> pip3 install -Ur ./requirements.txt
+> pip install -U .
 > deactivate
+> ./quickdif.sh "kitten"
+# Windows users will instead have to invoke Python directly
+> python quickdif.py "kitten"
 ```
 
-#### Run quickdif
+### As a module
+Additionally, you may use the project as a python module
+```sh
+pip install git+https://github.com/Beinsezii/quickdif.git
+python -m quickdif "kitten"
+```
+
+## Usage
 ```sh
 # See all options. Always refer to the script help over the other examples in this README
 > ./quickdif.sh --help
