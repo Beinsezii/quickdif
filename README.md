@@ -12,7 +12,7 @@ Quick and easy CLI inference that just works™ for a variety of Diffusers model
     + Kandinsky22
     + Pixart (Alpha/Sigma)
     + Hunyuan
-    * Other diffusion models will likely work to varying degrees so long as they're in the Diffusers format
+    * Other Diffusers format models will likely work to varying degrees
   * Multi-lora fusion using `peft` for minimal performance loss
   * Extremely small 1-shot script using `accelerate` for hot loading models
   * Features all of the most common generation parameters
