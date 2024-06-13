@@ -1025,7 +1025,7 @@ def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool) -> Diffu
                 try:
                     pipe = s3_pipe.from_single_file(model, **pipe_args)
                 except Exception as e:
-                    if str(e).startswith("Failed to load T5EncoderModel."): # better way?
+                    if str(e).startswith("Failed to load T5EncoderModel."):  # better way?
                         pipe = s3_pipe.from_single_file(model, text_encoder_3=None, tokenizer_3=None, **pipe_args)
                     else:
                         raise Exception(f'Could not load "{model}" as `{sd_pipe.__name__}`, `{xl_pipe.__name__}`, or `{s3_pipe.__name__}`')
