@@ -1264,6 +1264,7 @@ def build_jobs(parameters: Parameters, schedulers: list[tuple[dict[str, str], ty
     job = {
         "num_images_per_prompt": parameters.batch_size.value,
         "clean_caption": False,  # stop IF nag. what does this even do
+        "use_resolution_binning": False,  # True breaks with pre-noised latents
     }
 
     if not parameters.negative.value:
