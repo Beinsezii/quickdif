@@ -1465,10 +1465,12 @@ def process_job(
 
     if "sampler" in job and hasattr(pipe, "scheduler"):
         default_scheduler, pipe.scheduler = pipe.scheduler, get_scheduler(job["sampler"], job.get("spacing", None), pipe.scheduler)
+    else:
+        default_scheduler = None
 
     if input_image is not None:
         if resolution is not None:
-            job["image"] = input_image.resize(resolution.resolution, Image.LANCZOS)
+            job["image"] = input_image.resize(resolution.resolution, Image.Resampling.LANCZOS)
         else:
             job["image"] = input_image
     elif resolution is not None:
@@ -1548,13 +1550,13 @@ def process_job(
             if "pixelate" in ops:
                 if ops["pixelate"] > 1:
                     w, h = op_pil.width, op_pil.height
-                    op_pil = op_pil.resize((round(w / ops["pixelate"]), round(h / ops["pixelate"])), resample=Image.BOX)
-                    op_pil = op_pil.resize((w, h), resample=Image.NEAREST)
+                    op_pil = op_pil.resize((round(w / ops["pixelate"]), round(h / ops["pixelate"])), resample=Image.Resampling.BOX)
+                    op_pil = op_pil.resize((w, h), resample=Image.Resampling.NEAREST)
 
             op_pil.save(p, format="PNG", pnginfo=info, compress_level=4)
             results.append((meta | ops | {"seed": seed + n, "resolution": op_pil.size}, op_pil))
 
-    if "default_scheduler" in locals():
+    if default_scheduler is not None:
         pipe.scheduler = default_scheduler
 
     return results
