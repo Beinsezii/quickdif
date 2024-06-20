@@ -519,6 +519,15 @@ class QDParam:
 class Parameters:
     # {{{
     ### Batching
+    model = QDParam(
+        "model",
+        str,
+        short="-m",
+        value="stabilityai/stable-diffusion-xl-base-1.0",
+        meta=True,
+        multi=True,
+        help="Safetensor file or HuggingFace model ID. Append `:::` to denote revision",
+    )
     prompt = QDParam("prompt", str, multi=True, meta=True, positional=True, help="Positive prompt")
     negative = QDParam("negative", str, short="-n", multi=True, meta=True, help="Negative prompt")
     seed = QDParam("seed", int, short="-e", multi=True, meta=True, help="Seed for RNG")
@@ -644,14 +653,6 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
     )
     spacing = QDParam("spacing", Spacing, value=Spacing.Trailing, multi=True, meta=True, help="Sampler timestep spacing")
     ### Global
-    model = QDParam(
-        "model",
-        str,
-        short="-m",
-        value="stabilityai/stable-diffusion-xl-base-1.0",
-        meta=True,
-        help="Safetensor file or HuggingFace model ID. Append `:::` to denote revision",
-    )
     lora = QDParam("lora", str, short="-l", meta=True, multi=True, help='Apply Loras, ex. "ms_paint.safetensors:::0.6"')
     batch_count = QDParam("batch_count", int, short="-b", value=1, help="Behavior dependant on 'iter'")
     batch_size = QDParam("batch_size", int, short="-B", value=1, help="Amount of images to produce in each job")
@@ -1282,7 +1283,7 @@ def build_jobs(parameters: Parameters, schedulers: list[tuple[dict[str, str], ty
     for param in parameters.params():
         if param.multi:
             match param.name:
-                case "seed" | "sampler" | "spacing" | "lora":
+                case "seed" | "sampler" | "spacing" | "lora" | "model":
                     pass
                 case "power" | "pixelate" | "posterize":
                     if param.value:
@@ -1534,53 +1535,56 @@ def process_job(
 @torch.inference_mode()
 def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None):
     # {{{
-    with SmartSigint(num=2, job_name="model load"):
-        pipe = get_pipe(parameters.model.value, parameters.offload.value, parameters.dtype.value, image is not None)
-
-    if not get_latent_params(pipe):
-        print(f"\nModel {parameters.model.value} not able to use pre-noised latents.\nNoise options will not be respected.\n")
-
-    if parameters.lora.value:
-        lora_string = apply_loras(parameters.lora.value, pipe)
-        if lora_string:
-            meta["lora"] = lora_string
-
-    if hasattr(pipe, "vae"):
-        set_vae(parameters, pipe)
-
-    if parameters.compile.value:
-        if hasattr(pipe, "unet"):
-            pipe.unet = torch.compile(pipe.unet)
-        if hasattr(pipe, "transformer"):
-            pipe.transformer = torch.compile(pipe.transformer)
-        if hasattr(pipe, "prior_pipe"):
-            pipe.prior_pipe.prior = torch.compile(pipe.prior_pipe.prior)
-        if hasattr(pipe, "decoder_pipe"):
-            pipe.decoder_pipe.decoder = torch.compile(pipe.decoder_pipe.decoder)
-    elif parameters.attention.value:
-        set_attn(pipe, parameters.attention.value)
-
-    if hasattr(pipe, "scheduler") and not is_sd3(pipe):
-        schedulers = build_schedulers(parameters, pipe.scheduler)
-        if len(schedulers) == 1:
-            sched_meta, sched = schedulers[0]
-            meta |= sched_meta
-            pipe.scheduler = sched
-    else:
-        schedulers = []
-
-    jobs = build_jobs(parameters, schedulers)
-
-    total_images = len(jobs) * parameters.batch_size.value
-    print(f"\nGenerating {len(jobs)} batches of {parameters.batch_size.value} images for {total_images} total...")
-    pbar = tqdm(desc="Images", total=total_images, smoothing=0)
     images = []
-    for job in jobs:
-        with SmartSigint(job_name="current batch"):
-            results = process_job(parameters, pipe, job, meta.copy(), image)
-            if parameters.grid.value is not None:
-                images += results
-            pbar.update(parameters.batch_size.value)
+    for model in parameters.model.value:
+        with SmartSigint(num=2, job_name="model load"):
+            pipe = get_pipe(model, parameters.offload.value, parameters.dtype.value, image is not None)
+
+        if not get_latent_params(pipe):
+            print(f"\nModel {model} not able to use pre-noised latents.\nNoise options will not be respected.\n")
+
+        if parameters.lora.value:
+            lora_string = apply_loras(parameters.lora.value, pipe)
+            if lora_string:
+                meta["lora"] = lora_string
+
+        if hasattr(pipe, "vae"):
+            set_vae(parameters, pipe)
+
+        if parameters.compile.value:
+            if hasattr(pipe, "unet"):
+                pipe.unet = torch.compile(pipe.unet)
+            if hasattr(pipe, "transformer"):
+                pipe.transformer = torch.compile(pipe.transformer)
+            if hasattr(pipe, "prior_pipe"):
+                pipe.prior_pipe.prior = torch.compile(pipe.prior_pipe.prior)
+            if hasattr(pipe, "decoder_pipe"):
+                pipe.decoder_pipe.decoder = torch.compile(pipe.decoder_pipe.decoder)
+        elif parameters.attention.value:
+            set_attn(pipe, parameters.attention.value)
+
+        if hasattr(pipe, "scheduler") and not is_sd3(pipe):
+            schedulers = build_schedulers(parameters, pipe.scheduler)
+            if len(schedulers) == 1:
+                sched_meta, sched = schedulers[0]
+                meta |= sched_meta
+                pipe.scheduler = sched
+        else:
+            schedulers = []
+
+        jobs = build_jobs(parameters, schedulers)
+
+        total_images = len(jobs) * parameters.batch_size.value
+        print(f"\nGenerating {len(jobs)} batches of {parameters.batch_size.value} images for {total_images} total...")
+        pbar = tqdm(desc="Images", total=total_images, smoothing=0)
+        for job in jobs:
+            with SmartSigint(job_name="current batch"):
+                results = process_job(parameters, pipe, job, meta.copy() | {"model": model}, image)
+                if parameters.grid.value is not None:
+                    images += results
+                pbar.update(parameters.batch_size.value)
+
+        del pipe
 
     if parameters.grid.value is not None:
         filenum = 0
@@ -1599,7 +1603,7 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
 if __name__ == "__main__":
     parameters = locals()["cli_params"]
     image = locals()["cli_image"]
-    meta: dict[str, str] = {"model": parameters.model.value, "url": "https://github.com/Beinsezii/quickdif"}
+    meta: dict[str, str] = {"url": "https://github.com/Beinsezii/quickdif"}
     if parameters.comment.value:
         meta["comment"] = meta["comment"] = parameters.comment.value
 
