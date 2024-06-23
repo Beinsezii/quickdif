@@ -1508,58 +1508,59 @@ def process_job(
 
     results: list[tuple[dict[str, Any], Image.Image]] = []
     filenum = 0
-    for n, image_array in enumerate(pipe(output_type="np", **job).images):
-        pnginfo = PngImagePlugin.PngInfo()
-        for k, v in meta.items():
-            pnginfo.add_text(k, str(v))
-        if "latents" in job or n == 0:
-            pnginfo.add_text("seed", str(seed + n))
-        else:
-            pnginfo.add_text("seed", f"{seed} + {n}")
+    with SmartSigint(job_name="current batch"):
+        for n, image_array in enumerate(pipe(output_type="np", **job).images):
+            pnginfo = PngImagePlugin.PngInfo()
+            for k, v in meta.items():
+                pnginfo.add_text(k, str(v))
+            if "latents" in job or n == 0:
+                pnginfo.add_text("seed", str(seed + n))
+            else:
+                pnginfo.add_text("seed", f"{seed} + {n}")
 
-        for ops in image_ops:
-            info = copy(pnginfo)
-            for k, v in ops.items():
-                info.add_text(k, str(v))
-            p = parameters.output.value.joinpath(f"{filenum:05}.png")
-            while p.exists():
-                filenum += 1
+            for ops in image_ops:
+                info = copy(pnginfo)
+                for k, v in ops.items():
+                    info.add_text(k, str(v))
                 p = parameters.output.value.joinpath(f"{filenum:05}.png")
+                while p.exists():
+                    filenum += 1
+                    p = parameters.output.value.joinpath(f"{filenum:05}.png")
 
-            # Direct array ops
-            op_arr: np.ndarray = np.asarray(image_array)  # mutable reference to make pyright happy
+                # Direct array ops
+                op_arr: np.ndarray = np.asarray(image_array)  # mutable reference to make pyright happy
 
-            if "power" in ops:
-                # ^2.2 for approx sRGB EOTF
-                okl = lrgb_to_oklab(spowf(op_arr, 2.2))
+                if "power" in ops:
+                    # ^2.2 for approx sRGB EOTF
+                    okl = lrgb_to_oklab(spowf(op_arr, 2.2))
 
-                # ≈1/3 cause OKL's top heavy lightness curve
-                offset = [0.35, 1, 1]
-                # Halve chromacities' power slope
-                power = [ops["power"], sqrt(ops["power"]), sqrt(ops["power"])]
+                    # ≈1/3 cause OKL's top heavy lightness curve
+                    offset = [0.35, 1, 1]
+                    # Halve chromacities' power slope
+                    power = [ops["power"], sqrt(ops["power"]), sqrt(ops["power"])]
 
-                okl = spowf((okl + offset), power) - offset
+                    okl = spowf((okl + offset), power) - offset
 
-                # back to sRGB with approx OETF
-                op_arr = spowf(oklab_to_lrgb(okl), 1 / 2.2)
+                    # back to sRGB with approx OETF
+                    op_arr = spowf(oklab_to_lrgb(okl), 1 / 2.2)
 
-            if "posterize" in ops:
-                if ops["posterize"] > 1:
-                    factor = float((ops["posterize"] - 1) / 256)
-                    op_arr = (op_arr * 255 * factor).round() / factor / 255
+                if "posterize" in ops:
+                    if ops["posterize"] > 1:
+                        factor = float((ops["posterize"] - 1) / 256)
+                        op_arr = (op_arr * 255 * factor).round() / factor / 255
 
-            # PIL ops
-            op_pil: Image.Image = Image.fromarray((op_arr * 255).clip(0, 255).astype(np.uint8))
-            del op_arr
+                # PIL ops
+                op_pil: Image.Image = Image.fromarray((op_arr * 255).clip(0, 255).astype(np.uint8))
+                del op_arr
 
-            if "pixelate" in ops:
-                if ops["pixelate"] > 1:
-                    w, h = op_pil.width, op_pil.height
-                    op_pil = op_pil.resize((round(w / ops["pixelate"]), round(h / ops["pixelate"])), resample=Image.Resampling.BOX)
-                    op_pil = op_pil.resize((w, h), resample=Image.Resampling.NEAREST)
+                if "pixelate" in ops:
+                    if ops["pixelate"] > 1:
+                        w, h = op_pil.width, op_pil.height
+                        op_pil = op_pil.resize((round(w / ops["pixelate"]), round(h / ops["pixelate"])), resample=Image.Resampling.BOX)
+                        op_pil = op_pil.resize((w, h), resample=Image.Resampling.NEAREST)
 
-            op_pil.save(p, format="PNG", pnginfo=info, compress_level=4)
-            results.append((meta | ops | {"seed": seed + n, "resolution": op_pil.size}, op_pil))
+                op_pil.save(p, format="PNG", pnginfo=info, compress_level=4)
+                results.append((meta | ops | {"seed": seed + n, "resolution": op_pil.size}, op_pil))
 
     if default_scheduler is not None:
         pipe.scheduler = default_scheduler
@@ -1581,11 +1582,10 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
     pbar = tqdm(desc="Images", total=total_images, smoothing=0)
 
     for job in jobs:
-        with SmartSigint(job_name="current batch"):
-            results = process_job(parameters, piperef, job, meta.copy(), image)
-            if parameters.grid.value is not None:
-                images += results
-            pbar.update(parameters.batch_size.value)
+        results = process_job(parameters, piperef, job, meta.copy(), image)
+        if parameters.grid.value is not None:
+            images += results
+        pbar.update(parameters.batch_size.value)
 
     if parameters.grid.value is not None:
         filenum = 0
