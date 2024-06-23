@@ -1595,7 +1595,7 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
             while p.exists():
                 filenum += 1
                 p = parameters.output.value.joinpath(f"grid_{filenum:05}.png")
-            i.save(p)
+            i.save(p, format="PNG", compress_level=4)
         if len(others) > 0:
             print(f"###\n{len(others)} images not included in grid output\n###")
     # }}}
