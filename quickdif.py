@@ -414,7 +414,12 @@ class Grid:
                 if self.y is not None:
                     do_break = False
                     for gx in grids[n]:
-                        if not any(map(lambda gy: meta[self.y] == gy[0][self.y], gx)):
+                        if (
+                            # All gx columns unique Y
+                            not any(map(lambda gy: meta[self.y] == gy[0][self.y], gx))
+                            # All gx columns same X
+                            and all(map(lambda gy: meta[self.x] == gy[0][self.x], gx))
+                        ):
                             gx.append((meta, img))
                             do_break = True
                             break
