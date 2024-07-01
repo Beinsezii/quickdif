@@ -532,7 +532,7 @@ class Parameters:
         value="stabilityai/stable-diffusion-xl-base-1.0",
         meta=True,
         multi=True,
-        help="Safetensor file or HuggingFace model ID. Append `:::` to denote revision",
+        help="Safetensor file or HuggingFace model ID. Append `:::` to denote revision. Does not respect `--iter`",
     )
     prompt = QDParam("prompt", str, multi=True, meta=True, positional=True, help="Positive prompt")
     negative = QDParam("negative", str, short="-n", multi=True, meta=True, help="Negative prompt")
