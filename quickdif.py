@@ -1328,32 +1328,23 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
     # }}}
 
 
-def load_model(
-    model: str,
-    offload: Offload,
-    dtype: DType,
-    lora: list[str],
-    attention: Attention,
-    compile: bool,
-    tile: bool,
-    xl_vae: bool,
-) -> DiffusionPipeline:
+def load_model(model: str, img2img: bool, parameters: Parameters, meta: dict[str, str]) -> DiffusionPipeline:
     # {{{
     with SmartSigint(num=2, job_name="model load"):
-        pipe = get_pipe(model, offload, dtype, image is not None)
+        pipe = get_pipe(model, parameters.offload.value, parameters.dtype.value, img2img)
 
     if not get_latent_params(pipe):
         print(f"\nModel {model} not able to use pre-noised latents.\nNoise options will not be respected.\n")
 
-    if lora:
-        lora_string = apply_loras(lora, pipe)
+    if parameters.lora.value:
+        lora_string = apply_loras(parameters.lora.value, pipe)
         if lora_string:
             meta["lora"] = lora_string
 
     if hasattr(pipe, "vae"):
-        set_vae(pipe, tile, xl_vae)
+        set_vae(pipe, parameters.tile.value, parameters.xl_vae.value)
 
-    if compile:
+    if parameters.compile.value:
         if hasattr(pipe, "unet"):
             pipe.unet = torch.compile(pipe.unet)
         if hasattr(pipe, "transformer"):
@@ -1363,7 +1354,7 @@ def load_model(
         if hasattr(pipe, "decoder_pipe"):
             pipe.decoder_pipe.decoder = torch.compile(pipe.decoder_pipe.decoder)
     else:
-        set_attn(pipe, attention)
+        set_attn(pipe, parameters.attention.value)
 
     return pipe
     # }}}
@@ -1389,16 +1380,7 @@ def process_job(
         del piperef.pipe  # Remove only reference all memory
         gc.collect()  # force `del` to trigger immediately
         torch.cuda.empty_cache()  # make absolutely sure nothing is allocated
-        piperef.pipe = load_model(
-            model,
-            parameters.offload.value,
-            parameters.dtype.value,
-            parameters.lora.value,
-            parameters.attention.value,
-            parameters.compile.value,
-            parameters.tile.value,
-            parameters.xl_vae.value,
-        )
+        piperef.pipe = load_model(model, input_image is not None, parameters, meta)
         piperef.name = model
 
     seed = job.pop("seed")
@@ -1638,9 +1620,9 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
 
 if __name__ == "__main__":
     main_parameters = locals()["cli_params"]
-    image = locals()["cli_image"]
-    meta: dict[str, str] = {"url": "https://github.com/Beinsezii/quickdif"}
+    main_image = locals()["cli_image"]
+    main_meta: dict[str, str] = {"url": "https://github.com/Beinsezii/quickdif"}
     if main_parameters.comment.value:
-        meta["comment"] = meta["comment"] = main_parameters.comment.value
+        main_meta["comment"] = main_meta["comment"] = main_parameters.comment.value
 
-    main(main_parameters, meta, image)
+    main(main_parameters, main_meta, main_image)
