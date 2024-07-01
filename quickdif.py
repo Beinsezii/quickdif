@@ -748,7 +748,7 @@ def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
         if help:
             kwargs["help"] = help
 
-        if param.typing == bool and param.multi is False:
+        if param.typing is bool and param.multi is False:
             kwargs["action"] = argparse.BooleanOptionalAction
         else:
             kwargs["type"] = param.typing
@@ -1010,6 +1010,9 @@ class SmartSigint:
     # }}}
 
 
+# BOTTOM LEVEL
+
+
 def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool) -> DiffusionPipeline:
     # {{{
     pipe_args = {
@@ -1180,11 +1183,11 @@ def get_compel(pipe: DiffusionPipeline) -> Compel | None:
     # }}}
 
 
-def set_vae(parameters: Parameters, pipe: DiffusionPipeline):
+def set_vae(pipe: DiffusionPipeline, tile: bool, xl_vae: bool):
     # {{{
-    if is_xl(pipe) and parameters.xl_vae.value:
+    if is_xl(pipe) and xl_vae:
         pipe.vae = AutoencoderKL.from_pretrained("stabilityai/sdxl-vae", torch_dtype=pipe.vae.dtype, use_safetensors=True).to(pipe.vae.device)
-    if parameters.tile.value:
+    if tile:
         pipe.vae.enable_tiling()
     else:
         pipe.vae.enable_slicing()
@@ -1257,6 +1260,9 @@ def get_latent_params(pipe: DiffusionPipeline) -> tuple[int, float, int] | None:
     # }}}
 
 
+# MID LEVEL
+
+
 def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
     # {{{
     job = {
@@ -1322,6 +1328,41 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
     # }}}
 
 
+def load_model(
+    model: str, offload: Offload, dtype: DType, lora: list[str], attention: Attention, compile: bool, tile: bool, xl_vae: bool
+) -> DiffusionPipeline:
+    with SmartSigint(num=2, job_name="model load"):
+        pipe = get_pipe(model, offload, dtype, image is not None)
+
+    if not get_latent_params(pipe):
+        print(f"\nModel {model} not able to use pre-noised latents.\nNoise options will not be respected.\n")
+
+    if lora:
+        lora_string = apply_loras(lora, pipe)
+        if lora_string:
+            meta["lora"] = lora_string
+
+    if hasattr(pipe, "vae"):
+        set_vae(pipe, tile, xl_vae)
+
+    if compile:
+        if hasattr(pipe, "unet"):
+            pipe.unet = torch.compile(pipe.unet)
+        if hasattr(pipe, "transformer"):
+            pipe.transformer = torch.compile(pipe.transformer)
+        if hasattr(pipe, "prior_pipe"):
+            pipe.prior_pipe.prior = torch.compile(pipe.prior_pipe.prior)
+        if hasattr(pipe, "decoder_pipe"):
+            pipe.decoder_pipe.decoder = torch.compile(pipe.decoder_pipe.decoder)
+    else:
+        set_attn(pipe, attention)
+
+    return pipe
+
+
+# TOP LEVEL
+
+
 @torch.inference_mode()
 def process_job(
     parameters: Parameters,
@@ -1336,35 +1377,20 @@ def process_job(
 
     model = job["model"]
     if piperef.name != model:
-        with SmartSigint(num=2, job_name="model load"):
-            del piperef.pipe  # Remove only reference all memory
-            gc.collect()  # force `del` to trigger immediately
-            torch.cuda.empty_cache()  # make absolutely sure nothing is allocated
-            piperef.pipe = get_pipe(model, parameters.offload.value, parameters.dtype.value, image is not None)
-            piperef.name = model
-
-        if not get_latent_params(piperef.pipe):
-            print(f"\nModel {model} not able to use pre-noised latents.\nNoise options will not be respected.\n")
-
-        if parameters.lora.value:
-            lora_string = apply_loras(parameters.lora.value, piperef.pipe)
-            if lora_string:
-                meta["lora"] = lora_string
-
-        if hasattr(piperef.pipe, "vae"):
-            set_vae(parameters, piperef.pipe)
-
-        if parameters.compile.value:
-            if hasattr(piperef.pipe, "unet"):
-                piperef.pipe.unet = torch.compile(piperef.pipe.unet)
-            if hasattr(piperef.pipe, "transformer"):
-                piperef.pipe.transformer = torch.compile(piperef.pipe.transformer)
-            if hasattr(piperef.pipe, "prior_piperef.pipe"):
-                piperef.pipe.prior_piperef.pipe.prior = torch.compile(piperef.pipe.prior_piperef.pipe.prior)
-            if hasattr(piperef.pipe, "decoder_piperef.pipe"):
-                piperef.pipe.decoder_piperef.pipe.decoder = torch.compile(piperef.pipe.decoder_piperef.pipe.decoder)
-        elif parameters.attention.value:
-            set_attn(piperef.pipe, parameters.attention.value)
+        del piperef.pipe  # Remove only reference all memory
+        gc.collect()  # force `del` to trigger immediately
+        torch.cuda.empty_cache()  # make absolutely sure nothing is allocated
+        piperef.pipe = load_model(
+            model,
+            parameters.offload.value,
+            parameters.dtype.value,
+            parameters.lora.value,
+            parameters.attention.value,
+            parameters.compile.value,
+            parameters.tile.value,
+            parameters.xl_vae.value,
+        )
+        piperef.name = model
 
     seed = job.pop("seed")
     pipe = piperef.pipe
@@ -1602,10 +1628,10 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
 
 
 if __name__ == "__main__":
-    parameters = locals()["cli_params"]
+    main_parameters = locals()["cli_params"]
     image = locals()["cli_image"]
     meta: dict[str, str] = {"url": "https://github.com/Beinsezii/quickdif"}
-    if parameters.comment.value:
-        meta["comment"] = meta["comment"] = parameters.comment.value
+    if main_parameters.comment.value:
+        meta["comment"] = meta["comment"] = main_parameters.comment.value
 
-    main(parameters, meta, image)
+    main(main_parameters, meta, image)
