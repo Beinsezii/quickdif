@@ -1329,7 +1329,14 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
 
 
 def load_model(
-    model: str, offload: Offload, dtype: DType, lora: list[str], attention: Attention, compile: bool, tile: bool, xl_vae: bool
+    model: str,
+    offload: Offload,
+    dtype: DType,
+    lora: list[str],
+    attention: Attention,
+    compile: bool,
+    tile: bool,
+    xl_vae: bool,
 ) -> DiffusionPipeline:
     # {{{
     with SmartSigint(num=2, job_name="model load"):
