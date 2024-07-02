@@ -243,6 +243,17 @@ class DType(enum.StrEnum):
     BF16 = enum.auto()
     FP32 = enum.auto()
 
+    # -> torch.dtype
+    @property
+    def torch_dtype(self):
+        match self:
+            case DType.FP16:
+                return torch.float16
+            case DType.BF16:
+                return torch.bfloat16
+            case DType.FP32:
+                return torch.float32
+
 
 @enum.unique
 class Offload(enum.StrEnum):
@@ -259,6 +270,25 @@ class NoiseType(enum.StrEnum):
     Cuda16 = enum.auto()
     Cuda16B = enum.auto()
     Cuda32 = enum.auto()
+
+    @property
+    def torch_device(self) -> str:
+        match self:
+            case NoiseType.Cpu16 | NoiseType.Cpu16B | NoiseType.Cpu32:
+                return "cpu"
+            case NoiseType.Cuda16 | NoiseType.Cuda16B | NoiseType.Cuda32:
+                return "cuda"
+
+    # -> torch.dtype
+    @property
+    def torch_dtype(self):
+        match self:
+            case NoiseType.Cpu16 | NoiseType.Cuda16:
+                return torch.float16
+            case NoiseType.Cpu16B | NoiseType.Cuda16B:
+                return torch.bfloat16
+            case NoiseType.Cpu32 | NoiseType.Cuda32:
+                return torch.float32
 
 
 @enum.unique
@@ -1018,7 +1048,7 @@ def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool) -> Diffu
     pipe_args = {
         "add_watermarker": False,
         "safety_checker": None,
-        "torch_dtype": {DType.FP16: torch.float16, DType.BF16: torch.bfloat16, DType.FP32: torch.float32}[dtype],
+        "torch_dtype": dtype.torch_dtype,
         "use_safetensors": True,
         "watermarker": None,
     }
@@ -1360,6 +1390,73 @@ def load_model(model: str, img2img: bool, parameters: Parameters, meta: dict[str
     # }}}
 
 
+# Does not use Parameters because effectively all of these are per-job
+def make_noise(
+    pipe: DiffusionPipeline,
+    generators: list[torch.Generator],
+    # Parameters
+    batch_size: int,
+    color: LatentColor | None,
+    color_power: float,
+    noise_power: float,
+    noise_type: NoiseType,
+    resolution: Resolution | None,
+    variance_power: float,
+    variance_scale: int,
+) -> tuple[torch.Tensor | None, Resolution | None]:
+    # {{{
+
+    latent_params = get_latent_params(pipe)
+    if latent_params is None:
+        return (None, None)
+
+    channels, factor, default_size = latent_params
+    if resolution is not None:
+        width, height = round(resolution.width / factor), round(resolution.height / factor)
+    else:
+        width, height = default_size, default_size
+    shape = (batch_size, channels, height, width)
+    latents = torch.zeros(shape, dtype=pipe.dtype, device="cpu")
+    for latent, generator in zip(latents, generators):
+        # Variance
+        if variance_power != 0 and variance_scale > 0:
+            # save state so init noise seeds are the same with/without
+            state = generator.get_state()
+            variance = torch.randn(
+                [1, shape[1], variance_scale, variance_scale], generator=generator, dtype=noise_type.torch_dtype, device=noise_type.torch_device
+            )
+            latent += torch.nn.UpsamplingBilinear2d((shape[2], shape[3]))(variance).mul(variance_power)[0].to("cpu")
+            generator.set_state(state)
+        # Init noise
+        noise = torch.randn(latents.shape[1:], generator=generator, dtype=noise_type.torch_dtype, device=noise_type.torch_device)
+        if noise_power != 1:
+            noise *= noise_power
+        latent += noise.to("cpu")
+
+    # Colored latents
+    if color is not None and color_power != 0:
+        if is_xl(pipe) or isinstance(pipe, PixArtSigmaPipeline) or isinstance(pipe, HunyuanDiTPipeline):
+            cols = COLS_XL
+        elif is_sd(pipe) or isinstance(pipe, PixArtAlphaPipeline):
+            cols = COLS_FTMSE
+        else:
+            cols = None
+            print(f"# # #\nParameter `color_power` cannot be used for {type(pipe).__name__}\n# # #")
+        if cols:
+            sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config).init_noise_sigma
+            latents += (
+                torch.tensor(cols[color], dtype=pipe.dtype, device="cpu")
+                .mul(color_power)
+                .div(sigma)
+                .expand([shape[0], shape[2], shape[3], shape[1]])
+                .permute((0, 3, 1, 2))
+            )
+
+    return (latents, Resolution((round(default_size * factor), round(default_size * factor))))
+
+    # }}}
+
+
 # TOP LEVEL
 
 
@@ -1375,96 +1472,64 @@ def process_job(
 
     torch.cuda.empty_cache()
 
-    model = job["model"]
-    if piperef.name != model:
-        del piperef.pipe  # Remove only reference all memory
-        gc.collect()  # force `del` to trigger immediately
-        torch.cuda.empty_cache()  # make absolutely sure nothing is allocated
-        piperef.pipe = load_model(model, input_image is not None, parameters, meta)
-        piperef.name = model
-
+    # POP SEED first because the meta is set in PngInfo directly
     seed = job.pop("seed")
-    pipe = piperef.pipe
-    if pipe is None:
-        return []
 
+    # LOAD COMMON META
     for param in parameters.params():
         if param.name in job and param.meta:
             meta[param.name] = job[param.name]
 
-    resolution: Resolution | None = job.pop("resolution") if "resolution" in job else None
-    noise_power = job.pop("noise_power") if "noise_power" in job else None
-    variance_power = job.pop("variance_power") if "variance_power" in job else None
-    variance_scale = job.pop("variance_scale") if "variance_scale" in job else None
-    color = job.pop("color") if "color" in job else None
-    color_power = job.pop("color_power") if "color_power" in job else None
+    # POP PARAMS
+    model = job.pop("model")
+    color = job.pop("color", None)
+    color_power = job.pop("color_power", 0)
+    noise_power = job.pop("noise_power", 1)
+    noise_type = job.pop("noise_type", NoiseType.Cpu32)
+    resolution: Resolution | None = job.pop("resolution", None)
+    variance_power = job.pop("variance_power", 0)
+    variance_scale = job.pop("variance_scale", 0)
     image_ops: list[dict[str, Any]] = job.pop("image_ops")
 
-    if "noise_type" in job:
-        noise_type = job.pop("noise_type")
-        noise_dtype, noise_device = {
-            NoiseType.Cpu16: (torch.float16, "cpu"),
-            NoiseType.Cpu16B: (torch.bfloat16, "cpu"),
-            NoiseType.Cpu32: (torch.float32, "cpu"),
-            NoiseType.Cuda16: (torch.float16, "cuda"),
-            NoiseType.Cuda16B: (torch.bfloat16, "cuda"),
-            NoiseType.Cuda32: (torch.float32, "cuda"),
-        }[noise_type]
+    # PIPE
+    if piperef.name != model:
+        del piperef.pipe  # Remove only reference
+        gc.collect()  # force `del` to trigger immediately
+        torch.cuda.empty_cache()  # make absolutely sure nothing is allocated
+        piperef.pipe = load_model(model, input_image is not None, parameters, meta)
+        piperef.name = model
+    pipe = piperef.pipe
+    if pipe is None:
+        return []
+
+    # INPUT TENSOR
+    generators = [torch.Generator(noise_type.torch_device).manual_seed(seed + n) for n in range(parameters.batch_size.value)]
+    if input_image is None:
+        latents, latents_resolution = make_noise(
+            pipe,
+            generators,
+            # Parameters
+            parameters.batch_size.value,
+            color,
+            color_power,
+            noise_power,
+            noise_type,
+            resolution,
+            variance_power,
+            variance_scale,
+        )
+        if latents is not None and latents_resolution is not None:
+            job["latents"] = latents
+            job["width"], job["height"] = latents_resolution.resolution
+        elif resolution is not None:
+            job["width"], job["height"] = resolution.resolution
     else:
-        noise_dtype, noise_device = None, None
-
-    # NOISE {{{
-    generators = [torch.Generator(noise_device).manual_seed(seed + n) for n in range(parameters.batch_size.value)]
-    latent_params = get_latent_params(pipe)
-
-    if input_image is None and latent_params is not None:
-        channels, factor, default_size = latent_params
         if resolution is not None:
-            width, height = round(resolution.width / factor), round(resolution.height / factor)
+            job["image"] = input_image.resize(resolution.resolution, Image.Resampling.LANCZOS)
         else:
-            width, height = default_size, default_size
-            job["width"], job["height"] = round(default_size * factor), round(default_size * factor)
-        shape = (parameters.batch_size.value, channels, height, width)
-        latents = torch.zeros(shape, dtype=pipe.dtype, device="cpu")
-        for latent, generator in zip(latents, generators):
-            # Variance
-            if variance_power is not None and variance_scale is not None and variance_power != 0:
-                # save state so init noise seeds are the same with/without
-                state = generator.get_state()
-                variance = torch.randn([1, shape[1], variance_scale, variance_scale], generator=generator, dtype=noise_dtype, device=noise_device)
-                latent += torch.nn.UpsamplingBilinear2d((shape[2], shape[3]))(variance).mul(variance_power)[0].to("cpu")
-                generator.set_state(state)
-            # Init noise
-            noise = torch.randn(latents.shape[1:], generator=generator, dtype=noise_dtype, device=noise_device)
-            if noise_power is not None:
-                noise *= noise_power
-            latent += noise.to("cpu")
-
-        # Colored latents
-        # TODO: flatten
-        if color_power is not None and color is not None and color_power != 0:
-            if is_xl(pipe) or isinstance(pipe, PixArtSigmaPipeline) or isinstance(pipe, HunyuanDiTPipeline):
-                cols = COLS_XL
-            elif is_sd(pipe) or isinstance(pipe, PixArtAlphaPipeline):
-                cols = COLS_FTMSE
-            else:
-                cols = None
-                print(f"# # #\nParameter `color_power` cannot be used for {type(pipe).__name__}\n# # #")
-            if cols:
-                sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config).init_noise_sigma
-                latents += (
-                    torch.tensor(cols[color], dtype=pipe.dtype, device="cpu")
-                    .mul(color_power)
-                    .div(sigma)
-                    .expand([shape[0], shape[2], shape[3], shape[1]])
-                    .permute((0, 3, 1, 2))
-                )
-
-        job["latents"] = latents
-
+            job["image"] = input_image
     job["generator"] = generators
     print("seeds:", " ".join([str(seed + n) for n in range(parameters.batch_size.value)]))
-    # NOISE }}}
 
     # CONDITIONING {{{
     compel = get_compel(pipe)
@@ -1489,14 +1554,6 @@ def process_job(
         default_scheduler, pipe.scheduler = pipe.scheduler, get_scheduler(job["sampler"], job.get("spacing", None), pipe.scheduler)
     else:
         default_scheduler = None
-
-    if input_image is not None:
-        if resolution is not None:
-            job["image"] = input_image.resize(resolution.resolution, Image.Resampling.LANCZOS)
-        else:
-            job["image"] = input_image
-    elif resolution is not None:
-        job["width"], job["height"] = resolution.resolution
 
     if "prior_num_inference_steps" in pipe_params and "steps" in job:
         steps = job.pop("steps")
