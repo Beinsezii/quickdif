@@ -1,0 +1,27 @@
+grid = "pixelate,posterize"
+model = ["runwayml/stable-diffusion-v1-5"]
+negative = ["blurry, noisy, cropped"]
+pixelate = [
+    -1.0,
+    1.0,
+    4.0,
+    8.0,
+]
+posterize = [
+    999,
+    16,
+    4,
+    3,
+    2,
+    -1,
+]
+power = [
+    -1.0,
+    0.8,
+    1.0,
+    1.2,
+]
+prompt = ["kitten"]
+sampler = ["unipc"]
+seed = [1]
+steps = [20]

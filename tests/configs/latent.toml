@@ -1,0 +1,22 @@
+color_power = [
+    -0.5,
+    0.0,
+    0.5,
+]
+grid = "noise_power,variance_power"
+model = "runwayml/stable-diffusion-v1-5"
+negative = ["blurry, noisy, cropped"]
+noise_power = [
+    0.95,
+    1.0,
+    1.05,
+]
+prompt = ["kitten"]
+resolution = ["4:3:8^512"]
+sampler = ["unipc"]
+seed = [1]
+steps = [10]
+variance_power = [
+    0.0,
+    0.1,
+]

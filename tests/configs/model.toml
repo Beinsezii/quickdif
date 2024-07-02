@@ -1,0 +1,14 @@
+batch_size = 4
+dtype = "bf16"
+grid = "model,seed"
+model = [
+    "stabilityai/stable-diffusion-xl-base-1.0",
+    "stabilityai/stable-cascade",
+    "stabilityai/stable-diffusion-3-medium-diffusers",
+]
+negative = ["blurry, noisy, cropped"]
+prompt = ["kitten"]
+resolution = ["3:4:64^1024"]
+sampler = ["default"]
+seed = [1]
+steps = [10]
