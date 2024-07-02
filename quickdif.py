@@ -10,7 +10,7 @@ import tomllib
 from copy import copy
 from inspect import getmembers, signature
 from io import BytesIO, UnsupportedOperation
-from math import sqrt
+from math import copysign
 from pathlib import Path
 from sys import exit
 from typing import Any
@@ -100,16 +100,21 @@ def roundint(n: int | float, step: int) -> int:
         return round(n - (n % step))
 
 
-def spowf(array: np.ndarray, pow: int | float | list[int | float]) -> np.ndarray:
+def spowf(n: float | int, pow: int | float) -> float:
+    return copysign(abs(n) ** pow, n)
+    # return np.copysign(abs(array) ** pow, array)
+
+
+def spowf_np(array: np.ndarray, pow: int | float | list[int | float]) -> np.ndarray:
     return np.copysign(abs(array) ** pow, array)
 
 
 def lrgb_to_oklab(array: np.ndarray) -> np.ndarray:
-    return (spowf(array @ (XYZ_M1 @ OKLAB_M1), 1 / 3)) @ OKLAB_M2
+    return (spowf_np(array @ (XYZ_M1 @ OKLAB_M1), 1 / 3)) @ OKLAB_M2
 
 
 def oklab_to_lrgb(array: np.ndarray) -> np.ndarray:
-    return spowf((array @ npl.inv(OKLAB_M2)), 3) @ npl.inv(XYZ_M1 @ OKLAB_M1)
+    return spowf_np((array @ npl.inv(OKLAB_M2)), 3) @ npl.inv(XYZ_M1 @ OKLAB_M1)
 
 
 # }}}
@@ -327,8 +332,8 @@ class Resolution:
                 mpx = 1.0 if mpx is None else float(mpx)
                 if method == "^":
                     mpx = mpx * mpx / 10**6
-                self._width = roundint(sqrt(hor / ver * mpx * 10**6), rnd)
-                self._height = roundint(sqrt(ver / hor * mpx * 10**6), rnd)
+                self._width = roundint(spowf(hor / ver * mpx * 10**6, 1 / 2), rnd)
+                self._height = roundint(spowf(ver / hor * mpx * 10**6, 1 / 2), rnd)
             else:
                 m = re.match(r"^ *(\d+) *[x*]? *(\d+)? *$", resolution)
                 if m is None:
@@ -1560,7 +1565,7 @@ def process_job(
         job["prior_num_inference_steps"] = steps
         if "decoder_steps" in job:
             decoder_steps = job.pop("decoder_steps")
-            job["num_inference_steps"] = round(sqrt(abs(steps * decoder_steps))) if decoder_steps < 0 else decoder_steps
+            job["num_inference_steps"] = round(spowf(abs(steps * decoder_steps), 1 / 2)) if decoder_steps < 0 else decoder_steps
 
     for f, t in [
         ("steps", ["num_inference_steps"]),
@@ -1606,17 +1611,17 @@ def process_job(
 
                 if "power" in ops:
                     # ^2.2 for approx sRGB EOTF
-                    okl = lrgb_to_oklab(spowf(op_arr, 2.2))
+                    okl = lrgb_to_oklab(spowf_np(op_arr, 2.2))
 
                     # ≈1/3 cause OKL's top heavy lightness curve
                     offset = [0.35, 1, 1]
                     # Halve chromacities' power slope
-                    power = [ops["power"], sqrt(ops["power"]), sqrt(ops["power"])]
+                    power = [ops["power"], spowf(ops["power"], 1 / 2), spowf(ops["power"], 1 / 2)]
 
-                    okl = spowf((okl + offset), power) - offset
+                    okl = spowf_np((okl + offset), power) - offset
 
                     # back to sRGB with approx OETF
-                    op_arr = spowf(oklab_to_lrgb(okl), 1 / 2.2)
+                    op_arr = spowf_np(oklab_to_lrgb(okl), 1 / 2.2)
 
                 if "posterize" in ops:
                     if ops["posterize"] > 1:
