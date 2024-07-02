@@ -102,7 +102,6 @@ def roundint(n: int | float, step: int) -> int:
 
 def spowf(n: float | int, pow: int | float) -> float:
     return copysign(abs(n) ** pow, n)
-    # return np.copysign(abs(array) ** pow, array)
 
 
 def spowf_np(array: np.ndarray, pow: int | float | list[int | float]) -> np.ndarray:
