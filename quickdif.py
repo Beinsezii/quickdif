@@ -1457,7 +1457,7 @@ def make_noise(
                 .permute((0, 3, 1, 2))
             )
 
-    return (latents, Resolution((round(default_size * factor), round(default_size * factor))))
+    return (latents, Resolution((round(width * factor), round(height * factor))))
 
     # }}}
 
