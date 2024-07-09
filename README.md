@@ -54,7 +54,7 @@ This project only supports `pip` based installs on Python 3.11+
 # It's recommended to first install torch using the recommended commands from https://pytorch.org/get-started/locally/
 > pip install torch --index-url https://download.pytorch.org/whl/rocm6.0 # AMD example
 # finally
-> pip install -U .
+> pip install -e .
 > deactivate
 > ./quickdif.sh "kitten"
 # Windows users will instead have to invoke Python directly
