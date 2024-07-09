@@ -1,2 +1,4 @@
-#! /usr/bin/env sh
-source ./venv/bin/activate && python3 quickdif.py "$@"
+#! /usr/bin/env bash
+VENV=$([[ -d venv ]] && echo venv || ([[ -d .venv ]] && echo .venv))
+[[ -z $VENV ]] && echo "No venv found at 'venv', '.venv'!" && exit 1
+source $VENV/bin/activate && python3 quickdif.py "$@"
