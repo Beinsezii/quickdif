@@ -922,9 +922,6 @@ if __name__ == "__main__":
 # Load Torch and libs that depend on it after the CLI cause it's laggy.
 import torch  # noqa: E402
 
-# torch.set_grad_enabled(False)
-# torch.set_float32_matmul_precision("high")
-
 amd_hijack = False
 if amd_patch:
     if "AMD" in torch.cuda.get_device_name() or "Radeon" in torch.cuda.get_device_name():
