@@ -1057,6 +1057,11 @@ def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool) -> Diffu
         "watermarker": None,
     }
 
+    if "Kolors" in model:
+        pipe_args["variant"] = "fp16"
+    elif "stable-cascade" in model and pipe_args["torch_dtype"] == torch.float16:
+        pipe_args["torch_dtype"] = torch.bfloat16
+
     model, revision = get_suffix(model)
     if revision is not None:
         pipe_args["revision"] = revision
