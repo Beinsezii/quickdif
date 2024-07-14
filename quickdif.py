@@ -1,6 +1,7 @@
 import argparse
 import enum
 import functools
+import gc
 import json
 import random
 import re
@@ -9,7 +10,7 @@ import tomllib
 from copy import copy
 from inspect import getmembers, signature
 from io import BytesIO, UnsupportedOperation
-from math import sqrt
+from math import copysign
 from pathlib import Path
 from sys import exit
 from typing import Any
@@ -73,6 +74,17 @@ OKLAB_M2 = np.array(
 
 
 # UTILS {{{
+def get_suffix(string: str, separator: str = ":::", typing: type = str, default: Any = None) -> tuple[str, Any | None]:
+    split = string.rsplit(separator, 1)
+    match len(split):
+        case 1:
+            return (string, default)
+        case 2:
+            return split[0], typing(split[1])
+        case _:
+            raise ValueError(f"Unable to parse separators `{separator}` for value {string}")
+
+
 def oversample(population: list, k: int):
     samples = []
     while len(samples) < k:
@@ -88,16 +100,20 @@ def roundint(n: int | float, step: int) -> int:
         return round(n - (n % step))
 
 
-def spowf(array: np.ndarray, pow: int | float | list[int | float]) -> np.ndarray:
+def spowf(n: float | int, pow: int | float) -> float:
+    return copysign(abs(n) ** pow, n)
+
+
+def spowf_np(array: np.ndarray, pow: int | float | list[int | float]) -> np.ndarray:
     return np.copysign(abs(array) ** pow, array)
 
 
 def lrgb_to_oklab(array: np.ndarray) -> np.ndarray:
-    return (spowf((array) @ (XYZ_M1 @ OKLAB_M1), 1 / 3)) @ OKLAB_M2
+    return (spowf_np(array @ (XYZ_M1 @ OKLAB_M1), 1 / 3)) @ OKLAB_M2
 
 
 def oklab_to_lrgb(array: np.ndarray) -> np.ndarray:
-    return spowf((array @ npl.inv(OKLAB_M2)), 3) @ (npl.inv(OKLAB_M1) @ npl.inv(XYZ_M1))
+    return spowf_np((array @ npl.inv(OKLAB_M2)), 3) @ npl.inv(XYZ_M1 @ OKLAB_M1)
 
 
 # }}}
@@ -231,6 +247,17 @@ class DType(enum.StrEnum):
     BF16 = enum.auto()
     FP32 = enum.auto()
 
+    # -> torch.dtype
+    @property
+    def torch_dtype(self):
+        match self:
+            case DType.FP16:
+                return torch.float16
+            case DType.BF16:
+                return torch.bfloat16
+            case DType.FP32:
+                return torch.float32
+
 
 @enum.unique
 class Offload(enum.StrEnum):
@@ -247,6 +274,25 @@ class NoiseType(enum.StrEnum):
     Cuda16 = enum.auto()
     Cuda16B = enum.auto()
     Cuda32 = enum.auto()
+
+    @property
+    def torch_device(self) -> str:
+        match self:
+            case NoiseType.Cpu16 | NoiseType.Cpu16B | NoiseType.Cpu32:
+                return "cpu"
+            case NoiseType.Cuda16 | NoiseType.Cuda16B | NoiseType.Cuda32:
+                return "cuda"
+
+    # -> torch.dtype
+    @property
+    def torch_dtype(self):
+        match self:
+            case NoiseType.Cpu16 | NoiseType.Cuda16:
+                return torch.float16
+            case NoiseType.Cpu16B | NoiseType.Cuda16B:
+                return torch.bfloat16
+            case NoiseType.Cpu32 | NoiseType.Cuda32:
+                return torch.float32
 
 
 @enum.unique
@@ -286,8 +332,8 @@ class Resolution:
                 mpx = 1.0 if mpx is None else float(mpx)
                 if method == "^":
                     mpx = mpx * mpx / 10**6
-                self._width = roundint(sqrt(hor / ver * mpx * 10**6), rnd)
-                self._height = roundint(sqrt(ver / hor * mpx * 10**6), rnd)
+                self._width = roundint(spowf(hor / ver * mpx * 10**6, 1 / 2), rnd)
+                self._height = roundint(spowf(ver / hor * mpx * 10**6, 1 / 2), rnd)
             else:
                 m = re.match(r"^ *(\d+) *[x*]? *(\d+)? *$", resolution)
                 if m is None:
@@ -404,7 +450,12 @@ class Grid:
                 if self.y is not None:
                     do_break = False
                     for gx in grids[n]:
-                        if not any(map(lambda gy: meta[self.y] == gy[0][self.y], gx)):
+                        if (
+                            # All gx columns unique Y
+                            not any(map(lambda gy: meta[self.y] == gy[0][self.y], gx))
+                            # All gx columns same X
+                            and all(map(lambda gy: meta[self.x] == gy[0][self.x], gx))
+                        ):
                             gx.append((meta, img))
                             do_break = True
                             break
@@ -509,6 +560,15 @@ class QDParam:
 class Parameters:
     # {{{
     ### Batching
+    model = QDParam(
+        "model",
+        str,
+        short="-m",
+        value="stabilityai/stable-diffusion-xl-base-1.0",
+        meta=True,
+        multi=True,
+        help="Safetensor file or HuggingFace model ID. Append `:::` to denote revision. Does not respect `--iter`",
+    )
     prompt = QDParam("prompt", str, multi=True, meta=True, positional=True, help="Positive prompt")
     negative = QDParam("negative", str, short="-n", multi=True, meta=True, help="Negative prompt")
     seed = QDParam("seed", int, short="-e", multi=True, meta=True, help="Seed for RNG")
@@ -634,14 +694,6 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
     )
     spacing = QDParam("spacing", Spacing, value=Spacing.Trailing, multi=True, meta=True, help="Sampler timestep spacing")
     ### Global
-    model = QDParam(
-        "model",
-        str,
-        short="-m",
-        value="stabilityai/stable-diffusion-xl-base-1.0",
-        meta=True,
-        help="Safetensor file or HuggingFace model ID",
-    )
     lora = QDParam("lora", str, short="-l", meta=True, multi=True, help='Apply Loras, ex. "ms_paint.safetensors:::0.6"')
     batch_count = QDParam("batch_count", int, short="-b", value=1, help="Behavior dependant on 'iter'")
     batch_size = QDParam("batch_size", int, short="-B", value=1, help="Amount of images to produce in each job")
@@ -681,6 +733,7 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
     tile = QDParam("tile", bool, help="Tile VAE. Slicing is already used by default so only set tile if creating very large images")
     xl_vae = QDParam("xl_vae", bool, help="Override the SDXL VAE. Useful for models that use the broken 1.0 vae")
     amd_patch = QDParam("amd_patch", bool, value=True, help="Monkey patch the torch SDPA function with Flash Attention on AMD cards")
+    comment = QDParam("comment", str, meta=True, help="Add a comment to the image.")
 
     def pairs(self) -> list[tuple[str, QDParam]]:
         return [(k, v) for k, v in getmembers(self) if isinstance(v, QDParam)]
@@ -730,7 +783,7 @@ def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
         if help:
             kwargs["help"] = help
 
-        if param.typing == bool and param.multi is False:
+        if param.typing is bool and param.multi is False:
             kwargs["action"] = argparse.BooleanOptionalAction
         else:
             kwargs["type"] = param.typing
@@ -752,7 +805,6 @@ def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
     parser.add_argument("--json", type=argparse.FileType(mode="a+b"), help="Output settings to JSON")
     # It would be nice to write toml but I don't think its worth a 3rd party lib
     # parser.add_argument("--toml", type=argparse.FileType(mode="a+b"), help="Output settings to TOML")
-    parser.add_argument("--comment", type=str, help="Add a comment to the image.")
     parser.add_argument("--print", action="store_true", help="Print out generation params and exit")
     parser.add_argument("-.", action="count", help="End the current multi-value optional input")
     parser.add_argument("--help", action="help")
@@ -761,7 +813,7 @@ def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
     # }}}
 
 
-def parse_cli(parameters: Parameters) -> tuple[str | None, Image.Image | None]:
+def parse_cli(parameters: Parameters) -> Image.Image | None:
     # {{{
     args = vars(build_parser(parameters).parse_args())
 
@@ -853,31 +905,23 @@ def parse_cli(parameters: Parameters) -> tuple[str | None, Image.Image | None]:
     if args["input"]:
         input_image = Image.open(args["input"]).convert("RGB")
 
-    comment = None
-    if args.get("comment", ""):
-        try:
-            with open(args["comment"], "r") as f:
-                comment = f.read()
-        except Exception:
-            comment = args["comment"]
-
-    return (comment, input_image)
+    return input_image
     # }}}
 
 
 amd_patch = True
 if __name__ == "__main__":
     cli_params = Parameters()
-    (cli_comment, cli_image) = parse_cli(cli_params)
+    cli_image = parse_cli(cli_params)
+    if not cli_params.model.value:
+        print("No model was provided! Exiting...")
+        exit()
     amd_patch = cli_params.amd_patch.value
 
 # TORCH PRELUDE {{{
 #
 # Load Torch and libs that depend on it after the CLI cause it's laggy.
 import torch  # noqa: E402
-
-# torch.set_grad_enabled(False)
-# torch.set_float32_matmul_precision("high")
 
 amd_hijack = False
 if amd_patch:
@@ -931,9 +975,12 @@ from diffusers import (  # noqa: E402
     DPMSolverMultistepScheduler,
     EulerAncestralDiscreteScheduler,
     EulerDiscreteScheduler,
+    HunyuanDiTPipeline,
     PixArtAlphaPipeline,
     PixArtSigmaPipeline,
     SchedulerMixin,
+    StableDiffusion3Img2ImgPipeline,
+    StableDiffusion3Pipeline,
     StableDiffusionImg2ImgPipeline,
     StableDiffusionPipeline,
     StableDiffusionXLImg2ImgPipeline,
@@ -957,6 +1004,15 @@ try:
 except ImportError:
     triton_flash_processor = None
 # }}}
+
+
+class PipeRef:
+    name: str
+    pipe: DiffusionPipeline | None
+
+    def __init__(self):
+        self.name = "\x00"
+        self.pipe = None
 
 
 # elegent solution from <https://stackoverflow.com/questions/842557/>
@@ -991,29 +1047,52 @@ class SmartSigint:
     # }}}
 
 
+# BOTTOM LEVEL
+
+
 def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool) -> DiffusionPipeline:
     # {{{
     pipe_args = {
         "add_watermarker": False,
         "safety_checker": None,
-        "torch_dtype": {DType.FP16: torch.float16, DType.BF16: torch.bfloat16, DType.FP32: torch.float32}[dtype],
+        "torch_dtype": dtype.torch_dtype,
         "use_safetensors": True,
         "watermarker": None,
     }
 
-    if "PixArt-Sigma" in model:
-        pipe = PixArtSigmaPipeline.from_pretrained(model, **pipe_args)
-    elif model.endswith(".safetensors"):
+    if "Kolors" in model:
+        pipe_args["variant"] = "fp16"
+    elif "stable-cascade" in model and pipe_args["torch_dtype"] == torch.float16:
+        pipe_args["torch_dtype"] = torch.bfloat16
+
+    model, revision = get_suffix(model)
+    if revision is not None:
+        pipe_args["revision"] = revision
+
+    if model.endswith(".safetensors"):
         if img2img:
-            try:
-                pipe = StableDiffusionXLImg2ImgPipeline.from_single_file(model, **pipe_args)
-            except:  # noqa: E722
-                pipe = StableDiffusionImg2ImgPipeline.from_single_file(model, **pipe_args)
+            sd_pipe = StableDiffusionImg2ImgPipeline
+            xl_pipe = StableDiffusionXLImg2ImgPipeline
+            s3_pipe = StableDiffusion3Img2ImgPipeline
         else:
+            sd_pipe = StableDiffusionPipeline
+            xl_pipe = StableDiffusionXLPipeline
+            s3_pipe = StableDiffusion3Pipeline
+
+        try:
+            pipe = xl_pipe.from_single_file(model, **pipe_args)
+            assert pipe.text_encoder_2 is not None
+        except:  # noqa: E722
             try:
-                pipe = StableDiffusionXLPipeline.from_single_file(model, **pipe_args)
+                pipe = sd_pipe.from_single_file(model, **pipe_args)
             except:  # noqa: E722
-                pipe = StableDiffusionPipeline.from_single_file(model, **pipe_args)
+                try:
+                    pipe = s3_pipe.from_single_file(model, **pipe_args)
+                except Exception as e:
+                    if str(e).startswith("Failed to load T5EncoderModel."):  # better way?
+                        pipe = s3_pipe.from_single_file(model, text_encoder_3=None, tokenizer_3=None, **pipe_args)
+                    else:
+                        raise Exception(f'Could not load "{model}" as `{sd_pipe.__name__}`, `{xl_pipe.__name__}`, or `{s3_pipe.__name__}`')
     else:
         if img2img:
             pipe = AutoPipelineForImage2Image.from_pretrained(model, **pipe_args)
@@ -1046,6 +1125,10 @@ def is_xl(pipe: DiffusionPipeline) -> bool:
 
 def is_sd(pipe: DiffusionPipeline) -> bool:
     return isinstance(pipe, StableDiffusionPipeline) or isinstance(pipe, StableDiffusionImg2ImgPipeline)
+
+
+def is_sd3(pipe: DiffusionPipeline) -> bool:
+    return isinstance(pipe, StableDiffusion3Pipeline) or isinstance(pipe, StableDiffusion3Img2ImgPipeline)
 
 
 def set_attn(pipe: DiffusionPipeline, attention: Attention):
@@ -1098,9 +1181,7 @@ def apply_loras(loras: list[str], pipe: DiffusionPipeline) -> str | None:
     # {{{
     adapters = []
     for n, lora in enumerate(loras):
-        split = lora.rsplit(":::")
-        path = split[0]
-        scale = 1.0 if len(split) < 2 else float(split[1])
+        path, scale = get_suffix(lora, typing=float, default=1.0)
         if scale == 0.0:
             continue
         name = f"LA{n}"
@@ -1125,29 +1206,37 @@ def apply_loras(loras: list[str], pipe: DiffusionPipeline) -> str | None:
 
 def get_compel(pipe: DiffusionPipeline) -> Compel | None:
     # {{{
-    if hasattr(pipe, "tokenizer") and isinstance(pipe.tokenizer, CLIPTokenizer):
-        if hasattr(pipe, "tokenizer_2"):
-            compel = Compel(
-                tokenizer=[pipe.tokenizer, pipe.tokenizer_2],
-                text_encoder=[pipe.text_encoder, pipe.text_encoder_2],
-                returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
-                requires_pooled=[False, True],
-                truncate_long_prompts=False,
-            )
+    # Compel thinks it supports it but it doesn't.
+    if is_sd3(pipe):
+        return None
+    try:
+        if hasattr(pipe, "tokenizer") and isinstance(pipe.tokenizer, CLIPTokenizer):
+            if hasattr(pipe, "tokenizer_2"):
+                compel = Compel(
+                    tokenizer=[pipe.tokenizer, pipe.tokenizer_2],
+                    text_encoder=[pipe.text_encoder, pipe.text_encoder_2],
+                    returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
+                    requires_pooled=[False, True],
+                    truncate_long_prompts=False,
+                )
+            else:
+                compel = Compel(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder, truncate_long_prompts=False)
         else:
-            compel = Compel(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder, truncate_long_prompts=False)
-    else:
+            compel = None
+
+    except Exception as e:
         compel = None
+        print(f"Compel not enabled:\n{e}\nRich prompting not available.")
 
     return compel
     # }}}
 
 
-def set_vae(parameters: Parameters, pipe: DiffusionPipeline):
+def set_vae(pipe: DiffusionPipeline, tile: bool, xl_vae: bool):
     # {{{
-    if is_xl(pipe) and parameters.xl_vae.value:
+    if is_xl(pipe) and xl_vae:
         pipe.vae = AutoencoderKL.from_pretrained("stabilityai/sdxl-vae", torch_dtype=pipe.vae.dtype, use_safetensors=True).to(pipe.vae.device)
-    if parameters.tile.value:
+    if tile:
         pipe.vae.enable_tiling()
     else:
         pipe.vae.enable_slicing()
@@ -1156,14 +1245,17 @@ def set_vae(parameters: Parameters, pipe: DiffusionPipeline):
     # }}}
 
 
-def build_schedulers(parameters: Parameters, default_scheduler: Any) -> list[tuple[dict[str, str], type[SchedulerMixin]]]:
+def get_scheduler(sampler: Sampler, spacing: Spacing | None, default_scheduler: Any) -> type[SchedulerMixin]:
     # {{{
     sampler_args = {
         "steps_offset": 0,
         "set_alpha_to_one": True,
         "final_sigmas_type": "zero",
     }
-    sampler_map: dict[Sampler, tuple[Any, dict[str, Any]]] = {
+    if spacing is not None:
+        sampler_args["timestep_spacing"] = spacing
+
+    scheduler, scheduler_args = {
         Sampler.Default: (default_scheduler, {}),
         Sampler.Ddim: (DDIMScheduler, {}),
         Sampler.Ddpm: (DDPMScheduler, {}),
@@ -1186,33 +1278,9 @@ def build_schedulers(parameters: Parameters, default_scheduler: Any) -> list[tup
         Sampler.Unipc2K: (UniPCMultistepScheduler, {"solver_order": 2, "use_karras_sigmas": True}),
         Sampler.Unipc3: (UniPCMultistepScheduler, {"solver_order": 3, "use_karras_sigmas": False}),
         Sampler.Unipc3K: (UniPCMultistepScheduler, {"solver_order": 3, "use_karras_sigmas": True}),
-    }
-    for name, (sched, args) in sampler_map.items():
-        for k in args:
-            sig = signature(sched).parameters
-            if k not in sig:
-                raise AssertionError(f"kwarg '{k}' not valid for requested scheduler for '{name}'.\nParameters: {list(sig)}")
+    }[sampler]
 
-    builders: list[tuple[dict[str, str], Any, dict[str, Any]]] = []
-    if not parameters.sampler.value:
-        parameters.sampler.value = [Sampler.Default]
-    if parameters.sampler.value:
-        for s in parameters.sampler.value:
-            sched, kwargs = sampler_map[s]
-            builders.append(({"sampler": s}, sched, kwargs))
-
-    if parameters.spacing.value:
-        builders = [
-            (sched_meta | {"spacing": space}, sched, kwargs | {"timestep_spacing": space})
-            for sched_meta, sched, kwargs in builders
-            for space in parameters.spacing.value
-        ]
-
-    for sched_meta, _, _ in builders:
-        if sched_meta["sampler"] == Sampler.Default:
-            del sched_meta["sampler"]
-
-    return [(sched_meta, sched.from_config(default_scheduler.config, **(sampler_args | kwargs))) for sched_meta, sched, kwargs in builders]
+    return scheduler.from_config(default_scheduler.config, **(sampler_args | scheduler_args))
     # }}}
 
 
@@ -1241,11 +1309,15 @@ def get_latent_params(pipe: DiffusionPipeline) -> tuple[int, float, int] | None:
     # }}}
 
 
-def build_jobs(parameters: Parameters, schedulers: list[tuple[dict[str, str], type[SchedulerMixin]]]) -> list[dict[str, Any]]:
+# MID LEVEL
+
+
+def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
     # {{{
     job = {
         "num_images_per_prompt": parameters.batch_size.value,
         "clean_caption": False,  # stop IF nag. what does this even do
+        "use_resolution_binning": False,  # True breaks with pre-noised latents
     }
 
     if not parameters.negative.value:
@@ -1263,7 +1335,7 @@ def build_jobs(parameters: Parameters, schedulers: list[tuple[dict[str, str], ty
     for param in parameters.params():
         if param.multi:
             match param.name:
-                case "seed" | "sampler" | "spacing" | "lora":
+                case "seed" | "lora" | "model":
                     pass
                 case "power" | "pixelate" | "posterize":
                     if param.value:
@@ -1271,9 +1343,6 @@ def build_jobs(parameters: Parameters, schedulers: list[tuple[dict[str, str], ty
                 case _:
                     if param.value:
                         jobs = merger(jobs, param.name, param.value)
-
-    if schedulers:
-        jobs = merger(jobs, "scheduler", schedulers)
 
     i32max = 2**31 - 1
     seeds = [torch.randint(high=i32max, low=-i32max, size=(1,)).item()] if not parameters.seed.value else parameters.seed.value
@@ -1287,6 +1356,9 @@ def build_jobs(parameters: Parameters, schedulers: list[tuple[dict[str, str], ty
             jobs = [j | {"seed": s} for s in seeds for j in jobs]
         case _:
             raise ValueError
+
+    # Ensure models are always sequential. Not really compatible with `Iter`...
+    jobs = [j | {"model": m} for m in parameters.model.value for j in jobs]
 
     if parameters.iter.value is Iter.Shuffle:
         jobs = [j | {"image_ops": [o]} for j, o in zip(jobs, oversample(image_ops, len(jobs)))]
@@ -1305,85 +1377,91 @@ def build_jobs(parameters: Parameters, schedulers: list[tuple[dict[str, str], ty
     # }}}
 
 
-@torch.inference_mode()
-def process_job(
-    parameters: Parameters,
+def load_model(model: str, img2img: bool, parameters: Parameters, meta: dict[str, str]) -> DiffusionPipeline:
+    # {{{
+    with SmartSigint(num=2, job_name="model load"):
+        pipe = get_pipe(model, parameters.offload.value, parameters.dtype.value, img2img)
+
+    if not get_latent_params(pipe):
+        print(f"\nModel {model} not able to use pre-noised latents.\nNoise options will not be respected.\n")
+
+    if parameters.lora.value:
+        lora_string = apply_loras(parameters.lora.value, pipe)
+        if lora_string:
+            meta["lora"] = lora_string
+
+    if hasattr(pipe, "vae"):
+        set_vae(pipe, parameters.tile.value, parameters.xl_vae.value)
+
+    if parameters.compile.value:
+        if hasattr(pipe, "unet"):
+            pipe.unet = torch.compile(pipe.unet)
+        if hasattr(pipe, "transformer"):
+            pipe.transformer = torch.compile(pipe.transformer)
+        if hasattr(pipe, "prior_pipe"):
+            pipe.prior_pipe.prior = torch.compile(pipe.prior_pipe.prior)
+        if hasattr(pipe, "decoder_pipe"):
+            pipe.decoder_pipe.decoder = torch.compile(pipe.decoder_pipe.decoder)
+    else:
+        set_attn(pipe, parameters.attention.value)
+
+    return pipe
+    # }}}
+
+
+# Does not use Parameters because effectively all of these are per-job
+def make_noise(
     pipe: DiffusionPipeline,
-    job: dict[str, Any],
-    meta: dict[str, str],
-    input_image: Image.Image | None,
-) -> list[tuple[dict[str, Any], Image.Image]]:
+    generators: list[torch.Generator],
+    # Parameters
+    batch_size: int,
+    color: LatentColor | None,
+    color_power: float,
+    noise_power: float,
+    noise_type: NoiseType,
+    resolution: Resolution | None,
+    variance_power: float,
+    variance_scale: int,
+) -> tuple[torch.Tensor | None, Resolution | None]:
     # {{{
 
-    torch.cuda.empty_cache()
-    seed = job.pop("seed")
-
-    for param in parameters.params():
-        if param.name in job and param.meta:
-            meta[param.name] = job[param.name]
-
-    resolution: Resolution | None = job.pop("resolution") if "resolution" in job else None
-    noise_power = job.pop("noise_power") if "noise_power" in job else None
-    variance_power = job.pop("variance_power") if "variance_power" in job else None
-    variance_scale = job.pop("variance_scale") if "variance_scale" in job else None
-    color = job.pop("color") if "color" in job else None
-    color_power = job.pop("color_power") if "color_power" in job else None
-    image_ops: list[dict[str, Any]] = job.pop("image_ops")
-
-    if "noise_type" in job:
-        noise_type = job.pop("noise_type")
-        noise_dtype, noise_device = {
-            NoiseType.Cpu16: (torch.float16, "cpu"),
-            NoiseType.Cpu16B: (torch.bfloat16, "cpu"),
-            NoiseType.Cpu32: (torch.float32, "cpu"),
-            NoiseType.Cuda16: (torch.float16, "cuda"),
-            NoiseType.Cuda16B: (torch.bfloat16, "cuda"),
-            NoiseType.Cuda32: (torch.float32, "cuda"),
-        }[noise_type]
-    else:
-        noise_dtype, noise_device = None, None
-
-    if "scheduler" in job:
-        sched_meta, sched = job.pop("scheduler")
-        meta |= sched_meta
-        pipe.scheduler = sched
-
-    # NOISE {{{
-    generators = [torch.Generator(noise_device).manual_seed(seed + n) for n in range(parameters.batch_size.value)]
     latent_params = get_latent_params(pipe)
+    if latent_params is None:
+        return (None, None)
 
-    if input_image is None and latent_params is not None:
-        channels, factor, default_size = latent_params
-        if resolution is not None:
-            width, height = round(resolution.width / factor), round(resolution.height / factor)
-        else:
-            width, height = default_size, default_size
-            job["width"], job["height"] = round(default_size * factor), round(default_size * factor)
-        shape = (parameters.batch_size.value, channels, height, width)
-        latents = torch.zeros(shape, dtype=pipe.dtype, device="cpu")
-        for latent, generator in zip(latents, generators):
-            # Variance
-            if variance_power is not None and variance_scale is not None and variance_power != 0:
-                # save state so init noise seeds are the same with/without
-                state = generator.get_state()
-                variance = torch.randn([1, shape[1], variance_scale, variance_scale], generator=generator, dtype=noise_dtype, device=noise_device)
-                latent += torch.nn.UpsamplingBilinear2d((shape[2], shape[3]))(variance).mul(variance_power)[0].to("cpu")
-                generator.set_state(state)
-            # Init noise
-            noise = torch.randn(latents.shape[1:], generator=generator, dtype=noise_dtype, device=noise_device)
-            if noise_power is not None:
-                noise *= noise_power
-            latent += noise.to("cpu")
+    channels, factor, default_size = latent_params
+    if resolution is not None:
+        width, height = round(resolution.width / factor), round(resolution.height / factor)
+    else:
+        width, height = default_size, default_size
+    shape = (batch_size, channels, height, width)
+    latents = torch.zeros(shape, dtype=pipe.dtype, device="cpu")
+    for latent, generator in zip(latents, generators):
+        # Variance
+        if variance_power != 0 and variance_scale > 0:
+            # save state so init noise seeds are the same with/without
+            state = generator.get_state()
+            variance = torch.randn(
+                [1, shape[1], variance_scale, variance_scale], generator=generator, dtype=noise_type.torch_dtype, device=noise_type.torch_device
+            )
+            latent += torch.nn.UpsamplingBilinear2d((shape[2], shape[3]))(variance).mul(variance_power)[0].to("cpu")
+            generator.set_state(state)
+        # Init noise
+        noise = torch.randn(latents.shape[1:], generator=generator, dtype=noise_type.torch_dtype, device=noise_type.torch_device)
+        if noise_power != 1:
+            noise *= noise_power
+        latent += noise.to("cpu")
 
-        # Colored latents
-        # TODO: flatten
-        if is_xl(pipe) or isinstance(pipe, PixArtSigmaPipeline):
+    # Colored latents
+    if color is not None and color_power != 0:
+        if is_xl(pipe) or isinstance(pipe, PixArtSigmaPipeline) or isinstance(pipe, HunyuanDiTPipeline):
             cols = COLS_XL
         elif is_sd(pipe) or isinstance(pipe, PixArtAlphaPipeline):
             cols = COLS_FTMSE
         else:
             cols = None
-        if cols and color_power is not None and color is not None and color_power != 0:
+            print(f"# # #\nParameter `color_power` cannot be used for {type(pipe).__name__}\n# # #")
+        if cols:
             sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config).init_noise_sigma
             latents += (
                 torch.tensor(cols[color], dtype=pipe.dtype, device="cpu")
@@ -1393,11 +1471,84 @@ def process_job(
                 .permute((0, 3, 1, 2))
             )
 
-        job["latents"] = latents
+    return (latents, Resolution((round(width * factor), round(height * factor))))
 
+    # }}}
+
+
+# TOP LEVEL
+
+
+@torch.inference_mode()
+def process_job(
+    parameters: Parameters,
+    piperef: PipeRef,
+    job: dict[str, Any],
+    meta: dict[str, str],
+    input_image: Image.Image | None,
+) -> list[tuple[dict[str, Any], Image.Image]]:
+    # {{{
+
+    torch.cuda.empty_cache()
+
+    # POP SEED first because the meta is set in PngInfo directly
+    seed = job.pop("seed")
+
+    # LOAD COMMON META
+    for param in parameters.params():
+        if param.name in job and param.meta:
+            meta[param.name] = job[param.name]
+
+    # POP PARAMS
+    model = job.pop("model")
+    color = job.pop("color", None)
+    color_power = job.pop("color_power", 0)
+    noise_power = job.pop("noise_power", 1)
+    noise_type = job.pop("noise_type", NoiseType.Cpu32)
+    resolution: Resolution | None = job.pop("resolution", None)
+    variance_power = job.pop("variance_power", 0)
+    variance_scale = job.pop("variance_scale", 0)
+    image_ops: list[dict[str, Any]] = job.pop("image_ops")
+
+    # PIPE
+    if piperef.name != model:
+        del piperef.pipe  # Remove only reference
+        gc.collect()  # force `del` to trigger immediately
+        torch.cuda.empty_cache()  # make absolutely sure nothing is allocated
+        piperef.pipe = load_model(model, input_image is not None, parameters, meta)
+        piperef.name = model
+    pipe = piperef.pipe
+    if pipe is None:
+        return []
+
+    # INPUT TENSOR
+    generators = [torch.Generator(noise_type.torch_device).manual_seed(seed + n) for n in range(parameters.batch_size.value)]
+    if input_image is None:
+        latents, latents_resolution = make_noise(
+            pipe,
+            generators,
+            # Parameters
+            parameters.batch_size.value,
+            color,
+            color_power,
+            noise_power,
+            noise_type,
+            resolution,
+            variance_power,
+            variance_scale,
+        )
+        if latents is not None and latents_resolution is not None:
+            job["latents"] = latents
+            job["width"], job["height"] = latents_resolution.resolution
+        elif resolution is not None:
+            job["width"], job["height"] = resolution.resolution
+    else:
+        if resolution is not None:
+            job["image"] = input_image.resize(resolution.resolution, Image.Resampling.LANCZOS)
+        else:
+            job["image"] = input_image
     job["generator"] = generators
     print("seeds:", " ".join([str(seed + n) for n in range(parameters.batch_size.value)]))
-    # NOISE }}}
 
     # CONDITIONING {{{
     compel = get_compel(pipe)
@@ -1418,20 +1569,17 @@ def process_job(
     # INFERENCE {{{
     pipe_params = signature(pipe).parameters
 
-    if input_image is not None:
-        if resolution is not None:
-            job["image"] = input_image.resize(resolution.resolution, Image.LANCZOS)
-        else:
-            job["image"] = input_image
-    elif resolution is not None:
-        job["width"], job["height"] = resolution.resolution
+    if "sampler" in job and hasattr(pipe, "scheduler"):
+        default_scheduler, pipe.scheduler = pipe.scheduler, get_scheduler(job["sampler"], job.get("spacing", None), pipe.scheduler)
+    else:
+        default_scheduler = None
 
     if "prior_num_inference_steps" in pipe_params and "steps" in job:
         steps = job.pop("steps")
         job["prior_num_inference_steps"] = steps
         if "decoder_steps" in job:
             decoder_steps = job.pop("decoder_steps")
-            job["num_inference_steps"] = round(sqrt(abs(steps * decoder_steps))) if decoder_steps < 0 else decoder_steps
+            job["num_inference_steps"] = round(spowf(abs(steps * decoder_steps), 1 / 2)) if decoder_steps < 0 else decoder_steps
 
     for f, t in [
         ("steps", ["num_inference_steps"]),
@@ -1453,58 +1601,63 @@ def process_job(
 
     results: list[tuple[dict[str, Any], Image.Image]] = []
     filenum = 0
-    for n, image_array in enumerate(pipe(output_type="np", **job).images):
-        pnginfo = PngImagePlugin.PngInfo()
-        for k, v in meta.items():
-            pnginfo.add_text(k, str(v))
-        if "latents" in job or n == 0:
-            pnginfo.add_text("seed", str(seed + n))
-        else:
-            pnginfo.add_text("seed", f"{seed} + {n}")
+    with SmartSigint(job_name="current batch"):
+        for n, image_array in enumerate(pipe(output_type="np", **job).images):
+            pnginfo = PngImagePlugin.PngInfo()
+            for k, v in meta.items():
+                pnginfo.add_text(k, str(v))
+            if "latents" in job or n == 0:
+                pnginfo.add_text("seed", str(seed + n))
+            else:
+                pnginfo.add_text("seed", f"{seed} + {n}")
 
-        for ops in image_ops:
-            info = copy(pnginfo)
-            for k, v in ops.items():
-                info.add_text(k, str(v))
-            p = parameters.output.value.joinpath(f"{filenum:05}.png")
-            while p.exists():
-                filenum += 1
+            for ops in image_ops:
+                info = copy(pnginfo)
+                for k, v in ops.items():
+                    info.add_text(k, str(v))
                 p = parameters.output.value.joinpath(f"{filenum:05}.png")
+                while p.exists():
+                    filenum += 1
+                    p = parameters.output.value.joinpath(f"{filenum:05}.png")
 
-            # Direct array ops
-            op_arr: np.ndarray = np.asarray(image_array)  # mutable reference to make pyright happy
+                # Direct array ops
+                op_arr: np.ndarray = np.asarray(image_array)  # mutable reference to make pyright happy
 
-            if "power" in ops:
-                # ^2.2 for approx sRGB EOTF
-                okl = lrgb_to_oklab(spowf(op_arr, 2.2))
+                if "power" in ops:
+                    # ^2.2 for approx sRGB EOTF
+                    okl = lrgb_to_oklab(spowf_np(op_arr, 2.2))
 
-                # ≈1/3 cause OKL's top heavy lightness curve
-                offset = [0.35, 1, 1]
-                # Halve chromacities' power slope
-                power = [ops["power"], sqrt(ops["power"]), sqrt(ops["power"])]
+                    # ≈1/3 cause OKL's top heavy lightness curve
+                    offset = [0.35, 1, 1]
+                    # Halve chromacities' power slope
+                    power = [ops["power"], spowf(ops["power"], 1 / 2), spowf(ops["power"], 1 / 2)]
 
-                okl = spowf((okl + offset), power) - offset
+                    okl = spowf_np((okl + offset), power) - offset
 
-                # back to sRGB with approx OETF
-                op_arr = spowf(oklab_to_lrgb(okl), 1 / 2.2)
+                    # back to sRGB with approx OETF
+                    op_arr = spowf_np(oklab_to_lrgb(okl), 1 / 2.2)
 
-            if "posterize" in ops:
-                if ops["posterize"] > 1:
-                    factor = float((ops["posterize"] - 1) / 256)
-                    op_arr = (op_arr * 255 * factor).round() / factor / 255
+                if "posterize" in ops:
+                    if ops["posterize"] > 1:
+                        factor = float((ops["posterize"] - 1) / 256)
+                        op_arr = (op_arr * 255 * factor).round() / factor / 255
 
-            # PIL ops
-            op_pil: Image.Image = Image.fromarray((op_arr * 255).clip(0, 255).astype(np.uint8))
-            del op_arr
+                # PIL ops
+                op_pil: Image.Image = Image.fromarray((op_arr * 255).clip(0, 255).astype(np.uint8))
+                del op_arr
 
-            if "pixelate" in ops:
-                if ops["pixelate"] > 1:
-                    w, h = op_pil.width, op_pil.height
-                    op_pil = op_pil.resize((round(w / ops["pixelate"]), round(h / ops["pixelate"])), resample=Image.BOX)
-                    op_pil = op_pil.resize((w, h), resample=Image.NEAREST)
+                if "pixelate" in ops:
+                    if ops["pixelate"] > 1:
+                        w, h = op_pil.width, op_pil.height
+                        op_pil = op_pil.resize((round(w / ops["pixelate"]), round(h / ops["pixelate"])), resample=Image.Resampling.BOX)
+                        op_pil = op_pil.resize((w, h), resample=Image.Resampling.NEAREST)
 
-            op_pil.save(p, format="PNG", pnginfo=info, compress_level=4)
-            results.append((meta | ops | {"seed": seed + n, "resolution": op_pil.size}, op_pil))
+                op_pil.save(p, format="PNG", pnginfo=info, compress_level=4)
+                results.append((meta | ops | {"seed": seed + n, "resolution": op_pil.size}, op_pil))
+
+    if default_scheduler is not None:
+        pipe.scheduler = default_scheduler
+
     return results
     # }}}
     # }}}
@@ -1513,53 +1666,19 @@ def process_job(
 @torch.inference_mode()
 def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None):
     # {{{
-    with SmartSigint(num=2, job_name="model load"):
-        pipe = get_pipe(parameters.model.value, parameters.offload.value, parameters.dtype.value, image is not None)
-
-    if not get_latent_params(pipe):
-        print(f"\nModel {parameters.model.value} not able to use pre-noised latents.\nNoise options will not be respected.\n")
-
-    if parameters.lora.value:
-        lora_string = apply_loras(parameters.lora.value, pipe)
-        if lora_string:
-            meta["lora"] = lora_string
-
-    if hasattr(pipe, "vae"):
-        set_vae(parameters, pipe)
-
-    if parameters.compile.value:
-        if hasattr(pipe, "unet"):
-            pipe.unet = torch.compile(pipe.unet)
-        if hasattr(pipe, "transformer"):
-            pipe.transformer = torch.compile(pipe.transformer)
-        if hasattr(pipe, "prior_pipe"):
-            pipe.prior_pipe.prior = torch.compile(pipe.prior_pipe.prior)
-        if hasattr(pipe, "decoder_pipe"):
-            pipe.decoder_pipe.decoder = torch.compile(pipe.decoder_pipe.decoder)
-    elif parameters.attention.value:
-        set_attn(pipe, parameters.attention.value)
-
-    if hasattr(pipe, "scheduler"):
-        schedulers = build_schedulers(parameters, pipe.scheduler)
-        if len(schedulers) == 1:
-            sched_meta, sched = schedulers[0]
-            meta |= sched_meta
-            pipe.scheduler = sched
-    else:
-        schedulers = []
-
-    jobs = build_jobs(parameters, schedulers)
+    images = []
+    piperef = PipeRef()
+    jobs = build_jobs(parameters)
 
     total_images = len(jobs) * parameters.batch_size.value
     print(f"\nGenerating {len(jobs)} batches of {parameters.batch_size.value} images for {total_images} total...")
     pbar = tqdm(desc="Images", total=total_images, smoothing=0)
-    images = []
+
     for job in jobs:
-        with SmartSigint(job_name="current batch"):
-            results = process_job(parameters, pipe, job, meta.copy(), image)
-            if parameters.grid.value is not None:
-                images += results
-            pbar.update(parameters.batch_size.value)
+        results = process_job(parameters, piperef, job, meta.copy(), image)
+        if parameters.grid.value is not None:
+            images += results
+        pbar.update(parameters.batch_size.value)
 
     if parameters.grid.value is not None:
         filenum = 0
@@ -1569,18 +1688,17 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
             while p.exists():
                 filenum += 1
                 p = parameters.output.value.joinpath(f"grid_{filenum:05}.png")
-            i.save(p)
+            i.save(p, format="PNG", compress_level=4)
         if len(others) > 0:
             print(f"###\n{len(others)} images not included in grid output\n###")
     # }}}
 
 
 if __name__ == "__main__":
-    parameters = locals()["cli_params"]
-    comment = locals()["cli_comment"]
-    image = locals()["cli_image"]
-    meta: dict[str, str] = {"model": parameters.model.value, "url": "https://github.com/Beinsezii/quickdif"}
-    if comment:
-        meta["comment"] = comment
+    main_parameters = locals()["cli_params"]
+    main_image = locals()["cli_image"]
+    main_meta: dict[str, str] = {"url": "https://github.com/Beinsezii/quickdif"}
+    if main_parameters.comment.value:
+        main_meta["comment"] = main_meta["comment"] = main_parameters.comment.value
 
-    main(parameters, meta, image)
+    main(main_parameters, main_meta, main_image)

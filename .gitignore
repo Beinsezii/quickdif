@@ -3,9 +3,9 @@
 *.png
 *.tar*
 *.toml
+*.txt
 *.whl
 checkpoints
-comments
 diffusers
 lora
 
