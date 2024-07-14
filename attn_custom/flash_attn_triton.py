@@ -46,21 +46,23 @@ import triton
 import triton.language as tl
 
 
-# Disabling autotune for now, set num_warps=4 if headdim=64 and num_warps=8 if headdim=128
-# @triton.autotune(
-#     configs=[
-#         triton.Config({"BLOCK_M": 128, "BLOCK_N": 128}, num_warps=4, num_stages=1),
-#         # This config has a race condition when EVEN_M == False, disabling it for now.
-#         # triton.Config({"BLOCK_M": 64, "BLOCK_N": 64}, num_warps=4, num_stages=1),
-#     ],
-#     key=['CACHE_KEY_SEQLEN_Q', 'CACHE_KEY_SEQLEN_K', 'BIAS_TYPE', 'IS_CAUSAL', 'BLOCK_HEADDIM']
-# )
 @triton.autotune(
     configs=[
-        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128}, num_warps=4, num_stages=1),
-        triton.Config({"BLOCK_M": 16, "BLOCK_N": 16}, num_warps=1, num_stages=4),
-        # This config has a race condition when EVEN_M == False, disabling it for now.
-        # triton.Config({"BLOCK_M": 64, "BLOCK_N": 64}, num_warps=4, num_stages=1),
+        ### brute force a good config
+        #
+        # triton.Config({"BLOCK_M": block_m, "BLOCK_N": block_n}, num_warps=warp, num_stages=1)
+        # for block_m, warp in [(16, 1), (64, 2), (128, 4)]
+        # for block_n in [16, 32, 64, 128]
+
+        ### hand pick a few good ones
+        #
+        # triton.Config({"BLOCK_M": 128, "BLOCK_N": 128}, num_warps=4, num_stages=1), # base config. Terrible
+        # triton.Config({"BLOCK_M": 128, "BLOCK_N": 64}, num_warps=4, num_stages=1), # less terrbile. wose than SDPA
+        triton.Config({"BLOCK_M": 128, "BLOCK_N": 32}, num_warps=4, num_stages=1),  # good
+        # triton.Config({"BLOCK_M": 64, "BLOCK_N": 64}, num_warps=2, num_stages=1), # less terrible. worse than SDPA
+        triton.Config({"BLOCK_M": 64, "BLOCK_N": 32}, num_warps=2, num_stages=1),  # good
+        triton.Config({"BLOCK_M": 16, "BLOCK_N": 32}, num_warps=1, num_stages=1),  # best performer on my XTX
+        triton.Config({"BLOCK_M": 16, "BLOCK_N": 16}, num_warps=1, num_stages=1),  # good
     ],
     key=["CACHE_KEY_SEQLEN_Q", "CACHE_KEY_SEQLEN_K", "BIAS_TYPE", "IS_CAUSAL", "BLOCK_HEADDIM"],
 )
