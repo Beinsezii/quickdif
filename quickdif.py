@@ -1199,13 +1199,16 @@ def get_compel(pipe: DiffusionPipeline) -> Compel | None:
     try:
         if hasattr(pipe, "tokenizer") and isinstance(pipe.tokenizer, CLIPTokenizer):
             if hasattr(pipe, "tokenizer_2"):
-                compel = Compel(
-                    tokenizer=[pipe.tokenizer, pipe.tokenizer_2],
-                    text_encoder=[pipe.text_encoder, pipe.text_encoder_2],
-                    returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
-                    requires_pooled=[False, True],
-                    truncate_long_prompts=False,
-                )
+                if isinstance(pipe.tokenizer_2, CLIPTokenizer):
+                    compel = Compel(
+                        tokenizer=[pipe.tokenizer, pipe.tokenizer_2],
+                        text_encoder=[pipe.text_encoder, pipe.text_encoder_2],
+                        returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
+                        requires_pooled=[False, True],
+                        truncate_long_prompts=False,
+                    )
+                else:
+                    compel = None
             else:
                 compel = Compel(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder, truncate_long_prompts=False)
         else:
