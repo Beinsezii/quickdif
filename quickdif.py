@@ -1063,7 +1063,7 @@ def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool) -> Diffu
     if revision is not None:
         pipe_args["revision"] = revision
 
-    if model.endswith(".safetensors"):
+    if model.casefold().endswith(".safetensors") or model.casefold().endswith(".sft"):
         if img2img:
             sd_pipe = StableDiffusionImg2ImgPipeline
             xl_pipe = StableDiffusionXLImg2ImgPipeline
@@ -1119,10 +1119,6 @@ def is_xl(pipe: DiffusionPipeline) -> bool:
 
 def is_sd(pipe: DiffusionPipeline) -> bool:
     return isinstance(pipe, StableDiffusionPipeline) or isinstance(pipe, StableDiffusionImg2ImgPipeline)
-
-
-def is_sd3(pipe: DiffusionPipeline) -> bool:
-    return isinstance(pipe, StableDiffusion3Pipeline) or isinstance(pipe, StableDiffusion3Img2ImgPipeline)
 
 
 def set_attn(pipe: DiffusionPipeline, attention: Attention):
@@ -1194,12 +1190,10 @@ def apply_loras(loras: list[str], pipe: DiffusionPipeline) -> str | None:
 def get_compel(pipe: DiffusionPipeline) -> Compel | None:
     # {{{
     # Compel thinks it supports it but it doesn't.
-    if is_sd3(pipe):
-        return None
     try:
         if hasattr(pipe, "tokenizer") and isinstance(pipe.tokenizer, CLIPTokenizer):
             if hasattr(pipe, "tokenizer_2"):
-                if isinstance(pipe.tokenizer_2, CLIPTokenizer):
+                if isinstance(pipe.tokenizer_2, CLIPTokenizer) and not hasattr(pipe, "tokenizer_3"):
                     compel = Compel(
                         tokenizer=[pipe.tokenizer, pipe.tokenizer_2],
                         text_encoder=[pipe.text_encoder, pipe.text_encoder_2],
