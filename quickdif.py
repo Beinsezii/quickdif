@@ -215,6 +215,7 @@ class Sampler(enum.StrEnum):
     Ddpm = enum.auto()
     Euler = enum.auto()
     EulerK = enum.auto()
+    EulerF = enum.auto()
     EulerA = enum.auto()
     Dpm = enum.auto()
     DpmK = enum.auto()
@@ -974,6 +975,7 @@ from diffusers import (  # noqa: E402
     DPMSolverMultistepScheduler,
     EulerAncestralDiscreteScheduler,
     EulerDiscreteScheduler,
+    FlowMatchEulerDiscreteScheduler,
     HunyuanDiTPipeline,
     PixArtAlphaPipeline,
     PixArtSigmaPipeline,
@@ -1245,6 +1247,7 @@ def get_scheduler(sampler: Sampler, spacing: Spacing | None, default_scheduler: 
         Sampler.Ddpm: (DDPMScheduler, {}),
         Sampler.Euler: (EulerDiscreteScheduler, {}),
         Sampler.EulerK: (EulerDiscreteScheduler, {"use_karras_sigmas": True}),
+        Sampler.EulerF: (FlowMatchEulerDiscreteScheduler, {}),
         Sampler.EulerA: (EulerAncestralDiscreteScheduler, {}),
         Sampler.Dpm: (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 1, "use_karras_sigmas": False}),
         Sampler.DpmK: (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 1, "use_karras_sigmas": True}),
