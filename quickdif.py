@@ -1277,6 +1277,10 @@ def get_latent_params(pipe: DiffusionPipeline) -> tuple[int, float, int] | None:
     channels: int | None = None
     default_size: int | None = None
 
+    # appears to have a bad config?
+    if type(pipe).__name__ == "FluxPipeline":
+        return None
+
     if hasattr(pipe, "vae_scale_factor"):
         factor = pipe.vae_scale_factor
     if hasattr(pipe, "unet"):
