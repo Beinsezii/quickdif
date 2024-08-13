@@ -3,30 +3,34 @@ Quick and easy CLI inference that just works™ for a variety of Diffusers model
 
 ## Including
   * Verified working across many models
-    + Stable Diffusion (1.5/2.1)
-    + Stable Diffusion XL Base
-      - No refiner
-    + Stable Diffusion 3
-    + Stable Cascade
-    + Wuerstchen
-    + Kandinsky22
-    + Pixart (Alpha/Sigma)
-    + Hunyuan
-    + Kolors
     + AuraFlow
+    + FLUX
+    + Hunyuan
+    + Kandinsky
+    + Kolors
+    + Pixart (Alpha/Sigma)
+    + Stable Cascade
+    + Stable Diffusion (1.5/2.1)
+    + Stable Diffusion 3
+    + Stable Diffusion XL
+      - No refiner
+    + Wuerstchen
     * Other Diffusers format models will likely work to varying degrees
   * Multi-lora fusion using `peft` for minimal performance loss
-  * Extremely small 1-shot script using `accelerate` for hot loading models
   * Features all of the most common generation parameters
-  * Includes many advanced generation parameters such as latent augmentation
+  * Includes many advanced generation parameters
+    * PAG / Perturbed-Attention Guidance
+    * Many latent augmentation params
+    * Many post processing effects
   * Iterate over most parameters and create grids
   * Expand prompts with `photo of {all|of|these}` or `photo of [one|of|these]`
   * Load settings from JSON, TOML, PNG
+  * Extremely small 1-shot script using `accelerate` for hot loading models
   * Targeted AMD/ROCm optimizations
     * NVIDIA/CUDA does not need additional optimizations
 
 ## Not Including
-  - ControlNet + other Stable Diffusion extensions
+  - ControlNet, Inpaint
   - Multi-stage models: DFIF Stage 2, SDXL Refiner
   - Server/API for a perpetual instance
   - 100% maximum throughput

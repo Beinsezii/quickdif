@@ -623,6 +623,14 @@ class Parameters:
         meta=True,
         help="Rescale the noise during guidance. Moderate values may help produce more natural images when using strong guidance",
     )
+    pag = QDParam(
+        "pag",
+        float,
+        value=0.0,
+        multi=True,
+        meta=True,
+        help="Perturbed-Attention Guidance scale",
+    )
     denoise = QDParam("denoise", float, short="-d", multi=True, meta=True, help="Denoising amount for Img2Img. Higher values will change more")
     noise_type = QDParam(
         "noise_type",
@@ -977,15 +985,22 @@ from diffusers import (  # noqa: E402
     EulerDiscreteScheduler,
     FlowMatchEulerDiscreteScheduler,
     HunyuanDiTPipeline,
+    HunyuanDiTPAGPipeline,
     PixArtAlphaPipeline,
+    KolorsPipeline,
+    KolorsPAGPipeline,
+    KolorsImg2ImgPipeline,
     PixArtSigmaPipeline,
+    PixArtSigmaPAGPipeline,
     SchedulerMixin,
     StableDiffusion3Img2ImgPipeline,
     StableDiffusion3Pipeline,
     StableDiffusionImg2ImgPipeline,
     StableDiffusionPipeline,
+    StableDiffusionPAGPipeline,
     StableDiffusionXLImg2ImgPipeline,
     StableDiffusionXLPipeline,
+    StableDiffusionXLPAGPipeline,
     UniPCMultistepScheduler,
 )
 from diffusers.models.attention_processor import AttnProcessor2_0  # noqa: E402
@@ -1046,7 +1061,7 @@ class SmartSigint:
 # BOTTOM LEVEL
 
 
-def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool) -> DiffusionPipeline:
+def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool, pag: bool) -> DiffusionPipeline:
     # {{{
     pipe_args = {
         "add_watermarker": False,
@@ -1095,6 +1110,15 @@ def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool) -> Diffu
         else:
             pipe = AutoPipelineForText2Image.from_pretrained(model, **pipe_args)
 
+    if pag:
+        try:
+            if img2img:
+                pipe = AutoPipelineForImage2Image.from_pipe(pipe, enable_pag=True)
+            else:
+                pipe = AutoPipelineForText2Image.from_pipe(pipe, enable_pag=True)
+        except Exception as e:
+            print(f"Could not find a PAG pipeline variant for `{type(pipe).__name__} and `pag` parameter will be ignored:\n  {e}")
+
     pipe.safety_checker = None
     pipe.watermarker = None
     match offload:
@@ -1115,12 +1139,39 @@ def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool) -> Diffu
     # }}}
 
 
-def is_xl(pipe: DiffusionPipeline) -> bool:
-    return isinstance(pipe, StableDiffusionXLPipeline) or isinstance(pipe, StableDiffusionXLImg2ImgPipeline)
+def is_xl_vae(pipe: DiffusionPipeline) -> bool:
+    # TODO: agnostic detection?
+    return any(
+        [
+            isinstance(pipe, c)
+            for c in [
+                HunyuanDiTPAGPipeline,
+                HunyuanDiTPipeline,
+                KolorsImg2ImgPipeline,
+                KolorsPAGPipeline,
+                KolorsPipeline,
+                PixArtSigmaPAGPipeline,
+                PixArtSigmaPipeline,
+                StableDiffusionXLImg2ImgPipeline,
+                StableDiffusionXLPAGPipeline,
+                StableDiffusionXLPipeline,
+            ]
+        ]
+    )
 
 
-def is_sd(pipe: DiffusionPipeline) -> bool:
-    return isinstance(pipe, StableDiffusionPipeline) or isinstance(pipe, StableDiffusionImg2ImgPipeline)
+def is_sd_vae(pipe: DiffusionPipeline) -> bool:
+    return any(
+        [
+            isinstance(pipe, c)
+            for c in [
+                PixArtAlphaPipeline,
+                StableDiffusionImg2ImgPipeline,
+                StableDiffusionPAGPipeline,
+                StableDiffusionPipeline,
+            ]
+        ]
+    )
 
 
 def set_attn(pipe: DiffusionPipeline, attention: Attention):
@@ -1191,7 +1242,6 @@ def apply_loras(loras: list[str], pipe: DiffusionPipeline) -> str | None:
 
 def get_compel(pipe: DiffusionPipeline) -> Compel | None:
     # {{{
-    # Compel thinks it supports it but it doesn't.
     try:
         if hasattr(pipe, "tokenizer") and isinstance(pipe.tokenizer, CLIPTokenizer):
             if hasattr(pipe, "tokenizer_2"):
@@ -1220,7 +1270,7 @@ def get_compel(pipe: DiffusionPipeline) -> Compel | None:
 
 def set_vae(pipe: DiffusionPipeline, tile: bool, xl_vae: bool):
     # {{{
-    if is_xl(pipe) and xl_vae:
+    if is_xl_vae(pipe) and xl_vae:
         pipe.vae = AutoencoderKL.from_pretrained("stabilityai/sdxl-vae", torch_dtype=pipe.vae.dtype, use_safetensors=True).to(pipe.vae.device)
     if tile:
         pipe.vae.enable_tiling()
@@ -1278,7 +1328,7 @@ def get_latent_params(pipe: DiffusionPipeline) -> tuple[int, float, int] | None:
     default_size: int | None = None
 
     # appears to have a bad config?
-    if type(pipe).__name__ == "FluxPipeline":
+    if type(pipe).__name__.startswith("Flux"):
         return None
 
     if hasattr(pipe, "vae_scale_factor"):
@@ -1371,7 +1421,7 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
 def load_model(model: str, img2img: bool, parameters: Parameters, meta: dict[str, str]) -> DiffusionPipeline:
     # {{{
     with SmartSigint(num=2, job_name="model load"):
-        pipe = get_pipe(model, parameters.offload.value, parameters.dtype.value, img2img)
+        pipe = get_pipe(model, parameters.offload.value, parameters.dtype.value, img2img, pag=(any(parameters.pag.value)))
 
     if not get_latent_params(pipe):
         print(f"\nModel {model} not able to use pre-noised latents.\nNoise options will not be respected.\n")
@@ -1445,9 +1495,9 @@ def make_noise(
 
     # Colored latents
     if color is not None and color_power != 0:
-        if is_xl(pipe) or isinstance(pipe, PixArtSigmaPipeline) or isinstance(pipe, HunyuanDiTPipeline):
+        if is_xl_vae(pipe):
             cols = COLS_XL
-        elif is_sd(pipe) or isinstance(pipe, PixArtAlphaPipeline):
+        elif is_sd_vae(pipe):
             cols = COLS_FTMSE
         else:
             cols = None
@@ -1546,7 +1596,7 @@ def process_job(
     if compel is not None:
         pos = job.pop("prompt") if "prompt" in job else ""
         neg = job.pop("negative") if "negative" in job else ""
-        if is_xl(pipe):
+        if hasattr(pipe, "tokenizer_2"):
             ncond, npool = compel.build_conditioning_tensor(neg)
             pcond, ppool = compel.build_conditioning_tensor(pos)
             job = job | {"pooled_prompt_embeds": ppool, "negative_pooled_prompt_embeds": npool}
@@ -1579,6 +1629,7 @@ def process_job(
         ("guidance", ["guidance_scale", "prior_guidance_scale"]),
         ("decoder_guidance", ["decoder_guidance_scale"]),
         ("rescale", ["guidance_rescale"]),
+        ("pag", ["pag_scale"]),
     ]:
         if f in job:
             for to in t:
