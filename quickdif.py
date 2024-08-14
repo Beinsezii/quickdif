@@ -1184,7 +1184,7 @@ def set_attn(pipe: DiffusionPipeline, attention: Attention):
             pass
         case Attention.SubQuad:
             if subquad_processor is not None:
-                processor = subquad_processor(query_chunk_size=2**12, kv_chunk_size=2**15)
+                processor = subquad_processor()
             else:
                 print('\nAttention Processor "subquad" not available.\n')
         case Attention.RocmFlash:
