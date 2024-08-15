@@ -720,7 +720,7 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         "output",
         Path,
         short="-o",
-        value=Path("/tmp/quickdif/" if Path("/tmp/").exists() else "./output/"),
+        value=Path("./quickdif_output/"),
         help="Output directory for images",
     )
     dtype = QDParam(
