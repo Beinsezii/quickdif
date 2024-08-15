@@ -7,6 +7,7 @@ import random
 import re
 import signal
 import tomllib
+from collections import OrderedDict
 from copy import copy
 from inspect import getmembers, signature
 from io import BytesIO, UnsupportedOperation
@@ -973,6 +974,7 @@ if amd_patch:
 from compel import Compel, ReturnedEmbeddingsType  # noqa: E402
 from transformers import CLIPTokenizer  # noqa: E402
 
+import diffusers  # noqa: E402
 from diffusers import (  # noqa: E402
     AutoencoderKL,
     AutoPipelineForImage2Image,
@@ -984,26 +986,33 @@ from diffusers import (  # noqa: E402
     EulerAncestralDiscreteScheduler,
     EulerDiscreteScheduler,
     FlowMatchEulerDiscreteScheduler,
-    HunyuanDiTPipeline,
     HunyuanDiTPAGPipeline,
-    PixArtAlphaPipeline,
-    KolorsPipeline,
-    KolorsPAGPipeline,
+    HunyuanDiTPipeline,
     KolorsImg2ImgPipeline,
-    PixArtSigmaPipeline,
+    KolorsPAGPipeline,
+    KolorsPipeline,
+    LuminaText2ImgPipeline,
+    PixArtAlphaPipeline,
     PixArtSigmaPAGPipeline,
+    PixArtSigmaPipeline,
     SchedulerMixin,
     StableDiffusion3Img2ImgPipeline,
     StableDiffusion3Pipeline,
     StableDiffusionImg2ImgPipeline,
-    StableDiffusionPipeline,
     StableDiffusionPAGPipeline,
+    StableDiffusionPipeline,
     StableDiffusionXLImg2ImgPipeline,
-    StableDiffusionXLPipeline,
     StableDiffusionXLPAGPipeline,
+    StableDiffusionXLPipeline,
     UniPCMultistepScheduler,
 )
 from diffusers.models.attention_processor import AttnProcessor2_0  # noqa: E402
+
+# Patch pipes in while PRs await merge
+diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING = OrderedDict(
+    [(k, v) for k, v in diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING.items()] + [("lumina", LuminaText2ImgPipeline)]
+)
+diffusers.pipelines.auto_pipeline.SUPPORTED_TASKS_MAPPINGS[0] = diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING
 
 try:
     from attn_custom import SubQuadraticCrossAttnProcessor as subquad_processor
