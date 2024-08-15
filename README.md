@@ -8,6 +8,7 @@ Quick and easy CLI inference that just works™ for a variety of Diffusers model
     + Hunyuan
     + Kandinsky
     + Kolors
+    + Lumina T2X
     + Pixart (Alpha/Sigma)
     + Stable Cascade
     + Stable Diffusion (1.5/2.1)
