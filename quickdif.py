@@ -1159,6 +1159,7 @@ def is_xl_vae(pipe: DiffusionPipeline) -> bool:
                 KolorsImg2ImgPipeline,
                 KolorsPAGPipeline,
                 KolorsPipeline,
+                LuminaText2ImgPipeline,
                 PixArtSigmaPAGPipeline,
                 PixArtSigmaPipeline,
                 StableDiffusionXLImg2ImgPipeline,
