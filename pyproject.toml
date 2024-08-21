@@ -14,10 +14,15 @@ dependencies = [
     "peft",
     "transformers",
     # Dependencies I don't explicitly use but aren't automatically pulled...
-    "omegaconf", # Compel or pixart I forgot
-    "protobuf", # T5 SD3
-    "sentencepiece", # Also compel or pixart I think
-    "setuptools", # Why, diffusers? Why do you do this?
+    #
+    # Compel or pixart I forgot
+    "omegaconf",
+    # T5 SD3
+    "protobuf",
+    # Also compel or pixart I think
+    "sentencepiece",
+    # Why, diffusers? Why do you do this?
+    "setuptools",
 ]
 
 [build-system]
@@ -29,3 +34,8 @@ py-modules = ["quickdif"]
 
 [tool.ruff]
 line-length = 150
+
+[tool.uv]
+dev-dependencies = [
+    "pytest",
+]
