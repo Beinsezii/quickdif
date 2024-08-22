@@ -8,6 +8,7 @@ import re
 import signal
 import tomllib
 from collections import OrderedDict
+from contextlib import nullcontext
 from copy import copy
 from inspect import getmembers, signature
 from io import BytesIO, UnsupportedOperation
@@ -303,6 +304,29 @@ class Attention(enum.StrEnum):
     Sdp = enum.auto()
     SubQuad = enum.auto()
     RocmFlash = enum.auto()
+
+
+@enum.unique
+class SDPB(enum.StrEnum):
+    Math = enum.auto()
+    Flash = enum.auto()
+    Efficient = enum.auto()
+    CuDNN = enum.auto()
+
+    # -> torch.nn.attention.SDPBackend
+    @property
+    def torch_sdp_backend(self):
+        match self:
+            case SDPB.Math:
+                return SDPBackend.MATH
+            case SDPB.Flash:
+                return SDPBackend.FLASH_ATTENTION
+            case SDPB.Efficient:
+                return SDPBackend.EFFICIENT_ATTENTION
+            case SDPB.CuDNN:
+                return SDPBackend.CUDNN_ATTENTION
+            case _:
+                raise ValueError("Unreachable")
 
 
 @enum.unique
@@ -738,6 +762,7 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         help="Set amount of CPU offload. In most UIs, 'model' is equivalent to --med-vram while 'sequential' is equivalent to --low-vram",
     )
     attention = QDParam("attention", Attention, value=Attention.Default, help="Select attention processor to use")
+    sdpb = QDParam("sdpb", SDPB, multi=True, help="Override the SDP attention backend(s) to use.")
     compile = QDParam("compile", bool, help="Compile network with torch.compile()")
     tile = QDParam("tile", bool, help="Tile VAE. Slicing is already used by default so only set tile if creating very large images")
     xl_vae = QDParam("xl_vae", bool, help="Override the SDXL VAE. Useful for models that use the broken 1.0 vae")
@@ -931,7 +956,7 @@ if __name__ == "__main__":
 #
 # Load Torch and libs that depend on it after the CLI cause it's laggy.
 import torch  # noqa: E402
-
+from torch.nn.attention import SDPBackend  # noqa: E402
 
 amd_hijack = False
 if amd_patch:
@@ -972,10 +997,8 @@ if amd_patch:
     else:
         print(f"# # #\nCould not detect AMD GPU from:\n{torch.cuda.get_device_name()}\n# # #")
 
-from compel import Compel, ReturnedEmbeddingsType  # noqa: E402
-from transformers import CLIPTokenizer  # noqa: E402
-
 import diffusers  # noqa: E402
+from compel import Compel, ReturnedEmbeddingsType  # noqa: E402
 from diffusers import (  # noqa: E402
     AutoencoderKL,
     AutoPipelineForImage2Image,
@@ -1008,6 +1031,7 @@ from diffusers import (  # noqa: E402
     UniPCMultistepScheduler,
 )
 from diffusers.models.attention_processor import AttnProcessor2_0  # noqa: E402
+from transformers import CLIPTokenizer  # noqa: E402
 
 # Patch pipes in while PRs await merge
 diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING = OrderedDict(
@@ -1392,7 +1416,7 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
     for param in parameters.params():
         if param.multi:
             match param.name:
-                case "seed" | "lora" | "model":
+                case "seed" | "lora" | "model" | "sdpb":
                     pass
                 case "power" | "pixelate" | "posterize":
                     if param.value:
@@ -1739,8 +1763,13 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
     print(f"\nGenerating {len(jobs)} batches of {parameters.batch_size.value} images for {total_images} total...")
     pbar = tqdm(desc="Images", total=total_images, smoothing=0)
 
+    kernel_ctx = nullcontext()
+    if parameters.sdpb.value:
+        kernel_ctx = torch.nn.attention.sdpa_kernel([k.torch_sdp_backend for k in parameters.sdpb.value])
+
     for job in jobs:
-        results = process_job(parameters, piperef, job, meta.copy(), image)
+        with kernel_ctx:
+            results = process_job(parameters, piperef, job, meta.copy(), image)
         if parameters.grid.value is not None:
             images += results
         pbar.update(parameters.batch_size.value)
