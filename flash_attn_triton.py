@@ -57,7 +57,7 @@ import triton.language as tl
 # )
 
 
-# The stock config doesn't work right for Pixart so here's my own homebrew autotune
+# BSZ: The stock config doesn't work right for Pixart so here's my own homebrew autotune
 @triton.autotune(
     configs=[
         # # brute force
@@ -828,6 +828,7 @@ def _flash_attn_forward(q, k, v, bias=None, causal=False, softmax_scale=None):
     o = torch.empty_like(q)
 
     BLOCK_HEADDIM = max(triton.next_power_of_2(d), 16)
+    # # BSZ: Set from new autotune
     # BLOCK = 128
     # num_warps = 4 if d <= 64 else 8
     grid = lambda META: (triton.cdiv(seqlen_q, META["BLOCK_M"]), batch * nheads)
@@ -865,6 +866,7 @@ def _flash_attn_forward(q, k, v, bias=None, causal=False, softmax_scale=None):
         bias_type,
         causal,
         BLOCK_HEADDIM,
+        # # BSZ: Set from new autotune
         # BLOCK_M=BLOCK,
         # BLOCK_N=BLOCK,
         # num_warps=num_warps,
