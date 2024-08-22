@@ -16,6 +16,15 @@ dependencies = [
     "transformers>=4.44.1",
 ]
 
+[project.optional-dependencies]
+navi-flash = [
+    "flash-attn @ git+https://github.com/ROCm/flash-attention@howiejay/navi_support",
+]
+# `uv` doesn't like conflicting sources...
+# triton-flash = [
+#     "flash-attn @ git+https://github.com/ROCm/flash-attention@main_perf",
+# ]
+
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
@@ -28,5 +37,5 @@ line-length = 150
 
 [tool.uv]
 dev-dependencies = [
-    "pytest",
+    "pytest>=8.3.2",
 ]
