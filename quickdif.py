@@ -1288,8 +1288,8 @@ def apply_loras(loras: list[str], pipe: DiffusionPipeline) -> str | None:
         )
 
     if adapters:
-        pipe.set_adapters(list(map(lambda a: a["name"], adapters)), list(map(lambda a: a["scale"], adapters)))
-        pipe.fuse_lora(list(map(lambda a: a["name"], adapters)))
+        pipe.set_adapters(adapter_names=list(map(lambda a: a["name"], adapters)), adapter_weights=list(map(lambda a: a["scale"], adapters)))
+        pipe.fuse_lora(adapter_names=list(map(lambda a: a["name"], adapters)))
         # re-construct args without nulled loras
         return "\x1f".join(map((lambda a: a["path"] if a["scale"] == 1.0 else f'{a["path"]}:::{a["scale"]}'), adapters))
     else:
