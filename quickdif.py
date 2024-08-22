@@ -15,7 +15,7 @@ from io import BytesIO, UnsupportedOperation
 from math import copysign
 from pathlib import Path
 from sys import exit
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 import numpy.linalg as npl
@@ -299,11 +299,10 @@ class NoiseType(enum.StrEnum):
 
 
 @enum.unique
-class Attention(enum.StrEnum):
-    Default = enum.auto()
-    Sdp = enum.auto()
-    SubQuad = enum.auto()
-    RocmFlash = enum.auto()
+class AttentionPatch(enum.StrEnum):
+    NONE = enum.auto()
+    Flash = enum.auto()
+    Triton = enum.auto()
 
 
 @enum.unique
@@ -761,12 +760,16 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         value=Offload.NONE,
         help="Set amount of CPU offload. In most UIs, 'model' is equivalent to --med-vram while 'sequential' is equivalent to --low-vram",
     )
-    attention = QDParam("attention", Attention, value=Attention.Default, help="Select attention processor to use")
-    sdpb = QDParam("sdpb", SDPB, multi=True, help="Override the SDP attention backend(s) to use.")
+    attn_patch = QDParam(
+        "attn-patch",
+        AttentionPatch,
+        value=AttentionPatch.NONE,
+        help="Patch the SDPA function with a custom external attention processor. Not compatible with --compile.\nAMD Navi 3 users should install `git+https://github.com/ROCm/flash-attention@howiejay/navi_support` and use the `flash` patch for maximum speed",
+    )
+    sdpb = QDParam("sdpb", SDPB, multi=True, help="Override the SDP attention backend(s) to use")
     compile = QDParam("compile", bool, help="Compile network with torch.compile()")
     tile = QDParam("tile", bool, help="Tile VAE. Slicing is already used by default so only set tile if creating very large images")
     xl_vae = QDParam("xl_vae", bool, help="Override the SDXL VAE. Useful for models that use the broken 1.0 vae")
-    amd_patch = QDParam("amd_patch", bool, value=True, help="Monkey patch the torch SDPA function with Flash Attention on AMD cards")
     comment = QDParam("comment", str, meta=True, help="Add a comment to the image.")
 
     def pairs(self) -> list[tuple[str, QDParam]]:
@@ -943,61 +946,18 @@ def parse_cli(parameters: Parameters) -> Image.Image | None:
     # }}}
 
 
-amd_patch = True
 if __name__ == "__main__":
     cli_params = Parameters()
     cli_image = parse_cli(cli_params)
     if not cli_params.model.value:
         print("No model was provided! Exiting...")
         exit()
-    amd_patch = cli_params.amd_patch.value
 
 # TORCH PRELUDE {{{
 #
 # Load Torch and libs that depend on it after the CLI cause it's laggy.
-import torch  # noqa: E402
-from torch.nn.attention import SDPBackend  # noqa: E402
-
-amd_hijack = False
-if amd_patch:
-    if "AMD" in torch.cuda.get_device_name() or "Radeon" in torch.cuda.get_device_name():
-        try:
-            from flash_attn import flash_attn_func
-
-            sdpa = torch.nn.functional.scaled_dot_product_attention
-
-            def sdpa_hijack(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None):
-                if query.shape[3] <= 128 and attn_mask is None and query.dtype != torch.float32:
-                    result = flash_attn_func(
-                        q=query.transpose(1, 2),
-                        k=key.transpose(1, 2),
-                        v=value.transpose(1, 2),
-                        dropout_p=dropout_p,
-                        causal=is_causal,
-                        softmax_scale=scale,
-                    )
-                    hidden_states = result.transpose(1, 2) if result is not None else None
-                else:
-                    hidden_states = sdpa(
-                        query=query,
-                        key=key,
-                        value=value,
-                        attn_mask=attn_mask,
-                        dropout_p=dropout_p,
-                        is_causal=is_causal,
-                        scale=scale,
-                    )
-                return hidden_states
-
-            torch.nn.functional.scaled_dot_product_attention = sdpa_hijack
-            amd_hijack = True
-            print("# # #\nHijacked SDPA with ROCm Flash Attention\n# # #")
-        except ImportError as e:
-            print(f"# # #\nCould not load Flash Attention for hijack:\n{e}\n# # #")
-    else:
-        print(f"# # #\nCould not detect AMD GPU from:\n{torch.cuda.get_device_name()}\n# # #")
-
 import diffusers  # noqa: E402
+import torch  # noqa: E402
 from compel import Compel, ReturnedEmbeddingsType  # noqa: E402
 from diffusers import (  # noqa: E402
     AutoencoderKL,
@@ -1030,7 +990,8 @@ from diffusers import (  # noqa: E402
     StableDiffusionXLPipeline,
     UniPCMultistepScheduler,
 )
-from diffusers.models.attention_processor import AttnProcessor2_0  # noqa: E402
+from torch import Tensor  # noqa: E402
+from torch.nn.attention import SDPBackend  # noqa: E402
 from transformers import CLIPTokenizer  # noqa: E402
 
 # Patch pipes in while PRs await merge
@@ -1038,16 +999,6 @@ diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING = OrderedDic
     [(k, v) for k, v in diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING.items()] + [("lumina", LuminaText2ImgPipeline)]
 )
 diffusers.pipelines.auto_pipeline.SUPPORTED_TASKS_MAPPINGS[0] = diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING
-
-try:
-    from attn_custom import SubQuadraticCrossAttnProcessor as subquad_processor
-except ImportError:
-    subquad_processor = None
-
-try:
-    from attn_custom import FlashAttnProcessor as rocm_flash_processor
-except ImportError:
-    rocm_flash_processor = None
 # }}}
 
 
@@ -1214,42 +1165,108 @@ def is_sd_vae(pipe: DiffusionPipeline) -> bool:
     )
 
 
-def set_attn(pipe: DiffusionPipeline, attention: Attention):
-    # {{{
-    processor = None
-    match attention:
-        case Attention.Sdp:
-            processor = AttnProcessor2_0()
-        case Attention.Default:
-            pass
-        case Attention.SubQuad:
-            if subquad_processor is not None:
-                processor = subquad_processor()
-            else:
-                print('\nAttention Processor "subquad" not available.\n')
-        case Attention.RocmFlash:
-            if amd_hijack:
-                print('\nIgnoring attention procesor "rocm_flash" as SDPA was patched.\n')
-            elif rocm_flash_processor is not None:
-                processor = rocm_flash_processor()
-            else:
-                print('\nAttention Processor "rocm_flash" not available.\n')
+def _patch_sdpa(
+    patch_func: Callable[[Tensor, Tensor, Tensor, Tensor | None, float, bool, float | None], Tensor],
+):
+    """(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None)"""
 
-    for item in [pipe] + [
-        getattr(pipe, id, None)
-        for id in [
-            "unet",
-            "vae",
-            "transformer",
-            "prior",
-            "prior_prior",
-            "decoder",
-            "vqgan",
-        ]
-    ]:
-        if item is not None:
-            if hasattr(item, "set_attn_processor") and processor is not None:
-                item.set_attn_processor(processor)
+    torch_sdpa = torch.nn.functional.scaled_dot_product_attention
+
+    def sdpa_hijack_flash(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None):
+        try:
+            return patch_func(query, key, value, attn_mask, dropout_p, is_causal, scale)
+        except Exception:
+            hidden_states = torch_sdpa(
+                query=query,
+                key=key,
+                value=value,
+                attn_mask=attn_mask,
+                dropout_p=dropout_p,
+                is_causal=is_causal,
+                scale=scale,
+            )
+        return hidden_states
+
+    torch.nn.functional.scaled_dot_product_attention = sdpa_hijack_flash
+
+
+def patch_attn(attention: AttentionPatch):
+    # {{{
+    match attention:
+        case AttentionPatch.NONE:
+            pass
+
+        case AttentionPatch.Flash:
+            try:
+                from flash_attn import flash_attn_func
+
+                def sdpa_hijack_flash(q, k, v, m, p, c, s):
+                    assert m is None
+                    result = flash_attn_func(
+                        q=q.transpose(1, 2),
+                        k=k.transpose(1, 2),
+                        v=v.transpose(1, 2),
+                        dropout_p=p,
+                        softmax_scale=s if s else q.shape[-1] ** (-0.5),
+                        causal=c,
+                    )
+                    assert isinstance(result, Tensor)
+                    return result.transpose(1, 2)
+
+                _patch_sdpa(sdpa_hijack_flash)
+            except ImportError as e:
+                print(f"# # #\nCould not load Flash Attention for hijack:\n{e}\n# # #")
+
+        # # Wheel version segfaults?
+        # case AttentionPatch.Triton:
+        #     try:
+        #         from triton.ops.flash_attention import attention as flash_attention_triton
+        #
+        #         def sdpa_hijack_triton(q, k, v, m, p, c, s):
+        #             assert m is None
+        #             assert p == 0.0
+        #             # (q, k, v, causal, sm_scale, sequence_parallel=False)
+        #             result = flash_attention_triton(
+        #                 q.transpose(1, 2),
+        #                 k.transpose(1, 2),
+        #                 v.transpose(1, 2),
+        #                 c,
+        #                 s if s else q.shape[-1] ** (-0.5),
+        #             )
+        #             assert isinstance(result, Tensor)
+        #             return result.transpose(1, 2)
+        #
+        #         _patch_sdpa(sdpa_hijack_triton)
+        #     except ImportError as e:
+        #         print(f"# # #\nCould not load Triton for hijack:\n{e}\n# # #")
+
+        case AttentionPatch.Triton:
+            try:
+                from flash_attn_triton import flash_attn_func as flash_attention_func_triton
+
+                def sdpa_hijack_triton(q, k, v, m, p, c, s):
+                    assert q.shape[-1] <= 128
+                    # assert m is None
+                    assert p == 0.0
+                    # (q, k, v, bias=None, causal=False, softmax_scale=None)
+                    result = flash_attention_func_triton(
+                        q.transpose(1, 2),
+                        k.transpose(1, 2),
+                        v.transpose(1, 2),
+                        # None,
+                        m,
+                        c,
+                        s if s else q.shape[-1] ** (-0.5),
+                    )
+                    assert isinstance(result, Tensor)
+                    return result.transpose(1, 2)
+
+                _patch_sdpa(sdpa_hijack_triton)
+            except ImportError as e:
+                print(f"# # #\nCould not load Triton for hijack:\n{e}\n# # #")
+
+        case _:
+            raise ValueError("Unreachable!")
     # }}}
 
 
@@ -1483,8 +1500,6 @@ def load_model(model: str, img2img: bool, parameters: Parameters, meta: dict[str
             pipe.prior_pipe.prior = torch.compile(pipe.prior_pipe.prior)
         if hasattr(pipe, "decoder_pipe"):
             pipe.decoder_pipe.decoder = torch.compile(pipe.decoder_pipe.decoder)
-    else:
-        set_attn(pipe, parameters.attention.value)
 
     return pipe
     # }}}
@@ -1763,16 +1778,19 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
     print(f"\nGenerating {len(jobs)} batches of {parameters.batch_size.value} images for {total_images} total...")
     pbar = tqdm(desc="Images", total=total_images, smoothing=0)
 
+    if not parameters.compile.value:
+        patch_attn(parameters.attn_patch.value)
+
     kernel_ctx = nullcontext()
     if parameters.sdpb.value:
         kernel_ctx = torch.nn.attention.sdpa_kernel([k.torch_sdp_backend for k in parameters.sdpb.value])
 
-    for job in jobs:
-        with kernel_ctx:
+    with kernel_ctx:
+        for job in jobs:
             results = process_job(parameters, piperef, job, meta.copy(), image)
-        if parameters.grid.value is not None:
-            images += results
-        pbar.update(parameters.batch_size.value)
+            if parameters.grid.value is not None:
+                images += results
+            pbar.update(parameters.batch_size.value)
 
     if parameters.grid.value is not None:
         filenum = 0
