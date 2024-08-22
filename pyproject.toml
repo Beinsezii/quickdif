@@ -6,14 +6,14 @@ license = {file = "LICENSE"}
 authors = [{name = "Beinsezii"}]
 requires-python = ">= 3.11"
 dependencies = [
-    "accelerate",
-    "compel",
-    "diffusers>=0.30",
-    "peft",
-    "protobuf",
-    "sentencepiece",
-    "torch>=2.3",
-    "transformers",
+    "accelerate>=0.33.0",
+    "compel>=2.0.3",
+    "diffusers>=0.30.0",
+    "peft>=0.12.0",
+    "protobuf>=5.27.3",
+    "sentencepiece>=0.2.0",
+    "torch>=2.4.0",
+    "transformers>=4.44.1",
 ]
 
 [build-system]
