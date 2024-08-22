@@ -932,6 +932,7 @@ if __name__ == "__main__":
 # Load Torch and libs that depend on it after the CLI cause it's laggy.
 import torch  # noqa: E402
 
+
 amd_hijack = False
 if amd_patch:
     if "AMD" in torch.cuda.get_device_name() or "Radeon" in torch.cuda.get_device_name():
@@ -1068,6 +1069,11 @@ class SmartSigint:
 
 
 # BOTTOM LEVEL
+
+
+def flush():
+    gc.collect()
+    torch.cuda.empty_cache()
 
 
 def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool, pag: bool) -> DiffusionPipeline:
@@ -1564,8 +1570,7 @@ def process_job(
     # PIPE
     if piperef.name != model:
         del piperef.pipe  # Remove only reference
-        gc.collect()  # force `del` to trigger immediately
-        torch.cuda.empty_cache()  # make absolutely sure nothing is allocated
+        flush()
         piperef.pipe = load_model(model, input_image is not None, parameters, meta)
         piperef.name = model
     pipe = piperef.pipe
@@ -1615,6 +1620,14 @@ def process_job(
             ncond = compel.build_conditioning_tensor(neg)
         pcond, ncond = compel.pad_conditioning_tensors_to_same_length([pcond, ncond])
         job |= {"prompt_embeds": pcond, "negative_prompt_embeds": ncond}
+    # Flux 24GB workaround because diffusers doesn't bother to clear between stages
+    elif type(pipe).__name__.startswith("Flux") and parameters.offload.value == Offload.Model:
+        pos, ppos, _ = pipe.encode_prompt(job.pop("prompt", ""), None)
+        job.pop("negative", "")  # flux has no negative?
+        pipe.to("cpu")
+        flush()  # basically diffusers should call this between weight migrations but it doesn't
+        job |= {"prompt_embeds": pos, "pooled_prompt_embeds": ppos}
+
     # CONDITIONING }}}
 
     # INFERENCE {{{
