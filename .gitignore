@@ -1,6 +1,10 @@
+*.ckpt
 *.json
 *.latent
 *.png
+*.pt
+*.pth
+*.safetensors
 *.tar*
 *.toml
 *.txt
