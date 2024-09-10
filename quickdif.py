@@ -249,6 +249,10 @@ class DType(enum.StrEnum):
     FP16 = enum.auto()
     BF16 = enum.auto()
     FP32 = enum.auto()
+    I8 = enum.auto()
+    I8D = enum.auto()
+    I4 = enum.auto()
+    I4D = enum.auto()
 
     # -> torch.dtype
     @property
@@ -260,6 +264,8 @@ class DType(enum.StrEnum):
                 return torch.bfloat16
             case DType.FP32:
                 return torch.float32
+            case DType.I8 | DType.I8D | DType.I4 | DType.I4D:
+                return torch.bfloat16
 
 
 @enum.unique
@@ -992,7 +998,14 @@ from diffusers import (  # noqa: E402
 )
 from torch import Tensor  # noqa: E402
 from torch.nn.attention import SDPBackend  # noqa: E402
-from transformers import CLIPTokenizer  # noqa: E402
+from transformers import CLIPTokenizer, T5EncoderModel  # noqa: E402
+from torchao.quantization.quant_api import (  # noqa: E402
+    quantize_,
+    int8_weight_only,
+    int4_weight_only,
+    int8_dynamic_activation_int8_weight,
+    int8_dynamic_activation_int4_weight,
+)
 
 # Patch pipes in while PRs await merge
 diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING = OrderedDict(
@@ -1051,7 +1064,7 @@ def flush():
     torch.cuda.empty_cache()
 
 
-def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool, pag: bool) -> DiffusionPipeline:
+def get_pipe(model: str, offload: Offload, dtype: DType, compile: bool, img2img: bool, pag: bool) -> DiffusionPipeline:
     # {{{
     pipe_args = {
         "add_watermarker": False,
@@ -1111,6 +1124,45 @@ def get_pipe(model: str, offload: Offload, dtype: DType, img2img: bool, pag: boo
 
     pipe.safety_checker = None
     pipe.watermarker = None
+
+    if compile:
+        if hasattr(pipe, "unet"):
+            pipe.unet = torch.compile(pipe.unet)
+        if hasattr(pipe, "transformer"):
+            pipe.transformer = torch.compile(pipe.transformer)
+        if hasattr(pipe, "prior_pipe"):
+            pipe.prior_pipe.prior = torch.compile(pipe.prior_pipe.prior)
+        if hasattr(pipe, "decoder_pipe"):
+            pipe.decoder_pipe.decoder = torch.compile(pipe.decoder_pipe.decoder)
+
+    weight_quant = None
+    match dtype:
+        case DType.I8:
+            weight_quant = int8_weight_only()
+        case DType.I8D:
+            weight_quant = int8_dynamic_activation_int8_weight()
+        case DType.I4:
+            weight_quant = int4_weight_only()
+        case DType.I4D:
+            weight_quant = int8_dynamic_activation_int4_weight()
+
+    if weight_quant is not None:
+        if hasattr(pipe, "unet"):
+            quantize_(pipe.unet, weight_quant)
+        if hasattr(pipe, "transformer"):
+            quantize_(pipe.transformer, weight_quant)
+        if hasattr(pipe, "prior_pipe"):
+            quantize_(pipe.prior_pipe.prior, weight_quant)
+        if hasattr(pipe, "decoder_pipe"):
+            quantize_(pipe.decoder_pipe.decoder, weight_quant)
+        # It's not worth quantizing CLIP
+        if isinstance(getattr(pipe, "text_encoder", None), T5EncoderModel):
+            quantize_(pipe.text_encoder, weight_quant)
+        if isinstance(getattr(pipe, "text_encoder_2", None), T5EncoderModel):
+            quantize_(pipe.text_encoder_2, weight_quant)
+        if isinstance(getattr(pipe, "text_encoder_3", None), T5EncoderModel):
+            quantize_(pipe.text_encoder_3, weight_quant)
+
     match offload:
         case Offload.NONE:
             if hasattr(pipe, "prior_pipe"):
@@ -1478,7 +1530,7 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
 def load_model(model: str, img2img: bool, parameters: Parameters, meta: dict[str, str]) -> DiffusionPipeline:
     # {{{
     with SmartSigint(num=2, job_name="model load"):
-        pipe = get_pipe(model, parameters.offload.value, parameters.dtype.value, img2img, pag=(any(parameters.pag.value)))
+        pipe = get_pipe(model, parameters.offload.value, parameters.dtype.value, parameters.compile.value, img2img, pag=(any(parameters.pag.value)))
 
     if not get_latent_params(pipe):
         print(f"\nModel {model} not able to use pre-noised latents.\nNoise options will not be respected.\n")
@@ -1490,16 +1542,6 @@ def load_model(model: str, img2img: bool, parameters: Parameters, meta: dict[str
 
     if hasattr(pipe, "vae"):
         set_vae(pipe, parameters.tile.value, parameters.xl_vae.value)
-
-    if parameters.compile.value:
-        if hasattr(pipe, "unet"):
-            pipe.unet = torch.compile(pipe.unet)
-        if hasattr(pipe, "transformer"):
-            pipe.transformer = torch.compile(pipe.transformer)
-        if hasattr(pipe, "prior_pipe"):
-            pipe.prior_pipe.prior = torch.compile(pipe.prior_pipe.prior)
-        if hasattr(pipe, "decoder_pipe"):
-            pipe.decoder_pipe.decoder = torch.compile(pipe.decoder_pipe.decoder)
 
     return pipe
     # }}}
@@ -1575,7 +1617,7 @@ def make_noise(
 # TOP LEVEL
 
 
-@torch.inference_mode()
+@torch.no_grad()  # torchao breaks with inference_mode
 def process_job(
     parameters: Parameters,
     piperef: PipeRef,
@@ -1767,7 +1809,6 @@ def process_job(
     # }}}
 
 
-@torch.inference_mode()
 def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None):
     # {{{
     images = []
