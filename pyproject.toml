@@ -13,7 +13,7 @@ dependencies = [
     "protobuf>=5.27.3",
     "sentencepiece>=0.2.0",
     "torch>=2.4.0",
-    "torchao>=0.4",
+    "torchao>=0.4.0",
     "transformers>=4.44.1",
 ]
 
