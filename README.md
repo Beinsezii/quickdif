@@ -20,7 +20,7 @@ Quick and easy CLI inference that just works™ for a variety of Diffusers model
   * Multi-lora fusion using `peft` for minimal performance loss
   * Features all of the most common generation parameters
   * Includes many advanced generation parameters
-    * 8-bit and 4-bit quantization
+    * 1, 2, 3, 4, 5, 6, 7, 8-bit quantization
     * PAG / Perturbed-Attention Guidance
     * Many latent augmentation params
     * Many post processing effects

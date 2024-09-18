@@ -241,6 +241,13 @@ class DType(enum.StrEnum):
     I8D = enum.auto()
     I4 = enum.auto()
     I4D = enum.auto()
+    U7 = enum.auto()
+    U6 = enum.auto()
+    U5 = enum.auto()
+    U4 = enum.auto()
+    U3 = enum.auto()
+    U2 = enum.auto()
+    U1 = enum.auto()
 
     # -> torch.dtype
     @property
@@ -252,7 +259,21 @@ class DType(enum.StrEnum):
                 return torch.bfloat16
             case DType.FP32:
                 return torch.float32
-            case DType.F8 | DType.F8D | DType.I8 | DType.I8D | DType.I4 | DType.I4D:
+            case (
+                DType.F8
+                | DType.F8D
+                | DType.I8
+                | DType.I8D
+                | DType.I4
+                | DType.I4D
+                | DType.U7
+                | DType.U6
+                | DType.U5
+                | DType.U4
+                | DType.U3
+                | DType.U2
+                | DType.U1
+            ):
                 return torch.bfloat16
             case _:
                 raise ValueError("Unreachable")
@@ -997,6 +1018,7 @@ from torchao.quantization.quant_api import (  # noqa: E402
     int8_dynamic_activation_int8_weight,
     int8_weight_only,
     quantize_,
+    uintx_weight_only,
 )
 from transformers import CLIPTokenizer, T5EncoderModel  # noqa: E402
 
@@ -1142,6 +1164,23 @@ def get_pipe(model: str, offload: Offload, dtype: DType, compile: bool, img2img:
             weight_quant = int4_weight_only()
         case DType.I4D:
             weight_quant = int8_dynamic_activation_int4_weight()
+        # Just defaults...
+        # GS=128 doesn't work? <64 GS is better spent on more bits
+        # HQQ adds too much mem, better spent on more bits
+        case DType.U7:
+            weight_quant = uintx_weight_only(torch.uint7)
+        case DType.U6:
+            weight_quant = uintx_weight_only(torch.uint6)
+        case DType.U5:
+            weight_quant = uintx_weight_only(torch.uint5)
+        case DType.U4:
+            weight_quant = uintx_weight_only(torch.uint4)
+        case DType.U3:
+            weight_quant = uintx_weight_only(torch.uint3)
+        case DType.U2:
+            weight_quant = uintx_weight_only(torch.uint2)
+        case DType.U1:
+            weight_quant = uintx_weight_only(torch.uint1)
 
     if weight_quant is not None:
         if offload == Offload.NONE:
