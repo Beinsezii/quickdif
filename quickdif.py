@@ -252,7 +252,7 @@ class DType(enum.StrEnum):
                 return torch.bfloat16
             case DType.FP32:
                 return torch.float32
-            case DType.F8 | DType.F8D |DType.I8 | DType.I8D | DType.I4 | DType.I4D:
+            case DType.F8 | DType.F8D | DType.I8 | DType.I8D | DType.I4 | DType.I4D:
                 return torch.bfloat16
             case _:
                 raise ValueError("Unreachable")
@@ -1144,21 +1144,25 @@ def get_pipe(model: str, offload: Offload, dtype: DType, compile: bool, img2img:
             weight_quant = int8_dynamic_activation_int4_weight()
 
     if weight_quant is not None:
+        if offload == Offload.NONE:
+            quantize_device = "cuda"
+        else:
+            quantize_device = None
         if hasattr(pipe, "unet"):
-            quantize_(pipe.unet, weight_quant)
+            quantize_(pipe.unet, weight_quant, device=quantize_device)
         if hasattr(pipe, "transformer"):
-            quantize_(pipe.transformer, weight_quant)
+            quantize_(pipe.transformer, weight_quant, device=quantize_device)
         if hasattr(pipe, "prior_pipe"):
-            quantize_(pipe.prior_pipe.prior, weight_quant)
+            quantize_(pipe.prior_pipe.prior, weight_quant, device=quantize_device)
         if hasattr(pipe, "decoder_pipe"):
-            quantize_(pipe.decoder_pipe.decoder, weight_quant)
+            quantize_(pipe.decoder_pipe.decoder, weight_quant, device=quantize_device)
         # It's not worth quantizing CLIP
         if isinstance(getattr(pipe, "text_encoder", None), T5EncoderModel):
-            quantize_(pipe.text_encoder, weight_quant)
+            quantize_(pipe.text_encoder, weight_quant, device=quantize_device)
         if isinstance(getattr(pipe, "text_encoder_2", None), T5EncoderModel):
-            quantize_(pipe.text_encoder_2, weight_quant)
+            quantize_(pipe.text_encoder_2, weight_quant, device=quantize_device)
         if isinstance(getattr(pipe, "text_encoder_3", None), T5EncoderModel):
-            quantize_(pipe.text_encoder_3, weight_quant)
+            quantize_(pipe.text_encoder_3, weight_quant, device=quantize_device)
 
     match offload:
         case Offload.NONE:
