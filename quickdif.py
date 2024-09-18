@@ -1153,9 +1153,10 @@ def get_pipe(model: str, offload: Offload, dtype: DType, compile: bool, img2img:
     weight_quant = None
     match dtype:
         case DType.F8:
-            weight_quant = float8_weight_only()
+            # unsigned zero appears much higher quality, closer to i8
+            weight_quant = float8_weight_only(torch.float8_e4m3fnuz)
         case DType.F8D:
-            weight_quant = float8_dynamic_activation_float8_weight()
+            weight_quant = float8_dynamic_activation_float8_weight(torch.float8_e4m3fnuz)
         case DType.I8:
             weight_quant = int8_weight_only()
         case DType.I8D:
