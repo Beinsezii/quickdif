@@ -235,6 +235,8 @@ class DType(enum.StrEnum):
     FP16 = enum.auto()
     BF16 = enum.auto()
     FP32 = enum.auto()
+    F8 = enum.auto()
+    F8D = enum.auto()
     I8 = enum.auto()
     I8D = enum.auto()
     I4 = enum.auto()
@@ -250,8 +252,10 @@ class DType(enum.StrEnum):
                 return torch.bfloat16
             case DType.FP32:
                 return torch.float32
-            case DType.I8 | DType.I8D | DType.I4 | DType.I4D:
+            case DType.F8 | DType.F8D |DType.I8 | DType.I8D | DType.I4 | DType.I4D:
                 return torch.bfloat16
+            case _:
+                raise ValueError("Unreachable")
 
 
 @enum.unique
@@ -986,6 +990,8 @@ from diffusers import (  # noqa: E402
 from torch import Tensor  # noqa: E402
 from torch.nn.attention import SDPBackend  # noqa: E402
 from torchao.quantization.quant_api import (  # noqa: E402
+    float8_dynamic_activation_float8_weight,
+    float8_weight_only,
     int4_weight_only,
     int8_dynamic_activation_int4_weight,
     int8_dynamic_activation_int8_weight,
@@ -1124,6 +1130,10 @@ def get_pipe(model: str, offload: Offload, dtype: DType, compile: bool, img2img:
 
     weight_quant = None
     match dtype:
+        case DType.F8:
+            weight_quant = float8_weight_only()
+        case DType.F8D:
+            weight_quant = float8_dynamic_activation_float8_weight()
         case DType.I8:
             weight_quant = int8_weight_only()
         case DType.I8D:
