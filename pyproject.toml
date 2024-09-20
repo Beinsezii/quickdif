@@ -6,7 +6,7 @@ license = {file = "LICENSE"}
 authors = [{name = "Beinsezii"}]
 requires-python = ">= 3.11"
 dependencies = [
-    "accelerate>=0.33.0",
+    "accelerate>=0.34.0",
     "compel>=2.0.3",
     "diffusers>=0.30.0",
     "peft>=0.12.0",
