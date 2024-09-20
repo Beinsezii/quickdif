@@ -786,7 +786,6 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
     sdpb = QDParam("sdpb", SDPB, multi=True, help="Override the SDP attention backend(s) to use")
     compile = QDParam("compile", bool, help="Compile network with torch.compile()")
     tile = QDParam("tile", bool, help="Tile VAE. Slicing is already used by default so only set tile if creating very large images")
-    xl_vae = QDParam("xl_vae", bool, help="Override the SDXL VAE. Useful for models that use the broken 1.0 vae")
     comment = QDParam("comment", str, meta=True, help="Add a comment to the image.")
 
     def pairs(self) -> list[tuple[str, QDParam]]:
@@ -977,7 +976,6 @@ import diffusers  # noqa: E402
 import torch  # noqa: E402
 from compel import Compel, ReturnedEmbeddingsType  # noqa: E402
 from diffusers import (  # noqa: E402
-    AutoencoderKL,
     AutoPipelineForImage2Image,
     AutoPipelineForText2Image,
     DDIMScheduler,
@@ -1077,149 +1075,6 @@ class SmartSigint:
 def flush():
     gc.collect()
     torch.cuda.empty_cache()
-
-
-def get_pipe(model: str, offload: Offload, dtype: DType, compile: bool, img2img: bool, pag: bool) -> DiffusionPipeline:
-    # {{{
-    pipe_args = {
-        "add_watermarker": False,
-        "safety_checker": None,
-        "torch_dtype": dtype.torch_dtype,
-        "use_safetensors": True,
-        "watermarker": None,
-    }
-
-    if "Kolors" in model:
-        pipe_args["variant"] = "fp16"
-    elif "stable-cascade" in model and pipe_args["torch_dtype"] == torch.float16:
-        pipe_args["torch_dtype"] = torch.bfloat16
-
-    model, revision = get_suffix(model)
-    if revision is not None:
-        pipe_args["revision"] = revision
-
-    if model.casefold().endswith(".safetensors") or model.casefold().endswith(".sft"):
-        if img2img:
-            sd_pipe = StableDiffusionImg2ImgPipeline
-            xl_pipe = StableDiffusionXLImg2ImgPipeline
-            s3_pipe = StableDiffusion3Img2ImgPipeline
-        else:
-            sd_pipe = StableDiffusionPipeline
-            xl_pipe = StableDiffusionXLPipeline
-            s3_pipe = StableDiffusion3Pipeline
-
-        try:
-            pipe = xl_pipe.from_single_file(model, **pipe_args)
-            assert pipe.text_encoder_2 is not None
-        except:  # noqa: E722
-            try:
-                pipe = sd_pipe.from_single_file(model, **pipe_args)
-            except:  # noqa: E722
-                try:
-                    pipe = s3_pipe.from_single_file(model, **pipe_args)
-                except Exception as e:
-                    if str(e).startswith("Failed to load T5EncoderModel."):  # better way?
-                        pipe = s3_pipe.from_single_file(model, text_encoder_3=None, tokenizer_3=None, **pipe_args)
-                    else:
-                        raise Exception(f'Could not load "{model}" as `{sd_pipe.__name__}`, `{xl_pipe.__name__}`, or `{s3_pipe.__name__}`')
-    else:
-        if img2img:
-            pipe = AutoPipelineForImage2Image.from_pretrained(model, **pipe_args)
-        else:
-            pipe = AutoPipelineForText2Image.from_pretrained(model, **pipe_args)
-
-    if pag:
-        try:
-            if img2img:
-                pipe = AutoPipelineForImage2Image.from_pipe(pipe, enable_pag=True)
-            else:
-                pipe = AutoPipelineForText2Image.from_pipe(pipe, enable_pag=True)
-        except Exception as e:
-            print(f"Could not find a PAG pipeline variant for `{type(pipe).__name__} and `pag` parameter will be ignored:\n  {e}")
-
-    pipe.safety_checker = None
-    pipe.watermarker = None
-
-    if compile:
-        if hasattr(pipe, "unet"):
-            pipe.unet = torch.compile(pipe.unet)
-        if hasattr(pipe, "transformer"):
-            pipe.transformer = torch.compile(pipe.transformer)
-        if hasattr(pipe, "prior_pipe"):
-            pipe.prior_pipe.prior = torch.compile(pipe.prior_pipe.prior)
-        if hasattr(pipe, "decoder_pipe"):
-            pipe.decoder_pipe.decoder = torch.compile(pipe.decoder_pipe.decoder)
-
-    weight_quant = None
-    match dtype:
-        case DType.F8:
-            # unsigned zero appears much higher quality, closer to i8
-            weight_quant = float8_weight_only(torch.float8_e4m3fnuz)
-        case DType.F8D:
-            weight_quant = float8_dynamic_activation_float8_weight(torch.float8_e4m3fnuz)
-        case DType.I8:
-            weight_quant = int8_weight_only()
-        case DType.I8D:
-            weight_quant = int8_dynamic_activation_int8_weight()
-        case DType.I4:
-            weight_quant = int4_weight_only()
-        case DType.I4D:
-            weight_quant = int8_dynamic_activation_int4_weight()
-        # Just defaults...
-        # GS=128 doesn't work? <64 GS is better spent on more bits
-        # HQQ adds too much mem, better spent on more bits
-        case DType.U7:
-            weight_quant = uintx_weight_only(torch.uint7)
-        case DType.U6:
-            weight_quant = uintx_weight_only(torch.uint6)
-        case DType.U5:
-            weight_quant = uintx_weight_only(torch.uint5)
-        case DType.U4:
-            weight_quant = uintx_weight_only(torch.uint4)
-        case DType.U3:
-            weight_quant = uintx_weight_only(torch.uint3)
-        case DType.U2:
-            weight_quant = uintx_weight_only(torch.uint2)
-        case DType.U1:
-            weight_quant = uintx_weight_only(torch.uint1)
-
-    if weight_quant is not None:
-        if offload == Offload.NONE:
-            quantize_device = "cuda"
-        else:
-            quantize_device = None
-        if hasattr(pipe, "unet"):
-            quantize_(pipe.unet, weight_quant, device=quantize_device)
-        if hasattr(pipe, "transformer"):
-            quantize_(pipe.transformer, weight_quant, device=quantize_device)
-        if hasattr(pipe, "prior_pipe"):
-            quantize_(pipe.prior_pipe.prior, weight_quant, device=quantize_device)
-        if hasattr(pipe, "decoder_pipe"):
-            quantize_(pipe.decoder_pipe.decoder, weight_quant, device=quantize_device)
-        # It's not worth quantizing CLIP
-        if isinstance(getattr(pipe, "text_encoder", None), T5EncoderModel):
-            quantize_(pipe.text_encoder, weight_quant, device=quantize_device)
-        if isinstance(getattr(pipe, "text_encoder_2", None), T5EncoderModel):
-            quantize_(pipe.text_encoder_2, weight_quant, device=quantize_device)
-        if isinstance(getattr(pipe, "text_encoder_3", None), T5EncoderModel):
-            quantize_(pipe.text_encoder_3, weight_quant, device=quantize_device)
-
-    match offload:
-        case Offload.NONE:
-            if hasattr(pipe, "prior_pipe"):
-                pipe.prior_pipe = pipe.prior_pipe.to("cuda")
-            if hasattr(pipe, "decoder_pipe"):
-                pipe.decoder_pipe = pipe.decoder_pipe.to("cuda")
-            pipe = pipe.to("cuda")
-        case Offload.Model:
-            pipe.enable_model_cpu_offload()
-        case Offload.Sequential:
-            pipe.enable_sequential_cpu_offload()
-        case _:
-            raise ValueError
-
-    return pipe
-    # }}}
 
 
 def is_xl_vae(pipe: DiffusionPipeline) -> bool:
@@ -1376,7 +1231,7 @@ def patch_attn(attention: AttentionPatch):
     # }}}
 
 
-def apply_loras(loras: list[str], pipe: DiffusionPipeline) -> str | None:
+def apply_loras(loras: list[str], pipe: DiffusionPipeline):
     # {{{
     adapters = []
     for n, lora in enumerate(loras):
@@ -1388,7 +1243,6 @@ def apply_loras(loras: list[str], pipe: DiffusionPipeline) -> str | None:
         adapters.append(
             {
                 "name": name,
-                "path": path,
                 "scale": scale,
             }
         )
@@ -1396,11 +1250,16 @@ def apply_loras(loras: list[str], pipe: DiffusionPipeline) -> str | None:
     if adapters:
         pipe.set_adapters(adapter_names=list(map(lambda a: a["name"], adapters)), adapter_weights=list(map(lambda a: a["scale"], adapters)))
         pipe.fuse_lora(adapter_names=list(map(lambda a: a["name"], adapters)))
-        # re-construct args without nulled loras
-        return "\x1f".join(map((lambda a: a["path"] if a["scale"] == 1.0 else f'{a["path"]}:::{a["scale"]}'), adapters))
-    else:
-        return None
     # }}}
+
+
+def loras_to_str(loras: list[str]) -> str | None:
+    scaled_loras = [
+        path if scale == 1.0 else f"{path}:::{scale}"
+        for path, scale in map(lambda lora: get_suffix(lora, typing=float, default=1.0), loras)
+        if scale != 0.0
+    ]
+    return "\x1f".join(scaled_loras) if scaled_loras else None
 
 
 def get_compel(pipe: DiffusionPipeline) -> Compel | None:
@@ -1431,10 +1290,8 @@ def get_compel(pipe: DiffusionPipeline) -> Compel | None:
     # }}}
 
 
-def set_vae(pipe: DiffusionPipeline, tile: bool, xl_vae: bool):
+def set_vae(pipe: DiffusionPipeline, tile: bool):
     # {{{
-    if is_xl_vae(pipe) and xl_vae:
-        pipe.vae = AutoencoderKL.from_pretrained("stabilityai/sdxl-vae", torch_dtype=pipe.vae.dtype, use_safetensors=True).to(pipe.vae.device)
     if tile:
         pipe.vae.enable_tiling()
     else:
@@ -1581,21 +1438,159 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
     # }}}
 
 
-def load_model(model: str, img2img: bool, parameters: Parameters, meta: dict[str, str]) -> DiffusionPipeline:
+def get_pipe(
+    model: str,
+    dtype: DType,
+    offload: Offload,
+    loras: None | list[str],
+    img2img: bool,
+    compile: bool,
+    tile_vae: bool,
+    pag: bool,
+) -> DiffusionPipeline:
     # {{{
-    with SmartSigint(num=2, job_name="model load"):
-        pipe = get_pipe(model, parameters.offload.value, parameters.dtype.value, parameters.compile.value, img2img, pag=(any(parameters.pag.value)))
+    pipe_args = {
+        "add_watermarker": False,
+        "safety_checker": None,
+        "torch_dtype": dtype.torch_dtype,
+        "use_safetensors": True,
+        "watermarker": None,
+    }
 
-    if not get_latent_params(pipe):
-        print(f"\nModel {model} not able to use pre-noised latents.\nNoise options will not be respected.\n")
+    if "Kolors" in model:
+        pipe_args["variant"] = "fp16"
+    elif ("stable-cascade" in model.casefold() or "flux.1" in model.casefold()) and pipe_args["torch_dtype"] == torch.float16:
+        pipe_args["torch_dtype"] = torch.bfloat16
 
-    if parameters.lora.value:
-        lora_string = apply_loras(parameters.lora.value, pipe)
-        if lora_string:
-            meta["lora"] = lora_string
+    model, revision = get_suffix(model)
+    if revision is not None:
+        pipe_args["revision"] = revision
+
+    if model.casefold().endswith(".safetensors") or model.casefold().endswith(".sft"):
+        if img2img:
+            sd_pipe = StableDiffusionImg2ImgPipeline
+            xl_pipe = StableDiffusionXLImg2ImgPipeline
+            s3_pipe = StableDiffusion3Img2ImgPipeline
+        else:
+            sd_pipe = StableDiffusionPipeline
+            xl_pipe = StableDiffusionXLPipeline
+            s3_pipe = StableDiffusion3Pipeline
+
+        try:
+            pipe = xl_pipe.from_single_file(model, **pipe_args)
+            assert pipe.text_encoder_2 is not None
+        except:  # noqa: E722
+            try:
+                pipe = sd_pipe.from_single_file(model, **pipe_args)
+            except:  # noqa: E722
+                try:
+                    pipe = s3_pipe.from_single_file(model, **pipe_args)
+                except Exception as e:
+                    if str(e).startswith("Failed to load T5EncoderModel."):  # better way?
+                        pipe = s3_pipe.from_single_file(model, text_encoder_3=None, tokenizer_3=None, **pipe_args)
+                    else:
+                        raise Exception(f'Could not load "{model}" as `{sd_pipe.__name__}`, `{xl_pipe.__name__}`, or `{s3_pipe.__name__}`')
+    else:
+        if img2img:
+            pipe = AutoPipelineForImage2Image.from_pretrained(model, **pipe_args)
+        else:
+            pipe = AutoPipelineForText2Image.from_pretrained(model, **pipe_args)
+
+    if pag:
+        try:
+            if img2img:
+                pipe = AutoPipelineForImage2Image.from_pipe(pipe, enable_pag=True)
+            else:
+                pipe = AutoPipelineForText2Image.from_pipe(pipe, enable_pag=True)
+        except Exception as e:
+            print(f"Could not find a PAG pipeline variant for `{type(pipe).__name__} and `pag` parameter will be ignored:\n  {e}")
+
+    pipe.safety_checker = None
+    pipe.watermarker = None
 
     if hasattr(pipe, "vae"):
-        set_vae(pipe, parameters.tile.value, parameters.xl_vae.value)
+        set_vae(pipe, tile_vae)
+
+    if loras is not None:
+        apply_loras(loras, pipe)
+
+    if compile:
+        if hasattr(pipe, "unet"):
+            pipe.unet = torch.compile(pipe.unet)
+        if hasattr(pipe, "transformer"):
+            pipe.transformer = torch.compile(pipe.transformer)
+        if hasattr(pipe, "prior_pipe"):
+            pipe.prior_pipe.prior = torch.compile(pipe.prior_pipe.prior)
+        if hasattr(pipe, "decoder_pipe"):
+            pipe.decoder_pipe.decoder = torch.compile(pipe.decoder_pipe.decoder)
+
+    weight_quant = None
+    match dtype:
+        case DType.F8:
+            # unsigned zero appears much higher quality, closer to i8
+            weight_quant = float8_weight_only(torch.float8_e4m3fnuz)
+        case DType.F8D:
+            weight_quant = float8_dynamic_activation_float8_weight(torch.float8_e4m3fnuz)
+        case DType.I8:
+            weight_quant = int8_weight_only()
+        case DType.I8D:
+            weight_quant = int8_dynamic_activation_int8_weight()
+        case DType.I4:
+            weight_quant = int4_weight_only()
+        case DType.I4D:
+            weight_quant = int8_dynamic_activation_int4_weight()
+        # Just defaults...
+        # GS=128 doesn't work? <64 GS is better spent on more bits
+        # HQQ adds too much mem, better spent on more bits
+        case DType.U7:
+            weight_quant = uintx_weight_only(torch.uint7)
+        case DType.U6:
+            weight_quant = uintx_weight_only(torch.uint6)
+        case DType.U5:
+            weight_quant = uintx_weight_only(torch.uint5)
+        case DType.U4:
+            weight_quant = uintx_weight_only(torch.uint4)
+        case DType.U3:
+            weight_quant = uintx_weight_only(torch.uint3)
+        case DType.U2:
+            weight_quant = uintx_weight_only(torch.uint2)
+        case DType.U1:
+            weight_quant = uintx_weight_only(torch.uint1)
+
+    if weight_quant is not None:
+        if offload == Offload.NONE:
+            quantize_device = "cuda"
+        else:
+            quantize_device = None
+        if hasattr(pipe, "unet"):
+            quantize_(pipe.unet, weight_quant, device=quantize_device)
+        if hasattr(pipe, "transformer"):
+            quantize_(pipe.transformer, weight_quant, device=quantize_device)
+        if hasattr(pipe, "prior_pipe"):
+            quantize_(pipe.prior_pipe.prior, weight_quant, device=quantize_device)
+        if hasattr(pipe, "decoder_pipe"):
+            quantize_(pipe.decoder_pipe.decoder, weight_quant, device=quantize_device)
+        # It's not worth quantizing CLIP
+        if isinstance(getattr(pipe, "text_encoder", None), T5EncoderModel):
+            quantize_(pipe.text_encoder, weight_quant, device=quantize_device)
+        if isinstance(getattr(pipe, "text_encoder_2", None), T5EncoderModel):
+            quantize_(pipe.text_encoder_2, weight_quant, device=quantize_device)
+        if isinstance(getattr(pipe, "text_encoder_3", None), T5EncoderModel):
+            quantize_(pipe.text_encoder_3, weight_quant, device=quantize_device)
+
+    match offload:
+        case Offload.NONE:
+            if hasattr(pipe, "prior_pipe"):
+                pipe.prior_pipe = pipe.prior_pipe.to("cuda")
+            if hasattr(pipe, "decoder_pipe"):
+                pipe.decoder_pipe = pipe.decoder_pipe.to("cuda")
+            pipe = pipe.to("cuda")
+        case Offload.Model:
+            pipe.enable_model_cpu_offload()
+        case Offload.Sequential:
+            pipe.enable_sequential_cpu_offload()
+        case _:
+            raise ValueError
 
     return pipe
     # }}}
@@ -1693,6 +1688,11 @@ def process_job(
         if param.name in job and param.meta:
             meta[param.name] = job[param.name]
 
+    if parameters.lora.value:
+        lora_meta = loras_to_str(parameters.lora.value)
+        if lora_meta is not None:
+            meta["lora"] = lora_meta
+
     # POP PARAMS
     model = job.pop("model")
     color = job.pop("color", None)
@@ -1706,10 +1706,20 @@ def process_job(
 
     # PIPE
     if piperef.name != model:
-        del piperef.pipe  # Remove only reference
-        flush()
-        piperef.pipe = load_model(model, input_image is not None, parameters, meta)
-        piperef.name = model
+        with SmartSigint(num=2, job_name="model load"):
+            del piperef.pipe  # Remove only reference
+            flush()
+            piperef.pipe = get_pipe(
+                model,
+                parameters.dtype.value,
+                parameters.offload.value,
+                parameters.lora.value,
+                input_image is not None,
+                parameters.compile.value,
+                parameters.tile.value,
+                any(parameters.pag.value),
+            )
+            piperef.name = model
     pipe = piperef.pipe
     if pipe is None:
         return []

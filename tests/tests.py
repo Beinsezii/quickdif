@@ -1,4 +1,4 @@
-from quickdif import Grid, Resolution, pexpand
+from quickdif import Grid, Resolution, loras_to_str, pexpand
 
 
 def fails(f) -> bool:
@@ -15,35 +15,18 @@ def assertsort(l1, l2):
     assert l1 == l2
 
 
-# pexpand {{{
-def test_pexpand_basic():
-    assertsort(pexpand("{a|b}"), ["a", "b"])
-
-
-def test_pexpand_multi():
-    assertsort(pexpand("{ ab |c|d e}"), [" ab ", "c", "d e"])
-
-
-def test_pexpand_empty():
-    assertsort(pexpand("foo {a ||b }bar"), ["foo a bar", "foo bar", "foo b bar"])
-
-
-def test_pexpand_escape():
-    assertsort(pexpand("foo \\{a||b}"), ["foo {a||b}"])
-
-
-def test_pexpand_escape2():
-    assertsort(pexpand("foo \\\\{a||b}"), ["foo \\a", "foo \\", "foo \\b"])
-
-
-def test_pexpand_recurse():
-    assertsort(
-        pexpand("the{{{}\\}} {wet|{big|smol}{ soft|}} {{{}}}dog"),
-        ["the{} wet dog", "the{} big soft dog", "the{} smol soft dog", "the{} big dog", "the{} smol dog"],
-    )
-
-
-# pexpand }}}
+def test_lora_to_str():
+    # {{{
+    # simple floats should be str() stable
+    assert loras_to_str([]) is None
+    assert loras_to_str(["lora_1:::0.5"]) == "lora_1:::0.5"
+    assert loras_to_str(["lora_2:::0.0"]) is None
+    assert loras_to_str(["lora_3:::1.0"]) == "lora_3"
+    assert loras_to_str(["lora_4"]) == "lora_4"
+    assert loras_to_str(["lora_5:::-0"]) is None
+    assert loras_to_str(["lora_6:::-1"]) == "lora_6:::-1.0"
+    assert loras_to_str(["lora_1:::0.5", "lora_2:::0.0", "lora_3:::1.0", "lora_4"]) == "lora_1:::0.5\x1flora_3\x1flora_4"
+    # }}}
 
 
 # Resolution {{{
@@ -101,3 +84,34 @@ def test_grid_invalid():
 
 
 # }}}
+
+
+# pexpand {{{
+def test_pexpand_basic():
+    assertsort(pexpand("{a|b}"), ["a", "b"])
+
+
+def test_pexpand_multi():
+    assertsort(pexpand("{ ab |c|d e}"), [" ab ", "c", "d e"])
+
+
+def test_pexpand_empty():
+    assertsort(pexpand("foo {a ||b }bar"), ["foo a bar", "foo bar", "foo b bar"])
+
+
+def test_pexpand_escape():
+    assertsort(pexpand("foo \\{a||b}"), ["foo {a||b}"])
+
+
+def test_pexpand_escape2():
+    assertsort(pexpand("foo \\\\{a||b}"), ["foo \\a", "foo \\", "foo \\b"])
+
+
+def test_pexpand_recurse():
+    assertsort(
+        pexpand("the{{{}\\}} {wet|{big|smol}{ soft|}} {{{}}}dog"),
+        ["the{} wet dog", "the{} big soft dog", "the{} smol soft dog", "the{} big dog", "the{} smol dog"],
+    )
+
+
+# pexpand }}}
