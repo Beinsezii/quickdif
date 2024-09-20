@@ -249,9 +249,9 @@ class DType(enum.StrEnum):
     U2 = enum.auto()
     U1 = enum.auto()
 
-    # -> torch.dtype
     @property
     def torch_dtype(self):
+        "Returns torch.dtype"
         match self:
             case DType.FP16:
                 return torch.float16
@@ -259,24 +259,8 @@ class DType(enum.StrEnum):
                 return torch.bfloat16
             case DType.FP32:
                 return torch.float32
-            case (
-                DType.F8
-                | DType.F8D
-                | DType.I8
-                | DType.I8D
-                | DType.I4
-                | DType.I4D
-                | DType.U7
-                | DType.U6
-                | DType.U5
-                | DType.U4
-                | DType.U3
-                | DType.U2
-                | DType.U1
-            ):
-                return torch.bfloat16
             case _:
-                raise ValueError("Unreachable")
+                return torch.bfloat16
 
 
 @enum.unique
@@ -303,9 +287,9 @@ class NoiseType(enum.StrEnum):
             case NoiseType.Cuda16 | NoiseType.Cuda16B | NoiseType.Cuda32:
                 return "cuda"
 
-    # -> torch.dtype
     @property
     def torch_dtype(self):
+        "Returns torch.dtype"
         match self:
             case NoiseType.Cpu16 | NoiseType.Cuda16:
                 return torch.float16
@@ -329,9 +313,9 @@ class SDPB(enum.StrEnum):
     Efficient = enum.auto()
     CuDNN = enum.auto()
 
-    # -> torch.nn.attention.SDPBackend
     @property
     def torch_sdp_backend(self):
+        "Returns torch.nn.attention.SDPBackend"
         match self:
             case SDPB.Math:
                 return SDPBackend.MATH
