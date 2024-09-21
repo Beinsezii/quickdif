@@ -1527,19 +1527,19 @@ def get_pipe(
         # GS=128 doesn't work? <64 GS is better spent on more bits
         # HQQ adds too much mem, better spent on more bits
         case DType.U7:
-            weight_quant = uintx_weight_only(torch.uint7)
+            weight_quant = uintx_weight_only(torch.uint7, 32)
         case DType.U6:
-            weight_quant = uintx_weight_only(torch.uint6)
+            weight_quant = uintx_weight_only(torch.uint6, 32)
         case DType.U5:
-            weight_quant = uintx_weight_only(torch.uint5)
+            weight_quant = uintx_weight_only(torch.uint5, 32)
         case DType.U4:
-            weight_quant = uintx_weight_only(torch.uint4)
+            weight_quant = uintx_weight_only(torch.uint4, 32)
         case DType.U3:
-            weight_quant = uintx_weight_only(torch.uint3)
+            weight_quant = uintx_weight_only(torch.uint3, 32)
         case DType.U2:
-            weight_quant = uintx_weight_only(torch.uint2)
+            weight_quant = uintx_weight_only(torch.uint2, 32)
         case DType.U1:
-            weight_quant = uintx_weight_only(torch.uint1)
+            weight_quant = uintx_weight_only(torch.uint1, 32)
 
     if weight_quant is not None:
         if offload == Offload.NONE:
