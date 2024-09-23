@@ -592,7 +592,7 @@ class Parameters:
         value="stabilityai/stable-diffusion-xl-base-1.0",
         meta=True,
         multi=True,
-        help="Safetensor file or HuggingFace model ID. Append `:::` to denote revision. Does not respect `--iter`",
+        help="Safetensor file or HuggingFace model ID. Append `:::` to denote revision",
     )
     prompt = QDParam("prompt", str, multi=True, meta=True, positional=True, help="Positive prompt")
     negative = QDParam("negative", str, short="-n", multi=True, meta=True, help="Negative prompt")
@@ -1366,14 +1366,14 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
     if not parameters.negative.value:
         parameters.negative.value = [""]
 
+    image_ops = [{}]
+
     if parameters.iter.value is Iter.Shuffle:
         jobs = [job] * parameters.batch_count.value
-        merger = lambda items, name, vals: [i | {name: v} for i, v in zip(items, oversample(vals, len(items)))]  # noqa: E731
+        merger = lambda sets, name, vals: [i | {name: v} for i, v in zip(sets, oversample(vals, len(sets)))]  # noqa: E731
     else:
         jobs = [job]
-        merger = lambda items, name, vals: [i | {name: v} for i in items for v in vals]  # noqa: E731
-
-    image_ops = [{}]
+        merger = lambda sets, name, vals: [i | {name: v} for v in vals for i in sets]  # noqa: E731
 
     for param in parameters.params():
         if param.multi:
@@ -1387,6 +1387,10 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
                     if param.value:
                         jobs = merger(jobs, param.name, param.value)
 
+    # manually ordered merges
+    if parameters.model.value:
+        jobs = merger(jobs, "model", parameters.model.value)
+
     i32max = 2**31 - 1
     seeds = [torch.randint(high=i32max, low=-i32max, size=(1,)).item()] if not parameters.seed.value else parameters.seed.value
     seeds = [s + c * parameters.batch_size.value for c in range(parameters.batch_count.value) for s in seeds]
@@ -1394,14 +1398,13 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
         case Iter.Shuffle:
             jobs = merger(jobs, "seed", seeds)
         case Iter.Walk:
-            jobs = [j | {"seed": s + (n * parameters.batch_size.value * parameters.batch_count.value)} for s in seeds for n, j in enumerate(jobs)]
+            # inverse merge so seeds always iter first
+            jobs = [j | {"seed": s + (n * parameters.batch_size.value * parameters.batch_count.value)} for n, j in enumerate(jobs) for s in seeds]
         case Iter.Basic:
-            jobs = [j | {"seed": s} for s in seeds for j in jobs]
+            # inverse merge so seeds always iter first
+            jobs = [j | {"seed": s} for j in jobs for s in seeds]
         case _:
             raise ValueError
-
-    # Ensure models are always sequential. Not really compatible with `Iter`...
-    jobs = [j | {"model": m} for m in parameters.model.value for j in jobs]
 
     if parameters.iter.value is Iter.Shuffle:
         jobs = [j | {"image_ops": [o]} for j, o in zip(jobs, oversample(image_ops, len(jobs)))]
