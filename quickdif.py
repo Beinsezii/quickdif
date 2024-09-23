@@ -81,6 +81,21 @@ def oversample(population: list, k: int):
     return samples
 
 
+def splitlist(values: list[str], split: str = ":::", trim=True) -> list[list[str]]:
+    results = []
+    buf = []
+    for v in values:
+        if v.strip() == split:
+            if buf:
+                results.append(buf)
+            buf = []
+        elif not trim or v.strip():
+            buf.append(v)
+    if buf:
+        results.append(buf)
+    return results
+
+
 def roundint(n: int | float, step: int) -> int:
     if n % step >= step / 2:
         return round(n + step - (n % step))

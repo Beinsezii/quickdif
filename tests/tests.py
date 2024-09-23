@@ -1,4 +1,4 @@
-from quickdif import Grid, Resolution, loras_to_str, pexpand
+from quickdif import Grid, Resolution, loras_to_str, pexpand, splitlist
 
 
 def fails(f) -> bool:
@@ -27,6 +27,18 @@ def test_lora_to_str():
     assert loras_to_str(["lora_6:::-1"]) == "lora_6:::-1.0"
     assert loras_to_str(["lora_1:::0.5", "lora_2:::0.0", "lora_3:::1.0", "lora_4"]) == "lora_1:::0.5\x1flora_3\x1flora_4"
     # }}}
+
+
+def test_splitlist():
+    assert splitlist([]) == []
+    assert splitlist(["a"]) == [["a"]]
+    assert splitlist(["a:::0.1"]) == [["a:::0.1"]]
+    assert splitlist(["a", "b"]) == [["a", "b"]]
+    assert splitlist(["a", ":::", "b"]) == [["a"], ["b"]]
+    assert splitlist([":::", "a", "b"]) == [["a", "b"]]
+    assert splitlist(["a", "b", ":::"]) == [["a", "b"]]
+    assert splitlist(["a", ":::", "b", ":::", "c", "d", ":::"]) == [["a"], ["b"], ["c", "d"]]
+    assert splitlist([":::", ":::"]) == []
 
 
 # Resolution {{{
