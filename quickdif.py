@@ -836,9 +836,7 @@ def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
         parser.add_argument(*flags, **kwargs)
 
     parser.add_argument("-i", "--input", type=argparse.FileType(mode="rb"), help="Input image")
-    parser.add_argument(
-        "-I", "--include", type=argparse.FileType(mode="rb"), nargs="*", help="Include parameters from another image. Only works with quickdif images"
-    )
+    parser.add_argument("-I", "--include", type=argparse.FileType(mode="rb"), nargs="*", help="Include parameters from a quickdif png, json, or toml")
     parser.add_argument("--json", type=argparse.FileType(mode="a+b"), help="Output settings to JSON")
     # It would be nice to write toml but I don't think its worth a 3rd party lib
     # parser.add_argument("--toml", type=argparse.FileType(mode="a+b"), help="Output settings to TOML")
