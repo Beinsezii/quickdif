@@ -84,9 +84,9 @@ python -m quickdif "kitten"
 # Run with defaults
 > ./quickdif.sh "high resolution dslr photograph of pink roses in the misty rain"
 # Custom model
-> ./quickdif.sh -m "ptx0/terminus-xl-gamma-v1" "analogue photograph of a kitteon on the beach in golden hour sun rays"
+> ./quickdif.sh "analogue photograph of a kitteon on the beach in golden hour sun rays" -m "ptx0/terminus-xl-gamma-v1"
 # Single files work for Stable Diffusion
-> ./quickdif.sh -m ./checkpoints/sd15/dreamshaper-v6.safetensors "colorful fantasy artwork side profile of a feminine robot in a dark cyberpunk city"
+> ./quickdif.sh "colorful fantasy artwork side profile of a feminine robot in a dark cyberpunk city" -m ./checkpoints/sd15/dreamshaper-v6.safetensors
 # Four dog and four cat images at twenty steps
 > ./quickdif.sh "photo of a dog" "painting of a cat" -B 4 -s 20
 # Colored latent for an offset noise effect
