@@ -398,6 +398,8 @@ class Resolution:
 
 
 class Grid:
+    other_iters = ["resolution", "dtype"]
+
     # {{{
     def __init__(self, axes: None | str | tuple[str | None, str | None]):
         self._x = None
@@ -419,13 +421,13 @@ class Grid:
             if self._x == "none":
                 self._x = None
             else:
-                assert params.get(self._x).meta or self._x == "resolution"
+                assert params.get(self._x).meta or self._x in self.other_iters
         if self._y is not None:
             self._y = self._y.casefold()
             if self._y == "none":
                 self._y = None
             else:
-                assert params.get(self._y).meta or self._y == "resolution"
+                assert params.get(self._y).meta or self._y in self.other_iters
 
     @property
     def x(self) -> str | None:
@@ -725,6 +727,14 @@ a - Use ancestral sampling;
 2/3 - Use 2nd/3rd order sampling;
 Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
     )
+    dtype = QDParam(
+        "dtype",
+        DType,
+        short="-dt",
+        value=DType.FP16,
+        multi=True,
+        help="Data format for inference. Should be left at FP16 unless the device or model does not work properly",
+    )
     spacing = QDParam("spacing", Spacing, value=Spacing.Trailing, multi=True, meta=True, help="Sampler timestep spacing")
     ### Global
     lora = QDParam("lora", str, short="-l", meta=True, multi=True, help='Apply Loras, ex. "ms_paint.safetensors:::0.6"')
@@ -747,13 +757,6 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         short="-o",
         value=Path("./quickdif_output/"),
         help="Output directory for images",
-    )
-    dtype = QDParam(
-        "dtype",
-        DType,
-        short="-dt",
-        value=DType.FP16,
-        help="Data format for inference. Should be left at FP16 unless the device or model does not work properly",
     )
     offload = QDParam(
         "offload",
@@ -1012,10 +1015,12 @@ diffusers.pipelines.auto_pipeline.SUPPORTED_TASKS_MAPPINGS[0] = diffusers.pipeli
 
 class PipeRef:
     name: str
+    dtype: DType
     pipe: DiffusionPipeline | None
 
     def __init__(self):
         self.name = "\x00"
+        self.dtype = DType.FP16
         self.pipe = None
 
 
@@ -1378,7 +1383,7 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
     for param in parameters.params():
         if param.multi:
             match param.name:
-                case "seed" | "lora" | "model" | "sdpb":
+                case "seed" | "lora" | "model" | "dtype" | "sdpb":
                     pass
                 case "power" | "pixelate" | "posterize":
                     if param.value:
@@ -1390,6 +1395,8 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
     # manually ordered merges
     if parameters.model.value:
         jobs = merger(jobs, "model", parameters.model.value)
+    if parameters.dtype.value:
+        jobs = merger(jobs, "dtype", parameters.dtype.value)
 
     i32max = 2**31 - 1
     seeds = [torch.randint(high=i32max, low=-i32max, size=(1,)).item()] if not parameters.seed.value else parameters.seed.value
@@ -1680,6 +1687,7 @@ def process_job(
 
     # POP PARAMS
     model = job.pop("model")
+    model_dtype = job.pop("dtype", DType.FP16)
     color = job.pop("color", None)
     color_power = job.pop("color_power", 0)
     noise_power = job.pop("noise_power", 1)
@@ -1690,13 +1698,13 @@ def process_job(
     image_ops: list[dict[str, Any]] = job.pop("image_ops")
 
     # PIPE
-    if piperef.name != model:
+    if piperef.name != model or piperef.dtype != model_dtype:
         with SmartSigint(num=2, job_name="model load"):
             del piperef.pipe  # Remove only reference
             flush()
             piperef.pipe = get_pipe(
                 model,
-                parameters.dtype.value,
+                model_dtype,
                 parameters.offload.value,
                 parameters.lora.value,
                 input_image is not None,
@@ -1705,6 +1713,7 @@ def process_job(
                 any(parameters.pag.value),
             )
             piperef.name = model
+            piperef.dtype = model_dtype
     pipe = piperef.pipe
     if pipe is None:
         return []
@@ -1850,7 +1859,7 @@ def process_job(
                         op_pil = op_pil.resize((w, h), resample=Image.Resampling.NEAREST)
 
                 op_pil.save(p, format="PNG", pnginfo=info, compress_level=4)
-                results.append((meta | ops | {"seed": seed + n, "resolution": op_pil.size}, op_pil))
+                results.append((meta | ops | {"seed": seed + n, "resolution": op_pil.size, "dtype": model_dtype}, op_pil))
 
     if default_scheduler is not None:
         pipe.scheduler = default_scheduler
