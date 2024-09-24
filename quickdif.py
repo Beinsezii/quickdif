@@ -251,11 +251,12 @@ class Spacing(enum.StrEnum):
 
 @enum.unique
 class DType(enum.StrEnum):
-    FP16 = enum.auto()
+    F16 = enum.auto()
     BF16 = enum.auto()
-    FP32 = enum.auto()
+    F32 = enum.auto()
     F8 = enum.auto()
     F8D = enum.auto()
+    F6 = enum.auto()
     I8 = enum.auto()
     I8D = enum.auto()
     I4 = enum.auto()
@@ -272,12 +273,20 @@ class DType(enum.StrEnum):
     def torch_dtype(self):
         "Returns torch.dtype"
         match self:
-            case DType.FP16:
+            case DType.F16:
                 return torch.float16
             case DType.BF16:
                 return torch.bfloat16
-            case DType.FP32:
+            case DType.F32:
                 return torch.float32
+            # Quantization parent types
+            # FloatX should use F16 instead
+            # https://github.com/pytorch/ao/tree/main/torchao/dtypes/floatx
+            # Does not work on AMD but performance absolutely tanks with bfloat16 casting
+            # So I'll just leave it in for my 0 Nvidia users.
+            case DType.F6:
+                return torch.float16
+            # Rest need BF16
             case _:
                 return torch.bfloat16
 
@@ -750,7 +759,7 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         "dtype",
         DType,
         short="-dt",
-        value=DType.FP16,
+        value=DType.F16,
         multi=True,
         help="Data format for inference. Should be left at FP16 unless the device or model does not work properly",
     )
@@ -1012,9 +1021,10 @@ from diffusers import (  # noqa: E402
 )
 from torch import Tensor  # noqa: E402
 from torch.nn.attention import SDPBackend  # noqa: E402
-from torchao.quantization.quant_api import (  # noqa: E402
+from torchao.quantization import (  # noqa: E402
     float8_dynamic_activation_float8_weight,
     float8_weight_only,
+    fpx_weight_only,
     int4_weight_only,
     int8_dynamic_activation_int4_weight,
     int8_dynamic_activation_int8_weight,
@@ -1548,6 +1558,8 @@ def get_pipe(
             weight_quant = float8_weight_only(torch.float8_e4m3fnuz)
         case DType.F8D:
             weight_quant = float8_dynamic_activation_float8_weight(torch.float8_e4m3fnuz)
+        case DType.F6:
+            weight_quant = fpx_weight_only(3, 2)
         case DType.I8:
             weight_quant = int8_weight_only()
         case DType.I8D:
@@ -1712,7 +1724,7 @@ def process_job(
 
     # POP PARAMS
     model = job.pop("model")
-    model_dtype = job.pop("dtype", DType.FP16)
+    model_dtype = job.pop("dtype", DType.F16)
     color = job.pop("color", None)
     color_power = job.pop("color_power", 0)
     noise_power = job.pop("noise_power", 1)
