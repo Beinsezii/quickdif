@@ -35,10 +35,12 @@ def test_splitlist():
     assert splitlist(["a:::0.1"]) == [["a:::0.1"]]
     assert splitlist(["a", "b"]) == [["a", "b"]]
     assert splitlist(["a", ":::", "b"]) == [["a"], ["b"]]
-    assert splitlist([":::", "a", "b"]) == [["a", "b"]]
-    assert splitlist(["a", "b", ":::"]) == [["a", "b"]]
-    assert splitlist(["a", ":::", "b", ":::", "c", "d", ":::"]) == [["a"], ["b"], ["c", "d"]]
-    assert splitlist([":::", ":::"]) == []
+    assert splitlist([":::", "a", "b"]) == [[], ["a", "b"]]
+    assert splitlist(["a", "b", ":::"]) == [["a", "b"], []]
+    assert splitlist([":::", ":::"]) == [[], [], []]
+    assert splitlist(["a", ":::", "", "b", ":::", "c", "d", ":::"]) == [["a"], ["b"], ["c", "d"], []]
+    assert splitlist(["a", ":::", "", "b", ":::", "c", "d", ":::"], trim_groups=True) == [["a"], ["b"], ["c", "d"]]
+    assert splitlist(["a", ":::", "", "b", ":::", "c", "d", ":::"], trim_items=False) == [["a"], ["", "b"], ["c", "d"], []]
 
 
 # Resolution {{{

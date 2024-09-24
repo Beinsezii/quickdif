@@ -81,17 +81,21 @@ def oversample(population: list, k: int):
     return samples
 
 
-def splitlist(values: list[str], split: str = ":::", trim=True) -> list[list[str]]:
+def splitlist(values: list[str], separator: str = ":::", trim_groups=False, trim_items=True) -> list[list[str]]:
+    """Split a list into sub-lists based on a separator.
+    `trim_groups` will disallow empty sub-lists, while `trim_items` will disallow empty strings."""
     results = []
     buf = []
+    last = ""
     for v in values:
-        if v.strip() == split:
-            if buf:
+        if v.strip() == separator:
+            if buf or not trim_groups:
                 results.append(buf)
             buf = []
-        elif not trim or v.strip():
+        elif not trim_items or v.strip():
             buf.append(v)
-    if buf:
+        last = v
+    if buf or (not trim_groups and last.strip() == separator):
         results.append(buf)
     return results
 
@@ -413,7 +417,7 @@ class Resolution:
 
 
 class Grid:
-    other_iters = ["resolution", "dtype"]
+    other_iters = ["resolution", "lora", "dtype"]
 
     # {{{
     def __init__(self, axes: None | str | tuple[str | None, str | None]):
@@ -1029,13 +1033,15 @@ diffusers.pipelines.auto_pipeline.SUPPORTED_TASKS_MAPPINGS[0] = diffusers.pipeli
 
 
 class PipeRef:
-    name: str
-    dtype: DType
+    name: str | None
+    loras: str | None
+    dtype: DType | None
     pipe: DiffusionPipeline | None
 
     def __init__(self):
-        self.name = "\x00"
-        self.dtype = DType.FP16
+        self.name = None
+        self.loras = None
+        self.dtype = None
         self.pipe = None
 
 
@@ -1408,6 +1414,10 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
                         jobs = merger(jobs, param.name, param.value)
 
     # manually ordered merges
+    if parameters.lora.value:
+        # Potentially this could go above model if fusion is avoided?
+        # TODO: measure fused vs unfused perf
+        jobs = merger(jobs, "lora", splitlist(parameters.lora.value))
     if parameters.model.value:
         jobs = merger(jobs, "model", parameters.model.value)
     if parameters.dtype.value:
@@ -1692,13 +1702,13 @@ def process_job(
 
     # LOAD COMMON META
     for param in parameters.params():
-        if param.name in job and param.meta:
+        if param.name in job and param.meta and param.name != "lora":
             meta[param.name] = job[param.name]
 
-    if parameters.lora.value:
-        lora_meta = loras_to_str(parameters.lora.value)
-        if lora_meta is not None:
-            meta["lora"] = lora_meta
+    loras = job.pop("lora", [])
+    lora_meta = loras_to_str(loras)
+    if lora_meta is not None:
+        meta["lora"] = lora_meta
 
     # POP PARAMS
     model = job.pop("model")
@@ -1713,7 +1723,7 @@ def process_job(
     image_ops: list[dict[str, Any]] = job.pop("image_ops")
 
     # PIPE
-    if piperef.name != model or piperef.dtype != model_dtype:
+    if piperef.name != model or piperef.loras != lora_meta or piperef.dtype != model_dtype:
         with SmartSigint(num=2, job_name="model load"):
             del piperef.pipe  # Remove only reference
             flush()
@@ -1721,13 +1731,14 @@ def process_job(
                 model,
                 model_dtype,
                 parameters.offload.value,
-                parameters.lora.value,
+                loras,
                 input_image is not None,
                 parameters.compile.value,
                 parameters.tile.value,
                 any(parameters.pag.value),
             )
             piperef.name = model
+            piperef.loras = lora_meta
             piperef.dtype = model_dtype
     pipe = piperef.pipe
     if pipe is None:
@@ -1874,7 +1885,8 @@ def process_job(
                         op_pil = op_pil.resize((w, h), resample=Image.Resampling.NEAREST)
 
                 op_pil.save(p, format="PNG", pnginfo=info, compress_level=4)
-                results.append((meta | ops | {"seed": seed + n, "resolution": op_pil.size, "dtype": model_dtype}, op_pil))
+                # insert extra non-png meta for grid making
+                results.append((meta | ops | {"seed": seed + n, "resolution": op_pil.size, "dtype": model_dtype, "lora": lora_meta or "-"}, op_pil))
 
     if default_scheduler is not None:
         pipe.scheduler = default_scheduler
