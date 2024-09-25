@@ -1557,7 +1557,7 @@ def get_pipe(
             # unsigned zero appears much higher quality, closer to i8
             weight_quant = float8_weight_only(torch.float8_e4m3fnuz)
         case DType.F8D:
-            weight_quant = float8_dynamic_activation_float8_weight(torch.float8_e4m3fnuz)
+            weight_quant = float8_dynamic_activation_float8_weight()
         case DType.F6:
             weight_quant = fpx_weight_only(3, 2)
         case DType.I8:
