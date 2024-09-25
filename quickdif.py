@@ -1268,6 +1268,7 @@ def apply_loras(loras: list[str], pipe: DiffusionPipeline):
     if adapters:
         pipe.set_adapters(adapter_names=list(map(lambda a: a["name"], adapters)), adapter_weights=list(map(lambda a: a["scale"], adapters)))
         pipe.fuse_lora(adapter_names=list(map(lambda a: a["name"], adapters)))
+        pipe.unload_lora_weights()
     # }}}
 
 
