@@ -1851,10 +1851,7 @@ def process_job(
             pnginfo = PngImagePlugin.PngInfo()
             for k, v in meta.items():
                 pnginfo.add_text(k, str(v))
-            if "latents" in job or n == 0:
                 pnginfo.add_text("seed", str(seed + n))
-            else:
-                pnginfo.add_text("seed", f"{seed} + {n}")
 
             for ops in image_ops:
                 info = copy(pnginfo)
