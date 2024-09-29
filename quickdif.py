@@ -1034,6 +1034,9 @@ from torchao.quantization import (  # noqa: E402
 )
 from transformers import CLIPTokenizer, T5EncoderModel  # noqa: E402
 
+if hasattr(torch.backends.cuda, "allow_fp16_bf16_reduction_math_sdp"):
+    torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
+
 # Patch pipes in while PRs await merge
 diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING = OrderedDict(
     [(k, v) for k, v in diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING.items()] + [("lumina", LuminaText2ImgPipeline)]
