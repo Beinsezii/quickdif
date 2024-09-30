@@ -797,7 +797,10 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         "attn-patch",
         AttentionPatch,
         value=AttentionPatch.NONE,
-        help="Patch the SDPA function with a custom external attention processor. Not compatible with --compile.\nAMD Navi 3 users should install `git+https://github.com/ROCm/flash-attention@howiejay/navi_support` and use the `flash` patch for maximum speed",
+        help="""
+Patch the SDPA function with a custom external attention processor.
+Not compatible with --compile.
+AMD Navi 3 users should install `git+https://github.com/ROCm/flash-attention@howiejay/navi_support` and use the `flash` patch for maximum speed""",
     )
     sdpb = QDParam("sdpb", SDPB, multi=True, help="Override the SDP attention backend(s) to use")
     compile = QDParam("compile", bool, help="Compile network with torch.compile()")
