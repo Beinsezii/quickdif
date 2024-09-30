@@ -3,6 +3,7 @@ import enum
 import functools
 import gc
 import json
+import os
 import random
 import re
 import signal
@@ -801,6 +802,14 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
     sdpb = QDParam("sdpb", SDPB, multi=True, help="Override the SDP attention backend(s) to use")
     compile = QDParam("compile", bool, help="Compile network with torch.compile()")
     tile = QDParam("tile", bool, help="Tile VAE. Slicing is already used by default so only set tile if creating very large images")
+    miopen_autotune = QDParam(
+        "miopen_autotune",
+        bool,
+        value=False,
+        help="""Set whether AMD MIOpen autotuning is enabled.
+This only applies if the environment variable `MIOPEN_FIND_MODE` is unset.
+For information, see `https://rocmdocs.amd.com/projects/MIOpen/en/latest/how-to/find-and-immediate.html#find-modes`""",
+    )
     comment = QDParam("comment", str, meta=True, help="Add a comment to the image.")
 
     def pairs(self) -> list[tuple[str, QDParam]]:
@@ -975,12 +984,18 @@ def parse_cli(parameters: Parameters) -> Image.Image | None:
     # }}}
 
 
+do_miopen_autotune = False
 if __name__ == "__main__":
     cli_params = Parameters()
     cli_image = parse_cli(cli_params)
+    do_miopen_autotune = cli_params.miopen_autotune.value
     if not cli_params.model.value:
         print("No model was provided! Exiting...")
         exit()
+
+# Skip kernel lookups as they're really bad in ROCm 6.2+
+if "MIOPEN_FIND_MODE" not in os.environ and not do_miopen_autotune:
+    os.environ["MIOPEN_FIND_MODE"] = "FAST"
 
 # TORCH PRELUDE {{{
 #
