@@ -63,6 +63,13 @@ OKLAB_M2 = np.array(
 
 
 # UTILS {{{
+
+
+def addenv(k: str, val: str):
+    if k not in os.environ:
+        os.environ[k] = val
+
+
 def get_suffix(string: str, separator: str = ":::", typing: type = str, default: Any = None) -> tuple[str, Any | None]:
     split = string.rsplit(separator, 1)
     match len(split):
@@ -996,9 +1003,12 @@ if __name__ == "__main__":
         print("No model was provided! Exiting...")
         exit()
 
+
 # Skip kernel lookups as they're really bad in ROCm 6.2+
-if "MIOPEN_FIND_MODE" not in os.environ and not do_miopen_autotune:
-    os.environ["MIOPEN_FIND_MODE"] = "FAST"
+if not do_miopen_autotune:
+    addenv("MIOPEN_FIND_MODE", "FAST")
+# Enables memory efficient attention on GFX11/Navi31
+addenv("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 
 # TORCH PRELUDE {{{
 #
