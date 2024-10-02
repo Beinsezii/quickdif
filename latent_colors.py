@@ -5,8 +5,7 @@ from diffusers import AutoencoderKL
 from diffusers.image_processor import VaeImageProcessor
 
 VAES = {
-    # # Disable Flux while latent parameters aren't working
-    # "FLUX": ("black-forest-labs/FLUX.1-dev", "vae"),
+    "FLUX": ("black-forest-labs/FLUX.1-dev", "vae"),
     "FTMSE": "stabilityai/sd-vae-ft-mse",
     "SD3": ("stabilityai/stable-diffusion-3-medium-diffusers", "vae"),
     "XL": "stabilityai/sdxl-vae",
@@ -37,6 +36,10 @@ def measure(vae: str, subfolder: str | None = None) -> dict[str, list[float]]:
 
     cols = {}
     encoder = AutoencoderKL.from_pretrained(vae, use_safetensors=True, torch_dtype=dtype, subfolder=subfolder).to(device)
+    factor = encoder.config.get("scaling_factor", 1)
+    shift = encoder.config.get("shift_factor", 0)
+    factor = 1 if factor is None else factor
+    shift = 0 if shift is None else shift
     processor = VaeImageProcessor(2 ** (len(encoder.config.block_out_channels) - 1))
 
     with torch.inference_mode():
@@ -47,7 +50,7 @@ def measure(vae: str, subfolder: str | None = None) -> dict[str, list[float]]:
             )
             # flatten to c, w×h
             encoded: torch.Tensor = encoder.encode(processor.preprocess(image)).latent_dist.sample().permute(1, 0, 2, 3).flatten(start_dim=1)
-            cols[k] = encoded.quantile(0.5, dim=1).mul(encoder.config.scaling_factor).tolist()
+            cols[k] = encoded.quantile(0.5, dim=1).sub(shift).mul(factor).tolist()
 
     return cols
 
