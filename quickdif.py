@@ -15,7 +15,6 @@ from inspect import getmembers, signature
 from io import BytesIO, UnsupportedOperation
 from math import copysign
 from pathlib import Path
-from sys import exit
 from typing import Any, Callable
 
 import numpy as np
@@ -364,6 +363,64 @@ class SDPB(enum.StrEnum):
                 return SDPBackend.CUDNN_ATTENTION
             case _:
                 raise ValueError("Unreachable")
+
+
+@enum.unique
+class Compile(enum.StrEnum):
+    Off = enum.auto()
+    On = enum.auto()
+    On_Dyn = enum.auto()
+    On_Full = enum.auto()
+    On_Dyn_Full = enum.auto()
+    Max = enum.auto()
+    Max_Dyn = enum.auto()
+    Max_Full = enum.auto()
+    Max_Dyn_Full = enum.auto()
+    RO = enum.auto()
+    RO_Dyn = enum.auto()
+    RO_Full = enum.auto()
+    RO_Dyn_Full = enum.auto()
+
+    @property
+    def kwargs(self) -> dict[str, Any]:
+        result = {}
+
+        if self in [
+            Compile.On_Dyn,
+            Compile.On_Dyn_Full,
+            Compile.Max_Dyn,
+            Compile.Max_Dyn_Full,
+            Compile.RO_Dyn,
+            Compile.RO_Dyn_Full,
+        ]:
+            result["dynamic"] = True
+
+        if self in [
+            Compile.On_Full,
+            Compile.On_Dyn_Full,
+            Compile.Max_Full,
+            Compile.Max_Dyn_Full,
+            Compile.RO_Full,
+            Compile.RO_Dyn_Full,
+        ]:
+            result["fullgraph"] = True
+
+        if self in [
+            Compile.Max,
+            Compile.Max_Dyn,
+            Compile.Max_Full,
+            Compile.Max_Dyn_Full,
+        ]:
+            result["mode"] = "max-autotune"
+        elif self in [
+            Compile.RO,
+            Compile.RO_Dyn,
+            Compile.RO_Full,
+            Compile.RO_Dyn_Full,
+        ]:
+            result["mode"] = "reduce-overhead"
+
+        return result
 
 
 @enum.unique
@@ -811,7 +868,7 @@ Not compatible with --compile.
 AMD Navi 3 users should install `git+https://github.com/ROCm/flash-attention@howiejay/navi_support` and use the `flash` patch for maximum speed""",
     )
     sdpb = QDParam("sdpb", SDPB, multi=True, help="Override the SDP attention backend(s) to use")
-    compile = QDParam("compile", bool, help="Compile network with torch.compile()")
+    compile = QDParam("compile", Compile, value=Compile.Off, help="Compile network with torch.compile()")
     tile = QDParam("tile", bool, help="Tile VAE. Slicing is already used by default so only set tile if creating very large images")
     miopen_autotune = QDParam(
         "miopen_autotune",
@@ -1516,7 +1573,7 @@ def get_pipe(
     offload: Offload,
     loras: None | list[str],
     img2img: bool,
-    compile: bool,
+    compile: Compile,
     tile_vae: bool,
     pag: bool,
 ) -> DiffusionPipeline:
@@ -1586,15 +1643,15 @@ def get_pipe(
     if loras is not None:
         apply_loras(loras, pipe)
 
-    if compile:
+    if compile is not Compile.Off:
         if hasattr(pipe, "unet"):
-            pipe.unet = torch.compile(pipe.unet)
+            pipe.unet = torch.compile(pipe.unet, **compile.kwargs)
         if hasattr(pipe, "transformer"):
-            pipe.transformer = torch.compile(pipe.transformer)
+            pipe.transformer = torch.compile(pipe.transformer, **compile.kwargs)
         if hasattr(pipe, "prior_pipe"):
-            pipe.prior_pipe.prior = torch.compile(pipe.prior_pipe.prior)
+            pipe.prior_pipe.prior = torch.compile(pipe.prior_pipe.prior, **compile.kwargs)
         if hasattr(pipe, "decoder_pipe"):
-            pipe.decoder_pipe.decoder = torch.compile(pipe.decoder_pipe.decoder)
+            pipe.decoder_pipe.decoder = torch.compile(pipe.decoder_pipe.decoder, **compile.kwargs)
 
     weight_quant = None
     match dtype:
@@ -1969,8 +2026,11 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
     print(f"\nGenerating {len(jobs)} batches of {parameters.batch_size.value} images for {total_images} total...")
     pbar = tqdm(desc="Images", total=total_images, smoothing=0)
 
-    if not parameters.compile.value:
-        patch_attn(parameters.attn_patch.value)
+    if parameters.attn_patch.value is not AttentionPatch.NONE:
+        if parameters.compile.value is Compile.Off:
+            patch_attn(parameters.attn_patch.value)
+        else:
+            print(f"\n!! Ignoreing attention patch `{parameters.attn_patch.value}` as compile is set to `{parameters.compile.value}`")
 
     kernel_ctx = nullcontext()
     if parameters.sdpb.value:
