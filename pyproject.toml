@@ -8,7 +8,7 @@ requires-python = ">= 3.11"
 dependencies = [
     "accelerate>=1.0.0",
     "compel>=2.0.3",
-    "diffusers>=0.30.3",
+    "diffusers>=0.31.0",
     "peft>=0.13.1",
     "protobuf>=5.28.2",
     "sentencepiece>=0.2.0",
