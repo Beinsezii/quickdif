@@ -603,7 +603,10 @@ class Grid:
             canvas = Image.new("RGB", (cells_x * cell_w, cells_y * cell_h), (0, 0, 0))
             for nx, ix in enumerate(g):
                 for ny, iy in enumerate(ix):
-                    canvas.paste(iy[1], (nx * cell_w + (cell_w - iy[1].width) // 2, ny * cell_h + (cell_h - iy[1].height) // 2))
+                    canvas.paste(
+                        iy[1],
+                        (nx * cell_w + (cell_w - iy[1].width) // 2, ny * cell_h + (cell_h - iy[1].height) // 2),
+                    )
                     # X labels
                     if ny == 0 and self.x is not None:
                         draw = ImageDraw.Draw(canvas)
@@ -611,7 +614,12 @@ class Grid:
                     # Y labels
                     if nx == 0 and self.y is not None:
                         draw = ImageDraw.Draw(canvas)
-                        draw.text((nx * cell_w + pad, (ny + 1) * cell_h - 5), f"{self.y} : {iy[0][self.y]}", anchor="lb", **style)
+                        draw.text(
+                            (nx * cell_w + pad, (ny + 1) * cell_h - 5),
+                            f"{self.y} : {iy[0][self.y]}",
+                            anchor="lb",
+                            **style,
+                        )
             results.append(canvas)
 
         return results, others
@@ -752,7 +760,14 @@ class Parameters:
         meta=True,
         help="Perturbed-Attention Guidance scale",
     )
-    denoise = QDParam("denoise", float, short="-d", multi=True, meta=True, help="Denoising amount for Img2Img. Higher values will change more")
+    denoise = QDParam(
+        "denoise",
+        float,
+        short="-d",
+        multi=True,
+        meta=True,
+        help="Denoising amount for Img2Img. Higher values will change more",
+    )
     noise_type = QDParam(
         "noise_type",
         NoiseType,
@@ -779,7 +794,14 @@ class Parameters:
         meta=True,
         help="Color of initial latent noise if applicable. Currently only for XL and SD-FT-MSE latent spaces",
     )
-    color_power = QDParam("color_power", float, short="-c", multi=True, meta=True, help="Power/opacity of colored latent noise")
+    color_power = QDParam(
+        "color_power",
+        float,
+        short="-c",
+        multi=True,
+        meta=True,
+        help="Power/opacity of colored latent noise",
+    )
     variance_scale = QDParam(
         "variance_scale",
         int,
@@ -804,8 +826,20 @@ class Parameters:
         meta=True,
         help="Simple filter which scales final image values away from gray based on an exponent",
     )
-    pixelate = QDParam("pixelate", float, multi=True, meta=True, help="Pixelate image using a divisor. Best used with a pixel art Lora")
-    posterize = QDParam("posterize", int, multi=True, meta=True, help="Set amount of colors per channel. Best used with --pixelate")
+    pixelate = QDParam(
+        "pixelate",
+        float,
+        multi=True,
+        meta=True,
+        help="Pixelate image using a divisor. Best used with a pixel art Lora",
+    )
+    posterize = QDParam(
+        "posterize",
+        int,
+        multi=True,
+        meta=True,
+        help="Set amount of colors per channel. Best used with --pixelate",
+    )
     sampler = QDParam(
         "sampler",
         Sampler,
@@ -829,7 +863,14 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         multi=True,
         help="Data format for inference. Should be left at FP16 unless the device or model does not work properly",
     )
-    spacing = QDParam("spacing", Spacing, value=Spacing.Trailing, multi=True, meta=True, help="Sampler timestep spacing")
+    spacing = QDParam(
+        "spacing",
+        Spacing,
+        value=Spacing.Trailing,
+        multi=True,
+        meta=True,
+        help="Sampler timestep spacing",
+    )
     ### Global
     lora = QDParam("lora", str, short="-l", meta=True, multi=True, help='Apply Loras, ex. "ms_paint.safetensors:::0.6"')
     batch_count = QDParam("batch_count", int, short="-b", value=1, help="Behavior dependant on 'iter'")
@@ -843,7 +884,11 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
 'walk' - Run every combination of parameters 'batch_count' times, incrementing seed for every individual job;
 'shuffle' - Pick randomly from all given parameters 'batch_count' times""",
     )
-    grid = QDParam("grid", Grid, help="Compile the images into a final grid using up to two parameters, formatted [X or none] ,: [Y or none]")
+    grid = QDParam(
+        "grid",
+        Grid,
+        help="Compile the images into a final grid using up to two parameters, formatted [X or none] ,: [Y or none]",
+    )
     ### System
     output = QDParam(
         "output",
@@ -869,7 +914,11 @@ AMD Navi 3 users should install `git+https://github.com/ROCm/flash-attention@how
     )
     sdpb = QDParam("sdpb", SDPB, multi=True, help="Override the SDP attention backend(s) to use")
     compile = QDParam("compile", Compile, value=Compile.Off, help="Compile network with torch.compile()")
-    tile = QDParam("tile", bool, help="Tile VAE. Slicing is already used by default so only set tile if creating very large images")
+    tile = QDParam(
+        "tile",
+        bool,
+        help="Tile VAE. Slicing is already used by default so only set tile if creating very large images",
+    )
     miopen_autotune = QDParam(
         "miopen_autotune",
         bool,
@@ -907,7 +956,8 @@ For information, see `https://rocmdocs.amd.com/projects/MIOpen/en/latest/how-to/
 def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
     # {{{
     parser = argparse.ArgumentParser(
-        description="Quick and easy inference for a variety of Diffusers models. Not all models support all options", add_help=False
+        description="Quick and easy inference for a variety of Diffusers models. Not all models support all options",
+        add_help=False,
     )
     for param in parameters.params():
         if param.positional:
@@ -944,7 +994,13 @@ def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
         parser.add_argument(*flags, **kwargs)
 
     parser.add_argument("-i", "--input", type=argparse.FileType(mode="rb"), help="Input image")
-    parser.add_argument("-I", "--include", type=argparse.FileType(mode="rb"), nargs="*", help="Include parameters from a quickdif png, json, or toml")
+    parser.add_argument(
+        "-I",
+        "--include",
+        type=argparse.FileType(mode="rb"),
+        nargs="*",
+        help="Include parameters from a quickdif png, json, or toml",
+    )
     parser.add_argument("--json", type=argparse.FileType(mode="a+b"), help="Output settings to JSON")
     # It would be nice to write toml but I don't think its worth a 3rd party lib
     # parser.add_argument("--toml", type=argparse.FileType(mode="a+b"), help="Output settings to TOML")
@@ -984,7 +1040,9 @@ def parse_cli(parameters: Parameters) -> Image.Image | None:
                                 try:
                                     parameters.get(k).value = v
                                 except ValueError:
-                                    print(f"Config value '{v}' cannot be assigned to parameter '{parameters.get(k).name}', ignoring")
+                                    print(
+                                        f"Config value '{v}' cannot be assigned to parameter '{parameters.get(k).name}', ignoring"
+                                    )
                             else:
                                 print(f'Unknown key in serial config "{k}"')
                         break
@@ -1001,10 +1059,16 @@ def parse_cli(parameters: Parameters) -> Image.Image | None:
                                 try:
                                     parameters.get(k).value = v
                                 except ValueError:
-                                    print(f"Config value '{v}' cannot be assigned to parameter '{parameters.get(k).name}', ignoring")
+                                    print(
+                                        f"Config value '{v}' cannot be assigned to parameter '{parameters.get(k).name}', ignoring"
+                                    )
 
     for id, val in args.items():
-        if id in parameters and val is not None and not (isinstance(val, list) and len(val) == 0 and parameters.get(id).positional):
+        if (
+            id in parameters
+            and val is not None
+            and not (isinstance(val, list) and len(val) == 0 and parameters.get(id).positional)
+        ):
             parameters.get(id).value = val
 
     args = {k: v for k, v in args.items() if k not in parameters}
@@ -1031,7 +1095,9 @@ def parse_cli(parameters: Parameters) -> Image.Image | None:
 
     for key in "prompt", "negative":
         if parameters.get(key).value is not None:
-            parameters.get(key).value = [expanded for nested in [pexpand(p) for p in parameters.get(key).value] for expanded in nested]
+            parameters.get(key).value = [
+                expanded for nested in [pexpand(p) for p in parameters.get(key).value] for expanded in nested
+            ]
 
     if args.get("print", False):
         print("\n".join([f"{p.name}: {p.value}" for p in parameters.params()]))
@@ -1126,9 +1192,12 @@ if hasattr(torch.backends.cuda, "allow_fp16_bf16_reduction_math_sdp"):
 
 # Patch pipes in while PRs await merge
 diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING = OrderedDict(
-    [(k, v) for k, v in diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING.items()] + [("lumina", LuminaText2ImgPipeline)]
+    [(k, v) for k, v in diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING.items()]
+    + [("lumina", LuminaText2ImgPipeline)]
 )
-diffusers.pipelines.auto_pipeline.SUPPORTED_TASKS_MAPPINGS[0] = diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING
+diffusers.pipelines.auto_pipeline.SUPPORTED_TASKS_MAPPINGS[0] = (
+    diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING
+)
 # }}}
 
 
@@ -1163,7 +1232,9 @@ class SmartSigint:
             print(f"\nSIGINT received {self.count+1} times, forcibly aborting {self.job_name}")
             self.terminate()
         else:
-            print(f"\nSIGINT received, waiting for {self.job_name} to complete before exiting.\nRequire {self.num - self.count} more to abort.")
+            print(
+                f"\nSIGINT received, waiting for {self.job_name} to complete before exiting.\nRequire {self.num - self.count} more to abort."
+            )
         self.count += 1
 
     def terminate(self):
@@ -1367,7 +1438,10 @@ def apply_loras(loras: list[str], pipe: DiffusionPipeline):
         )
 
     if adapters:
-        pipe.set_adapters(adapter_names=list(map(lambda a: a["name"], adapters)), adapter_weights=list(map(lambda a: a["scale"], adapters)))
+        pipe.set_adapters(
+            adapter_names=list(map(lambda a: a["name"], adapters)),
+            adapter_weights=list(map(lambda a: a["scale"], adapters)),
+        )
         pipe.fuse_lora(adapter_names=list(map(lambda a: a["name"], adapters)))
         pipe.unload_lora_weights()
     # }}}
@@ -1439,16 +1513,46 @@ def get_scheduler(sampler: Sampler, spacing: Spacing | None, default_scheduler: 
         Sampler.EulerK: (EulerDiscreteScheduler, {"use_karras_sigmas": True}),
         Sampler.EulerF: (FlowMatchEulerDiscreteScheduler, {}),
         Sampler.EulerA: (EulerAncestralDiscreteScheduler, {}),
-        Sampler.Dpm: (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 1, "use_karras_sigmas": False}),
-        Sampler.DpmK: (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 1, "use_karras_sigmas": True}),
-        Sampler.SDpm: (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++", "solver_order": 1, "use_karras_sigmas": False}),
-        Sampler.SDpmK: (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++", "solver_order": 1, "use_karras_sigmas": True}),
-        Sampler.Dpm2: (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 2, "use_karras_sigmas": False}),
-        Sampler.Dpm2K: (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 2, "use_karras_sigmas": True}),
-        Sampler.SDpm2: (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++", "solver_order": 2, "use_karras_sigmas": False}),
-        Sampler.SDpm2K: (DPMSolverMultistepScheduler, {"algorithm_type": "sde-dpmsolver++", "solver_order": 2, "use_karras_sigmas": True}),
-        Sampler.Dpm3: (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 3, "use_karras_sigmas": False}),
-        Sampler.Dpm3K: (DPMSolverMultistepScheduler, {"algorithm_type": "dpmsolver++", "solver_order": 3, "use_karras_sigmas": True}),
+        Sampler.Dpm: (
+            DPMSolverMultistepScheduler,
+            {"algorithm_type": "dpmsolver++", "solver_order": 1, "use_karras_sigmas": False},
+        ),
+        Sampler.DpmK: (
+            DPMSolverMultistepScheduler,
+            {"algorithm_type": "dpmsolver++", "solver_order": 1, "use_karras_sigmas": True},
+        ),
+        Sampler.SDpm: (
+            DPMSolverMultistepScheduler,
+            {"algorithm_type": "sde-dpmsolver++", "solver_order": 1, "use_karras_sigmas": False},
+        ),
+        Sampler.SDpmK: (
+            DPMSolverMultistepScheduler,
+            {"algorithm_type": "sde-dpmsolver++", "solver_order": 1, "use_karras_sigmas": True},
+        ),
+        Sampler.Dpm2: (
+            DPMSolverMultistepScheduler,
+            {"algorithm_type": "dpmsolver++", "solver_order": 2, "use_karras_sigmas": False},
+        ),
+        Sampler.Dpm2K: (
+            DPMSolverMultistepScheduler,
+            {"algorithm_type": "dpmsolver++", "solver_order": 2, "use_karras_sigmas": True},
+        ),
+        Sampler.SDpm2: (
+            DPMSolverMultistepScheduler,
+            {"algorithm_type": "sde-dpmsolver++", "solver_order": 2, "use_karras_sigmas": False},
+        ),
+        Sampler.SDpm2K: (
+            DPMSolverMultistepScheduler,
+            {"algorithm_type": "sde-dpmsolver++", "solver_order": 2, "use_karras_sigmas": True},
+        ),
+        Sampler.Dpm3: (
+            DPMSolverMultistepScheduler,
+            {"algorithm_type": "dpmsolver++", "solver_order": 3, "use_karras_sigmas": False},
+        ),
+        Sampler.Dpm3K: (
+            DPMSolverMultistepScheduler,
+            {"algorithm_type": "dpmsolver++", "solver_order": 3, "use_karras_sigmas": True},
+        ),
         Sampler.Unipc: (UniPCMultistepScheduler, {"solver_order": 1, "use_karras_sigmas": False}),
         Sampler.UnipcK: (UniPCMultistepScheduler, {"solver_order": 1, "use_karras_sigmas": True}),
         Sampler.Unipc2: (UniPCMultistepScheduler, {"solver_order": 2, "use_karras_sigmas": False}),
@@ -1536,14 +1640,22 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
         jobs = merger(jobs, "dtype", parameters.dtype.value)
 
     i32max = 2**31 - 1
-    seeds = [torch.randint(high=i32max, low=-i32max, size=(1,)).item()] if not parameters.seed.value else parameters.seed.value
+    seeds = (
+        [torch.randint(high=i32max, low=-i32max, size=(1,)).item()]
+        if not parameters.seed.value
+        else parameters.seed.value
+    )
     seeds = [s + c * parameters.batch_size.value for c in range(parameters.batch_count.value) for s in seeds]
     match parameters.iter.value:
         case Iter.Shuffle:
             jobs = merger(jobs, "seed", seeds)
         case Iter.Walk:
             # inverse merge so seeds always iter first
-            jobs = [j | {"seed": s + (n * parameters.batch_size.value * parameters.batch_count.value)} for n, j in enumerate(jobs) for s in seeds]
+            jobs = [
+                j | {"seed": s + (n * parameters.batch_size.value * parameters.batch_count.value)}
+                for n, j in enumerate(jobs)
+                for s in seeds
+            ]
         case Iter.Basic:
             # inverse merge so seeds always iter first
             jobs = [j | {"seed": s} for j in jobs for s in seeds]
@@ -1588,7 +1700,9 @@ def get_pipe(
 
     if "Kolors" in model:
         pipe_args["variant"] = "fp16"
-    elif ("stable-cascade" in model.casefold() or "flux.1" in model.casefold()) and pipe_args["torch_dtype"] == torch.float16:
+    elif ("stable-cascade" in model.casefold() or "flux.1" in model.casefold()) and pipe_args[
+        "torch_dtype"
+    ] == torch.float16:
         pipe_args["torch_dtype"] = torch.bfloat16
 
     model, revision = get_suffix(model)
@@ -1618,7 +1732,9 @@ def get_pipe(
                     if str(e).startswith("Failed to load T5EncoderModel."):  # better way?
                         pipe = s3_pipe.from_single_file(model, text_encoder_3=None, tokenizer_3=None, **pipe_args)
                     else:
-                        raise Exception(f'Could not load "{model}" as `{sd_pipe.__name__}`, `{xl_pipe.__name__}`, or `{s3_pipe.__name__}`')
+                        raise Exception(
+                            f'Could not load "{model}" as `{sd_pipe.__name__}`, `{xl_pipe.__name__}`, or `{s3_pipe.__name__}`'
+                        )
     else:
         if img2img:
             pipe = AutoPipelineForImage2Image.from_pretrained(model, **pipe_args)
@@ -1632,7 +1748,9 @@ def get_pipe(
             else:
                 pipe = AutoPipelineForText2Image.from_pipe(pipe, enable_pag=True)
         except Exception as e:
-            print(f"Could not find a PAG pipeline variant for `{type(pipe).__name__} and `pag` parameter will be ignored:\n  {e}")
+            print(
+                f"Could not find a PAG pipeline variant for `{type(pipe).__name__} and `pag` parameter will be ignored:\n  {e}"
+            )
 
     pipe.safety_checker = None
     pipe.watermarker = None
@@ -1760,12 +1878,20 @@ def make_noise(
             # save state so init noise seeds are the same with/without
             state = generator.get_state()
             variance = torch.randn(
-                [1, shape[1], variance_scale, variance_scale], generator=generator, dtype=noise_type.torch_dtype, device=noise_type.torch_device
+                [1, shape[1], variance_scale, variance_scale],
+                generator=generator,
+                dtype=noise_type.torch_dtype,
+                device=noise_type.torch_device,
             )
             latent += torch.nn.UpsamplingBilinear2d((shape[2], shape[3]))(variance).mul(variance_power)[0].to("cpu")
             generator.set_state(state)
         # Init noise
-        noise = torch.randn(latents.shape[1:], generator=generator, dtype=noise_type.torch_dtype, device=noise_type.torch_device)
+        noise = torch.randn(
+            latents.shape[1:],
+            generator=generator,
+            dtype=noise_type.torch_dtype,
+            device=noise_type.torch_device,
+        )
         if noise_power != 1:
             noise *= noise_power
         latent += noise.to("cpu")
@@ -1868,7 +1994,9 @@ def process_job(
         return []
 
     # INPUT TENSOR
-    generators = [torch.Generator(noise_type.torch_device).manual_seed(seed + n) for n in range(parameters.batch_size.value)]
+    generators = [
+        torch.Generator(noise_type.torch_device).manual_seed(seed + n) for n in range(parameters.batch_size.value)
+    ]
     if input_image is None:
         latents, latents_resolution = make_noise(
             pipe,
@@ -1924,7 +2052,10 @@ def process_job(
     pipe_params = signature(pipe).parameters
 
     if "sampler" in job and hasattr(pipe, "scheduler"):
-        default_scheduler, pipe.scheduler = pipe.scheduler, get_scheduler(job["sampler"], job.get("spacing", None), pipe.scheduler)
+        default_scheduler, pipe.scheduler = (
+            pipe.scheduler,
+            get_scheduler(job["sampler"], job.get("spacing", None), pipe.scheduler),
+        )
     else:
         default_scheduler = None
 
@@ -1933,7 +2064,9 @@ def process_job(
         job["prior_num_inference_steps"] = steps
         if "decoder_steps" in job:
             decoder_steps = job.pop("decoder_steps")
-            job["num_inference_steps"] = round(spowf(abs(steps * decoder_steps), 1 / 2)) if decoder_steps < 0 else decoder_steps
+            job["num_inference_steps"] = (
+                round(spowf(abs(steps * decoder_steps), 1 / 2)) if decoder_steps < 0 else decoder_steps
+            )
 
     for f, t in [
         ("steps", ["num_inference_steps"]),
@@ -2001,12 +2134,22 @@ def process_job(
                 if "pixelate" in ops:
                     if ops["pixelate"] > 1:
                         w, h = op_pil.width, op_pil.height
-                        op_pil = op_pil.resize((round(w / ops["pixelate"]), round(h / ops["pixelate"])), resample=Image.Resampling.BOX)
+                        op_pil = op_pil.resize(
+                            (round(w / ops["pixelate"]), round(h / ops["pixelate"])),
+                            resample=Image.Resampling.BOX,
+                        )
                         op_pil = op_pil.resize((w, h), resample=Image.Resampling.NEAREST)
 
                 op_pil.save(p, format="PNG", pnginfo=info, compress_level=4)
                 # insert extra non-png meta for grid making
-                results.append((meta | ops | {"seed": seed + n, "resolution": op_pil.size, "dtype": model_dtype, "lora": lora_meta or "-"}, op_pil))
+                results.append(
+                    (
+                        meta
+                        | ops
+                        | {"seed": seed + n, "resolution": op_pil.size, "dtype": model_dtype, "lora": lora_meta or "-"},
+                        op_pil,
+                    )
+                )
 
     if default_scheduler is not None:
         pipe.scheduler = default_scheduler
@@ -2030,7 +2173,9 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
         if parameters.compile.value is Compile.Off:
             patch_attn(parameters.attn_patch.value)
         else:
-            print(f"\n!! Ignoreing attention patch `{parameters.attn_patch.value}` as compile is set to `{parameters.compile.value}`")
+            print(
+                f"\n!! Ignoreing attention patch `{parameters.attn_patch.value}` as compile is set to `{parameters.compile.value}`"
+            )
 
     kernel_ctx = nullcontext()
     if parameters.sdpb.value:
