@@ -2,8 +2,8 @@
 name = "quickdif"
 dynamic = ["version"]
 readme = "README.md"
-license = {file = "LICENSE"}
-authors = [{name = "Beinsezii"}]
+license = { file = "LICENSE" }
+authors = [{ name = "Beinsezii" }]
 requires-python = ">= 3.11"
 dependencies = [
     "accelerate>=1.0.0",
@@ -21,10 +21,6 @@ dependencies = [
 navi-flash = [
     "flash-attn @ git+https://github.com/ROCm/flash-attention@howiejay/navi_support",
 ]
-# `uv` doesn't like conflicting sources...
-# triton-flash = [
-#     "flash-attn @ git+https://github.com/ROCm/flash-attention@main_perf",
-# ]
 
 [build-system]
 requires = ["setuptools"]
@@ -36,7 +32,5 @@ py-modules = ["quickdif"]
 [tool.ruff]
 line-length = 150
 
-[tool.uv]
-dev-dependencies = [
-    "pytest>=8.3.2",
-]
+[dependency-groups]
+dev = ["pytest>=8.3.3"]
