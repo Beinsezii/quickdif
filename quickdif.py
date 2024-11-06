@@ -19,6 +19,7 @@ from typing import Any, Callable
 
 import numpy as np
 import numpy.linalg as npl
+from diffusers.loaders.single_file import FromSingleFileMixin
 from PIL import Image, ImageDraw, PngImagePlugin
 from tqdm import tqdm
 
@@ -1710,36 +1711,38 @@ def get_pipe(
         pipe_args["revision"] = revision
 
     if model.casefold().endswith(".safetensors") or model.casefold().endswith(".sft"):
-        if img2img:
-            sd_pipe = StableDiffusionImg2ImgPipeline
-            xl_pipe = StableDiffusionXLImg2ImgPipeline
-            s3_pipe = StableDiffusion3Img2ImgPipeline
-        else:
-            sd_pipe = StableDiffusionPipeline
-            xl_pipe = StableDiffusionXLPipeline
-            s3_pipe = StableDiffusion3Pipeline
+        pipes: list[type[FromSingleFileMixin]] = [
+            # FluxPipeline, # Fucking diffusers won't fetch components
+            StableDiffusionXLPipeline,
+            StableDiffusionPipeline,
+            StableDiffusion3Pipeline,
+        ]
 
-        try:
-            pipe = xl_pipe.from_single_file(model, **pipe_args)
-            assert pipe.text_encoder_2 is not None
-        except:  # noqa: E722
+        pipe: DiffusionPipeline | None = None
+        for cls in pipes:
+            maybe_pipe = None
+
             try:
-                pipe = sd_pipe.from_single_file(model, **pipe_args)
-            except:  # noqa: E722
-                try:
-                    pipe = s3_pipe.from_single_file(model, **pipe_args)
-                except Exception as e:
-                    if str(e).startswith("Failed to load T5EncoderModel."):  # better way?
-                        pipe = s3_pipe.from_single_file(model, text_encoder_3=None, tokenizer_3=None, **pipe_args)
-                    else:
-                        raise Exception(
-                            f'Could not load "{model}" as `{sd_pipe.__name__}`, `{xl_pipe.__name__}`, or `{s3_pipe.__name__}`'
-                        )
+                maybe_pipe = cls.from_single_file(model, **pipe_args)
+            except Exception as e:
+                # better way?
+                if str(e).startswith("Failed to load T5EncoderModel.") and isinstance(cls, StableDiffusion3Pipeline):
+                    maybe_pipe = cls.from_single_file(model, text_encoder_3=None, tokenizer_3=None, **pipe_args)
+                    break
+
+            if maybe_pipe is not None:
+                if hasattr(maybe_pipe, "text_encoder_2") and maybe_pipe.text_encoder_2 is None:
+                    continue
+                pipe = maybe_pipe
+                break
+
+        if pipe is None:
+            raise Exception(f'Could not load "{model}" as single file pipeline')
     else:
-        if img2img:
-            pipe = AutoPipelineForImage2Image.from_pretrained(model, **pipe_args)
-        else:
-            pipe = AutoPipelineForText2Image.from_pretrained(model, **pipe_args)
+        pipe = AutoPipelineForText2Image.from_pretrained(model, **pipe_args)
+
+    if img2img:
+        pipe = AutoPipelineForImage2Image.from_pipe(pipe)
 
     if pag:
         try:
