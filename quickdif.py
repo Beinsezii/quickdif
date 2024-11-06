@@ -11,6 +11,7 @@ import tomllib
 from collections import OrderedDict
 from contextlib import nullcontext
 from copy import copy
+from dataclasses import dataclass
 from inspect import getmembers, signature
 from io import BytesIO, UnsupportedOperation
 from math import copysign
@@ -1202,17 +1203,12 @@ diffusers.pipelines.auto_pipeline.SUPPORTED_TASKS_MAPPINGS[0] = (
 # }}}
 
 
+@dataclass
 class PipeRef:
-    name: str | None
-    loras: str | None
-    dtype: DType | None
-    pipe: DiffusionPipeline | None
-
-    def __init__(self):
-        self.name = None
-        self.loras = None
-        self.dtype = None
-        self.pipe = None
+    name: str | None = None
+    loras: str | None = None
+    dtype: DType | None = None
+    pipe: DiffusionPipeline | None = None
 
 
 # elegent solution from <https://stackoverflow.com/questions/842557/>
