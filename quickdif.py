@@ -20,7 +20,6 @@ from typing import Any, Callable
 
 import numpy as np
 import numpy.linalg as npl
-from diffusers.loaders.single_file import FromSingleFileMixin
 from PIL import Image, ImageDraw, PngImagePlugin
 from tqdm import tqdm
 
@@ -1174,6 +1173,7 @@ from diffusers import (  # noqa: E402
     StableDiffusionXLPipeline,
     UniPCMultistepScheduler,
 )
+from diffusers.loaders.single_file import FromSingleFileMixin  # noqa: E402
 from torch import Tensor  # noqa: E402
 from torch.nn.attention import SDPBackend  # noqa: E402
 from torchao.quantization import (  # noqa: E402
