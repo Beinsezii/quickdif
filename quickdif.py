@@ -1174,6 +1174,7 @@ from diffusers import (  # noqa: E402
     UniPCMultistepScheduler,
 )
 from diffusers.loaders.single_file import FromSingleFileMixin  # noqa: E402
+from diffusers.pipelines.auto_pipeline import AUTO_TEXT2IMAGE_PIPELINES_MAPPING  # noqa: E402
 from torch import Tensor  # noqa: E402
 from torch.nn.attention import SDPBackend  # noqa: E402
 from torchao.quantization import (  # noqa: E402
@@ -1188,6 +1189,12 @@ from torchao.quantization import (  # noqa: E402
     uintx_weight_only,
 )
 from transformers import CLIPTokenizer, T5EncoderModel  # noqa: E402
+
+if "SanaPipeline" in dir(diffusers) and "sana" not in AUTO_TEXT2IMAGE_PIPELINES_MAPPING:
+    AUTO_TEXT2IMAGE_PIPELINES_MAPPING |= {
+        "sana": getattr(diffusers, "SanaPipeline"),
+        "sana-pag": getattr(diffusers, "SanaPAGPipeline"),
+    }
 
 if hasattr(torch.backends.cuda, "allow_fp16_bf16_reduction_math_sdp"):
     torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
