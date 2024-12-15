@@ -10,6 +10,7 @@ Quick and easy CLI inference that just works™ for a variety of Diffusers model
     + Kolors
     + Lumina T2X
     + Pixart (Alpha/Sigma)
+    + Sana
     + Stable Cascade
     + Stable Diffusion (1.5/2.1)
     + Stable Diffusion 3
