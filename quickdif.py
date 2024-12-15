@@ -1141,40 +1141,46 @@ addenv("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 import diffusers  # noqa: E402
 import torch  # noqa: E402
 from compel import Compel, ReturnedEmbeddingsType  # noqa: E402
-from diffusers import (  # noqa: E402
+from diffusers.loaders.single_file import FromSingleFileMixin  # noqa: E402
+from diffusers.pipelines.auto_pipeline import (  # noqa: E402
+    AUTO_TEXT2IMAGE_PIPELINES_MAPPING,
     AutoPipelineForImage2Image,
     AutoPipelineForText2Image,
-    DDIMScheduler,
-    DDPMScheduler,
-    DiffusionPipeline,
-    DPMSolverMultistepScheduler,
-    EulerAncestralDiscreteScheduler,
-    EulerDiscreteScheduler,
-    FlowMatchEulerDiscreteScheduler,
-    FluxPipeline,
-    HunyuanDiTPAGPipeline,
-    HunyuanDiTPipeline,
-    KolorsImg2ImgPipeline,
-    KolorsPAGPipeline,
-    KolorsPipeline,
-    LuminaText2ImgPipeline,
-    PixArtAlphaPipeline,
-    PixArtSigmaPAGPipeline,
-    PixArtSigmaPipeline,
-    SchedulerMixin,
-    StableDiffusion3Img2ImgPipeline,
-    StableDiffusion3PAGPipeline,
-    StableDiffusion3Pipeline,
-    StableDiffusionImg2ImgPipeline,
-    StableDiffusionPAGPipeline,
-    StableDiffusionPipeline,
-    StableDiffusionXLImg2ImgPipeline,
-    StableDiffusionXLPAGPipeline,
-    StableDiffusionXLPipeline,
-    UniPCMultistepScheduler,
 )
-from diffusers.loaders.single_file import FromSingleFileMixin  # noqa: E402
-from diffusers.pipelines.auto_pipeline import AUTO_TEXT2IMAGE_PIPELINES_MAPPING  # noqa: E402
+from diffusers.pipelines.flux.pipeline_flux import FluxPipeline  # noqa: E402
+from diffusers.pipelines.hunyuandit.pipeline_hunyuandit import HunyuanDiTPipeline  # noqa: E402
+from diffusers.pipelines.kolors.pipeline_kolors import KolorsPipeline  # noqa: E402
+from diffusers.pipelines.kolors.pipeline_kolors_img2img import KolorsImg2ImgPipeline  # noqa: E402
+from diffusers.pipelines.lumina.pipeline_lumina import LuminaText2ImgPipeline  # noqa: E402
+from diffusers.pipelines.pag.pipeline_pag_hunyuandit import HunyuanDiTPAGPipeline  # noqa: E402
+from diffusers.pipelines.pag.pipeline_pag_kolors import KolorsPAGPipeline  # noqa: E402
+from diffusers.pipelines.pag.pipeline_pag_pixart_sigma import PixArtSigmaPAGPipeline  # noqa: E402
+from diffusers.pipelines.pag.pipeline_pag_sd import StableDiffusionPAGPipeline  # noqa: E402
+from diffusers.pipelines.pag.pipeline_pag_sd_3 import StableDiffusion3PAGPipeline  # noqa: E402
+from diffusers.pipelines.pag.pipeline_pag_sd_xl import StableDiffusionXLPAGPipeline  # noqa: E402
+from diffusers.pipelines.pipeline_utils import DiffusionPipeline  # noqa: E402
+from diffusers.pipelines.pixart_alpha.pipeline_pixart_alpha import PixArtAlphaPipeline  # noqa: E402
+from diffusers.pipelines.pixart_alpha.pipeline_pixart_sigma import PixArtSigmaPipeline  # noqa: E402
+from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import StableDiffusionPipeline  # noqa: E402
+from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import (  # noqa: E402
+    StableDiffusionImg2ImgPipeline,
+)
+from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import StableDiffusion3Pipeline  # noqa: E402
+from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3_img2img import (  # noqa: E402
+    StableDiffusion3Img2ImgPipeline,
+)
+from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl import StableDiffusionXLPipeline  # noqa: E402
+from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl_img2img import (  # noqa: E402
+    StableDiffusionXLImg2ImgPipeline,
+)
+from diffusers.schedulers.scheduling_ddim import DDIMScheduler  # noqa: E402
+from diffusers.schedulers.scheduling_ddpm import DDPMScheduler  # noqa: E402
+from diffusers.schedulers.scheduling_dpmsolver_multistep import DPMSolverMultistepScheduler  # noqa: E402
+from diffusers.schedulers.scheduling_euler_ancestral_discrete import EulerAncestralDiscreteScheduler  # noqa: E402
+from diffusers.schedulers.scheduling_euler_discrete import EulerDiscreteScheduler  # noqa: E402
+from diffusers.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler  # noqa: E402
+from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler  # noqa: E402
+from diffusers.schedulers.scheduling_utils import SchedulerMixin  # noqa: E402
 from torch import Tensor  # noqa: E402
 from torch.nn.attention import SDPBackend  # noqa: E402
 from torchao.quantization import (  # noqa: E402
