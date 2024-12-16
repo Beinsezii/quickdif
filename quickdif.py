@@ -2005,6 +2005,10 @@ def process_job(
     if pipe is None:
         return []
 
+    if "Sana" in pipe.__class__.__name__:  # Sana is too touchy
+        aot = os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", 0)
+        os.environ["TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL"] = "0"
+
     # INPUT TENSOR
     generators = [
         torch.Generator(noise_type.torch_device).manual_seed(seed + n) for n in range(parameters.batch_size.value)
@@ -2165,6 +2169,9 @@ def process_job(
 
     if default_scheduler is not None:
         pipe.scheduler = default_scheduler
+
+    if "Sana" in pipe.__class__.__name__:
+        os.environ["TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL"] = aot
 
     return results
     # }}}
