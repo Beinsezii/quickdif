@@ -915,6 +915,7 @@ AMD Navi 3 users should install `git+https://github.com/ROCm/flash-attention@how
     )
     sdpb = QDParam("sdpb", SDPB, multi=True, help="Override the SDP attention backend(s) to use")
     compile = QDParam("compile", Compile, value=Compile.Off, help="Compile network with torch.compile()")
+    tunable = QDParam("tunable", bool, value=False, help="Enable tunable pytorch operations")
     tile = QDParam(
         "tile",
         bool,
@@ -1239,7 +1240,7 @@ class SmartSigint:
     def handler(self, sig, frame):
         self.received = (sig, frame)
         if self.count >= self.num:
-            print(f"\nSIGINT received {self.count+1} times, forcibly aborting {self.job_name}")
+            print(f"\nSIGINT received {self.count + 1} times, forcibly aborting {self.job_name}")
             self.terminate()
         else:
             print(
@@ -2183,6 +2184,9 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
     images = []
     piperef = PipeRef()
     jobs = build_jobs(parameters)
+
+    if parameters.tunable.value:
+        torch.cuda.tunable.enable(val=True)
 
     total_images = len(jobs) * parameters.batch_size.value
     print(f"\nGenerating {len(jobs)} batches of {parameters.batch_size.value} images for {total_images} total...")
