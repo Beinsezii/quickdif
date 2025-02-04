@@ -12,6 +12,7 @@ dependencies = [
     "peft>=0.13.1",
     "protobuf>=5.28.2",
     "sentencepiece>=0.2.0",
+    "skrample@https://github.com/Beinsezii/skrample.git",
     "torch>=2.4.1",
     "torchao>=0.5.0",
     "transformers>=4.45.2",

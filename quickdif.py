@@ -20,7 +20,11 @@ from typing import Any, Callable
 
 import numpy as np
 import numpy.linalg as npl
+import skrample.sampling as sampling
+import skrample.scheduling as scheduling
 from PIL import Image, ImageDraw, PngImagePlugin
+from skrample.sampling import SkrampleSampler
+from skrample.scheduling import SkrampleSchedule
 from tqdm import tqdm
 
 # LATENT COLORS {{{
@@ -217,6 +221,60 @@ def pexpand(prompt: str, body: tuple[str, str] = ("{", "}"), sep: str = "|", sin
 
 
 # Enums {{{
+@enum.unique
+class SamplerSK(enum.StrEnum):
+    DPM = enum.auto()
+    DPM2 = enum.auto()
+    Euler = enum.auto()
+    EulerF = enum.auto()
+
+    def sampler(self) -> SkrampleSampler:
+        match self:
+            case SamplerSK.DPM:
+                return sampling.DPM()
+            case SamplerSK.DPM2:
+                return sampling.DPM(order=2)
+            case SamplerSK.Euler:
+                return sampling.Euler()
+            case SamplerSK.EulerF:
+                return sampling.EulerFlow()
+
+
+@enum.unique
+class ScheduleSK(enum.StrEnum):
+    Flow = enum.auto()
+    Scaled = enum.auto()
+    Uniform = enum.auto()
+
+    def schedule(self) -> SkrampleSchedule:
+        match self:
+            case ScheduleSK.Flow:
+                return scheduling.Flow()
+            case ScheduleSK.Scaled:
+                return scheduling.Scaled(uniform=False)
+            case ScheduleSK.Uniform:
+                return scheduling.Scaled(uniform=True)
+
+
+@enum.unique
+class PredictorSK(enum.StrEnum):
+    Epsilon = enum.auto()
+    Flow = enum.auto()
+    Sample = enum.auto()
+    Velocity = enum.auto()
+
+    def predictor(self) -> Callable:
+        match self:
+            case PredictorSK.Epsilon:
+                return sampling.EPSILON
+            case PredictorSK.Flow:
+                return sampling.FLOW
+            case PredictorSK.Sample:
+                return sampling.SAMPLE
+            case PredictorSK.Velocity:
+                return sampling.VELOCITY
+
+
 @enum.unique
 class Iter(enum.StrEnum):
     Basic = enum.auto()
@@ -872,6 +930,27 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         meta=True,
         help="Sampler timestep spacing",
     )
+    skrample_sampler = QDParam(
+        "skrample_sampler",
+        SamplerSK,
+        short="-K",
+        multi=True,
+        meta=True,
+    )
+    skrample_schedule = QDParam(
+        "skrample_schedule",
+        ScheduleSK,
+        short="-Ks",
+        multi=True,
+        meta=True,
+    )
+    skrample_predictor = QDParam(
+        "skrample_predictor",
+        PredictorSK,
+        short="-Kp",
+        multi=True,
+        meta=True,
+    )
     ### Global
     lora = QDParam("lora", str, short="-l", meta=True, multi=True, help='Apply Loras, ex. "ms_paint.safetensors:::0.6"')
     batch_count = QDParam("batch_count", int, short="-b", value=1, help="Behavior dependant on 'iter'")
@@ -1182,6 +1261,7 @@ from diffusers.schedulers.scheduling_euler_discrete import EulerDiscreteSchedule
 from diffusers.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler  # noqa: E402
 from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler  # noqa: E402
 from diffusers.schedulers.scheduling_utils import SchedulerMixin  # noqa: E402
+from skrample.diffusers import SkrampleWrapperScheduler  # noqa: E402
 from torch import Tensor  # noqa: E402
 from torch.nn.attention import SDPBackend  # noqa: E402
 from torchao.quantization import (  # noqa: E402
@@ -2068,11 +2148,15 @@ def process_job(
     # INFERENCE {{{
     pipe_params = signature(pipe).parameters
 
-    if "sampler" in job and hasattr(pipe, "scheduler"):
-        default_scheduler, pipe.scheduler = (
-            pipe.scheduler,
-            get_scheduler(job["sampler"], job.get("spacing", None), pipe.scheduler),
-        )
+    if ("sampler" in job or "skrample_sampler" in job) and hasattr(pipe, "scheduler"):
+        default_scheduler = pipe.scheduler
+        if "skrample_sampler" in job:
+            sksampler = job["skrample_sampler"].sampler()
+            sksampler.predictor = job.get("skrample_predictor", PredictorSK.Epsilon).predictor()
+            skscheudle = job.get("skrample_schedule", ScheduleSK.Uniform).schedule()
+            pipe.scheduler = SkrampleWrapperScheduler(sampler=sksampler, schedule=skscheudle)
+        else:
+            pipe.scheduler = get_scheduler(job["sampler"], job.get("spacing", None), pipe.scheduler)
     else:
         default_scheduler = None
 
