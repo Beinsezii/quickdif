@@ -2161,7 +2161,12 @@ def process_job(
             sksampler: SkrampleSampler = job["skrample_sampler"].sampler()
             sksampler.predictor = job.get("skrample_predictor", PredictorSK.Epsilon).predictor()
             if isinstance(sksampler, HighOrderSampler):
-                sksampler.order = job.get("skrample_order", sksampler.order)
+                order = job.get("skrample_order", sksampler.order)
+                if order > sksampler.max_order:
+                    print(
+                        f"!! Selected order {order} larger than {type(sksampler).__name__} max order {sksampler.max_order}"
+                    )
+                sksampler.order = order
             skscheudle: SkrampleSchedule = job.get("skrample_schedule", ScheduleSK.Uniform).schedule()
             pipe.scheduler = SkrampleWrapperScheduler(sampler=sksampler, schedule=skscheudle)
         else:
