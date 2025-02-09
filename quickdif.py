@@ -23,7 +23,7 @@ import numpy.linalg as npl
 import skrample.sampling as sampling
 import skrample.scheduling as scheduling
 from PIL import Image, ImageDraw, PngImagePlugin
-from skrample.sampling import SkrampleSampler
+from skrample.sampling import HighOrderSampler, SkrampleSampler
 from skrample.scheduling import SkrampleSchedule
 from tqdm import tqdm
 
@@ -224,7 +224,7 @@ def pexpand(prompt: str, body: tuple[str, str] = ("{", "}"), sep: str = "|", sin
 @enum.unique
 class SamplerSK(enum.StrEnum):
     DPM = enum.auto()
-    DPM2 = enum.auto()
+    UniPC = enum.auto()
     Euler = enum.auto()
     EulerF = enum.auto()
 
@@ -232,8 +232,8 @@ class SamplerSK(enum.StrEnum):
         match self:
             case SamplerSK.DPM:
                 return sampling.DPM()
-            case SamplerSK.DPM2:
-                return sampling.DPM(order=2)
+            case SamplerSK.UniPC:
+                return sampling.UniPC()
             case SamplerSK.Euler:
                 return sampling.Euler()
             case SamplerSK.EulerF:
@@ -948,6 +948,13 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         "skrample_predictor",
         PredictorSK,
         short="-Kp",
+        multi=True,
+        meta=True,
+    )
+    skrample_order = QDParam(
+        "skrample_order",
+        int,
+        short="-Ko",
         multi=True,
         meta=True,
     )
@@ -2151,9 +2158,11 @@ def process_job(
     if ("sampler" in job or "skrample_sampler" in job) and hasattr(pipe, "scheduler"):
         default_scheduler = pipe.scheduler
         if "skrample_sampler" in job:
-            sksampler = job["skrample_sampler"].sampler()
+            sksampler: SkrampleSampler = job["skrample_sampler"].sampler()
             sksampler.predictor = job.get("skrample_predictor", PredictorSK.Epsilon).predictor()
-            skscheudle = job.get("skrample_schedule", ScheduleSK.Uniform).schedule()
+            if isinstance(sksampler, HighOrderSampler):
+                sksampler.order = job.get("skrample_order", sksampler.order)
+            skscheudle: SkrampleSchedule = job.get("skrample_schedule", ScheduleSK.Uniform).schedule()
             pipe.scheduler = SkrampleWrapperScheduler(sampler=sksampler, schedule=skscheudle)
         else:
             pipe.scheduler = get_scheduler(job["sampler"], job.get("spacing", None), pipe.scheduler)
