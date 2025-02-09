@@ -276,6 +276,30 @@ class PredictorSK(enum.StrEnum):
 
 
 @enum.unique
+class DTypeSK(enum.StrEnum):
+    Default = enum.auto()
+    F64 = enum.auto()
+    F32 = enum.auto()
+    F16 = enum.auto()
+    BF16 = enum.auto()
+
+    @property
+    def torch_dtype(self) -> "torch.dtype | None":
+        match self:
+            case DTypeSK.F64:
+                return torch.float64
+            case DTypeSK.F32:
+                return torch.float32
+            case DTypeSK.F16:
+                return torch.float16
+            case DTypeSK.BF16:
+                return torch.bfloat16
+            case DTypeSK.Default:
+                return None
+        return 0
+
+
+@enum.unique
 class Iter(enum.StrEnum):
     Basic = enum.auto()
     Walk = enum.auto()
@@ -940,6 +964,7 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
     skrample_schedule = QDParam(
         "skrample_schedule",
         ScheduleSK,
+        value=ScheduleSK.Uniform,
         short="-Ks",
         multi=True,
         meta=True,
@@ -947,6 +972,7 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
     skrample_predictor = QDParam(
         "skrample_predictor",
         PredictorSK,
+        value=PredictorSK.Epsilon,
         short="-Kp",
         multi=True,
         meta=True,
@@ -955,6 +981,14 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         "skrample_order",
         int,
         short="-Ko",
+        multi=True,
+        meta=True,
+    )
+    skrample_dtype = QDParam(
+        "skrample_dtype",
+        DTypeSK,
+        value=DTypeSK.F32,
+        short="-Kdt",
         multi=True,
         meta=True,
     )
@@ -2159,7 +2193,7 @@ def process_job(
         default_scheduler = pipe.scheduler
         if "skrample_sampler" in job:
             sksampler: SkrampleSampler = job["skrample_sampler"].sampler()
-            sksampler.predictor = job.get("skrample_predictor", PredictorSK.Epsilon).predictor()
+            sksampler.predictor = job["skrample_predictor"].predictor()
             if isinstance(sksampler, HighOrderSampler):
                 order = job.get("skrample_order", sksampler.order)
                 if order > sksampler.max_order:
@@ -2167,8 +2201,11 @@ def process_job(
                         f"!! Selected order {order} larger than {type(sksampler).__name__} max order {sksampler.max_order}"
                     )
                 sksampler.order = order
-            skscheudle: SkrampleSchedule = job.get("skrample_schedule", ScheduleSK.Uniform).schedule()
-            pipe.scheduler = SkrampleWrapperScheduler(sampler=sksampler, schedule=skscheudle)
+            pipe.scheduler = SkrampleWrapperScheduler(
+                sampler=sksampler,
+                schedule=job["skrample_schedule"].schedule(),
+                compute_scale=job["skrample_dtype"].torch_dtype,
+            )
         else:
             pipe.scheduler = get_scheduler(job["sampler"], job.get("spacing", None), pipe.scheduler)
     else:
