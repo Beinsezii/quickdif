@@ -224,9 +224,8 @@ def pexpand(prompt: str, body: tuple[str, str] = ("{", "}"), sep: str = "|", sin
 @enum.unique
 class SamplerSK(enum.StrEnum):
     DPM = enum.auto()
-    UniPC = enum.auto()
     Euler = enum.auto()
-    EulerF = enum.auto()
+    UniPC = enum.auto()
 
     def sampler(self) -> SkrampleSampler:
         match self:
@@ -236,8 +235,6 @@ class SamplerSK(enum.StrEnum):
                 return sampling.UniPC()
             case SamplerSK.Euler:
                 return sampling.Euler()
-            case SamplerSK.EulerF:
-                return sampling.EulerFlow()
 
 
 @enum.unique
