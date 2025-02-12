@@ -242,6 +242,7 @@ class ScheduleSK(enum.StrEnum):
     Flow = enum.auto()
     Scaled = enum.auto()
     Uniform = enum.auto()
+    ZSNR = enum.auto()
 
     def schedule(self) -> SkrampleSchedule:
         match self:
@@ -251,6 +252,8 @@ class ScheduleSK(enum.StrEnum):
                 return scheduling.Scaled(uniform=False)
             case ScheduleSK.Uniform:
                 return scheduling.Scaled(uniform=True)
+            case ScheduleSK.ZSNR:
+                return scheduling.ZSNR()
 
 
 @enum.unique
