@@ -24,7 +24,7 @@ import skrample.sampling as sampling
 import skrample.scheduling as scheduling
 from PIL import Image, ImageDraw, PngImagePlugin
 from skrample.sampling import HighOrderSampler, SkrampleSampler
-from skrample.scheduling import SkrampleSchedule
+from skrample.scheduling import ScheduleModifier, SkrampleSchedule
 from tqdm import tqdm
 
 # LATENT COLORS {{{
@@ -279,6 +279,26 @@ class PredictorSK(enum.StrEnum):
 
 
 @enum.unique
+class ModifierSK(enum.StrEnum):
+    Beta = enum.auto()
+    Exponential = enum.auto()
+    Karras = enum.auto()
+    NONE = enum.auto()
+
+    def schedule_modifier(self) -> type[ScheduleModifier] | None:
+        match self:
+            case ModifierSK.Beta:
+                return scheduling.Beta
+            case ModifierSK.Exponential:
+                return scheduling.Exponential
+            case ModifierSK.Karras:
+                return scheduling.Karras
+            case ModifierSK.NONE:
+                return None
+        return 0
+
+
+@enum.unique
 class DTypeSK(enum.StrEnum):
     Default = enum.auto()
     F64 = enum.auto()
@@ -316,7 +336,12 @@ class Sampler(enum.StrEnum):
     Ddpm = enum.auto()
     Euler = enum.auto()
     EulerK = enum.auto()
+    EulerE = enum.auto()
+    EulerB = enum.auto()
     EulerF = enum.auto()
+    EulerFK = enum.auto()
+    EulerFE = enum.auto()
+    EulerFB = enum.auto()
     EulerA = enum.auto()
     Dpm = enum.auto()
     DpmK = enum.auto()
@@ -977,6 +1002,14 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         PredictorSK,
         value=PredictorSK.Epsilon,
         short="-Kp",
+        multi=True,
+        meta=True,
+    )
+    skrample_modifier = QDParam(
+        "skrample_modifier",
+        ModifierSK,
+        value=ModifierSK.NONE,
+        short="-Km",
         multi=True,
         meta=True,
     )
@@ -1646,7 +1679,12 @@ def get_scheduler(sampler: Sampler, spacing: Spacing | None, default_scheduler: 
         Sampler.Ddpm: (DDPMScheduler, {}),
         Sampler.Euler: (EulerDiscreteScheduler, {}),
         Sampler.EulerK: (EulerDiscreteScheduler, {"use_karras_sigmas": True}),
+        Sampler.EulerE: (EulerDiscreteScheduler, {"use_exponential_sigmas": True}),
+        Sampler.EulerB: (EulerDiscreteScheduler, {"use_beta_sigmas": True}),
         Sampler.EulerF: (FlowMatchEulerDiscreteScheduler, {}),
+        Sampler.EulerFK: (FlowMatchEulerDiscreteScheduler, {"use_karras_sigmas": True}),
+        Sampler.EulerFE: (FlowMatchEulerDiscreteScheduler, {"use_exponential_sigmas": True}),
+        Sampler.EulerFB: (FlowMatchEulerDiscreteScheduler, {"use_beta_sigmas": True}),
         Sampler.EulerA: (EulerAncestralDiscreteScheduler, {}),
         Sampler.Dpm: (
             DPMSolverMultistepScheduler,
@@ -2204,9 +2242,15 @@ def process_job(
                         f"!! Selected order {order} larger than {type(sksampler).__name__} max order {sksampler.max_order}"
                     )
                 sksampler.order = order
+
+            skschedule = job["skrample_schedule"].schedule()
+            schedule_modifier = job["skrample_modifier"].schedule_modifier()
+            if schedule_modifier:
+                skschedule = schedule_modifier(skschedule)
+
             pipe.scheduler = SkrampleWrapperScheduler(
                 sampler=sksampler,
-                schedule=job["skrample_schedule"].schedule(),
+                schedule=skschedule,
                 compute_scale=job["skrample_dtype"].torch_dtype,
             )
         else:
