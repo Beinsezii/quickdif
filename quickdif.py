@@ -228,46 +228,56 @@ class SamplerSK(enum.StrEnum):
     Euler = enum.auto()
     UniPC = enum.auto()
 
-    def sampler(self) -> SkrampleSampler:
+    @property
+    def sampler(self) -> tuple[type[SkrampleSampler], dict[str, Any]]:
         match self:
             case SamplerSK.DPM:
-                return sampling.DPM()
+                return sampling.DPM, {"add_noise": False}
             case SamplerSK.SDPM:
-                return sampling.DPM(add_noise=True)
+                return sampling.DPM, {"add_noise": True}
             case SamplerSK.UniPC:
-                return sampling.UniPC()
+                return sampling.UniPC, {}
             case SamplerSK.Euler:
-                return sampling.Euler()
+                return sampling.Euler, {}
 
 
 @enum.unique
 class ScheduleSK(enum.StrEnum):
+    Default = enum.auto()
     Flow = enum.auto()
     Scaled = enum.auto()
     Uniform = enum.auto()
     ZSNR = enum.auto()
 
-    def schedule(self) -> SkrampleSchedule:
+    @property
+    def schedule(self) -> tuple[type[SkrampleSchedule] | None, dict[str, Any]]:
         match self:
+            case ScheduleSK.Default:
+                return None, {}
             case ScheduleSK.Flow:
-                return scheduling.Flow()
+                return scheduling.Flow, {}
             case ScheduleSK.Scaled:
-                return scheduling.Scaled(uniform=False)
+                return scheduling.Scaled, {"uniform": False}
             case ScheduleSK.Uniform:
-                return scheduling.Scaled(uniform=True)
+                return scheduling.Scaled, {"uniform": True}
             case ScheduleSK.ZSNR:
-                return scheduling.ZSNR()
+                return scheduling.ZSNR, {"uniform": True}
+        return 0
 
 
 @enum.unique
 class PredictorSK(enum.StrEnum):
+    Default = enum.auto()
     Epsilon = enum.auto()
     Flow = enum.auto()
     Sample = enum.auto()
     Velocity = enum.auto()
 
-    def predictor(self) -> Callable:
+    @property
+    def predictor(self) -> sampling.PREDICTOR | None:
         match self:
+            case PredictorSK.Default:
+                return None
             case PredictorSK.Epsilon:
                 return sampling.EPSILON
             case PredictorSK.Flow:
@@ -276,17 +286,22 @@ class PredictorSK(enum.StrEnum):
                 return sampling.SAMPLE
             case PredictorSK.Velocity:
                 return sampling.VELOCITY
+        return 0
 
 
 @enum.unique
 class ModifierSK(enum.StrEnum):
+    Default = enum.auto()
     Beta = enum.auto()
     Exponential = enum.auto()
     Karras = enum.auto()
     NONE = enum.auto()
 
+    @property
     def schedule_modifier(self) -> type[ScheduleModifier] | None:
         match self:
+            case ModifierSK.Default:
+                return None
             case ModifierSK.Beta:
                 return scheduling.Beta
             case ModifierSK.Exponential:
@@ -294,7 +309,7 @@ class ModifierSK(enum.StrEnum):
             case ModifierSK.Karras:
                 return scheduling.Karras
             case ModifierSK.NONE:
-                return None
+                return scheduling.NoMod
         return 0
 
 
@@ -992,7 +1007,7 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
     skrample_schedule = QDParam(
         "skrample_schedule",
         ScheduleSK,
-        value=ScheduleSK.Uniform,
+        value=ScheduleSK.Default,
         short="-Ks",
         multi=True,
         meta=True,
@@ -1000,7 +1015,7 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
     skrample_predictor = QDParam(
         "skrample_predictor",
         PredictorSK,
-        value=PredictorSK.Epsilon,
+        value=PredictorSK.Default,
         short="-Kp",
         multi=True,
         meta=True,
@@ -1008,7 +1023,7 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
     skrample_modifier = QDParam(
         "skrample_modifier",
         ModifierSK,
-        value=ModifierSK.NONE,
+        value=ModifierSK.Default,
         short="-Km",
         multi=True,
         meta=True,
@@ -2233,26 +2248,28 @@ def process_job(
     if ("sampler" in job or "skrample_sampler" in job) and hasattr(pipe, "scheduler"):
         default_scheduler = pipe.scheduler
         if "skrample_sampler" in job:
-            sksampler: SkrampleSampler = job["skrample_sampler"].sampler()
-            sksampler.predictor = job["skrample_predictor"].predictor()
-            if isinstance(sksampler, HighOrderSampler):
-                order = job.get("skrample_order", sksampler.order)
-                if order > sksampler.max_order:
-                    print(
-                        f"!! Selected order {order} larger than {type(sksampler).__name__} max order {sksampler.max_order}"
-                    )
-                sksampler.order = order
+            sampler_type, sampler_props = job["skrample_sampler"].sampler
+            schedule_type, schedule_props = job["skrample_schedule"].schedule
 
-            skschedule = job["skrample_schedule"].schedule()
-            schedule_modifier = job["skrample_modifier"].schedule_modifier()
-            if schedule_modifier:
-                skschedule = schedule_modifier(skschedule)
+            if issubclass(sampler_type, HighOrderSampler):
+                hos = sampler_type()
+                order = job.get("skrample_order", None)
+                if order is not None:
+                    if order > hos.max_order:
+                        print(f"!! Selected order {order} larger than {type(hos).__name__} max order {hos.max_order}")
+                    sampler_props["order"] = order
 
-            pipe.scheduler = SkrampleWrapperScheduler(
-                sampler=sksampler,
-                schedule=skschedule,
+            pipe.scheduler = SkrampleWrapperScheduler.from_diffusers_config(
+                sampler=sampler_type,
+                schedule=schedule_type,
+                schedule_modifier=job["skrample_modifier"].schedule_modifier,
+                predictor=job["skrample_predictor"].predictor,
                 compute_scale=job["skrample_dtype"].torch_dtype,
+                sampler_props=sampler_props,
+                schedule_props=schedule_props,
+                **pipe.scheduler.config | {"timestep_spacing": job["spacing"]},
             )
+
         else:
             pipe.scheduler = get_scheduler(job["sampler"], job.get("spacing", None), pipe.scheduler)
     else:
