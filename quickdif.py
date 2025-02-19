@@ -2232,13 +2232,6 @@ def process_job(
             ncond = compel.build_conditioning_tensor(neg)
         pcond, ncond = compel.pad_conditioning_tensors_to_same_length([pcond, ncond])
         job |= {"prompt_embeds": pcond, "negative_prompt_embeds": ncond}
-    # Flux 24GB workaround because diffusers doesn't bother to clear between stages
-    elif type(pipe).__name__.startswith("Flux") and parameters.offload.value == Offload.Model:
-        pos, ppos, _ = pipe.encode_prompt(job.pop("prompt", ""), None)
-        job.pop("negative", "")  # flux has no negative?
-        pipe.to("cpu")
-        flush()  # basically diffusers should call this between weight migrations but it doesn't
-        job |= {"prompt_embeds": pos, "pooled_prompt_embeds": ppos}
 
     # CONDITIONING }}}
 
