@@ -226,6 +226,7 @@ class SamplerSK(enum.StrEnum):
     DPM = enum.auto()
     SDPM = enum.auto()
     Euler = enum.auto()
+    SEuler = enum.auto()
     UniPC = enum.auto()
 
     @property
@@ -238,7 +239,9 @@ class SamplerSK(enum.StrEnum):
             case SamplerSK.UniPC:
                 return sampling.UniPC, {}
             case SamplerSK.Euler:
-                return sampling.Euler, {}
+                return sampling.Euler, {"add_noise": False}
+            case SamplerSK.SEuler:
+                return sampling.Euler, {"add_noise": True}
 
 
 @enum.unique
