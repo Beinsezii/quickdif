@@ -371,6 +371,8 @@ class Sampler(enum.StrEnum):
     SDpm2K = enum.auto()
     Dpm3 = enum.auto()
     Dpm3K = enum.auto()
+    SDpm3 = enum.auto()
+    SDpm3K = enum.auto()
     Unipc = enum.auto()
     UnipcK = enum.auto()
     Unipc2 = enum.auto()
@@ -1743,6 +1745,14 @@ def get_scheduler(sampler: Sampler, spacing: Spacing | None, default_scheduler: 
         Sampler.Dpm3K: (
             DPMSolverMultistepScheduler,
             {"algorithm_type": "dpmsolver++", "solver_order": 3, "use_karras_sigmas": True},
+        ),
+        Sampler.SDpm3: (
+            DPMSolverMultistepScheduler,
+            {"algorithm_type": "sde-dpmsolver++", "solver_order": 3, "use_karras_sigmas": False},
+        ),
+        Sampler.SDpm3K: (
+            DPMSolverMultistepScheduler,
+            {"algorithm_type": "sde-dpmsolver++", "solver_order": 3, "use_karras_sigmas": True},
         ),
         Sampler.Unipc: (UniPCMultistepScheduler, {"solver_order": 1, "use_karras_sigmas": False}),
         Sampler.UnipcK: (UniPCMultistepScheduler, {"solver_order": 1, "use_karras_sigmas": True}),
