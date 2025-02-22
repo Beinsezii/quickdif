@@ -225,6 +225,8 @@ def pexpand(prompt: str, body: tuple[str, str] = ("{", "}"), sep: str = "|", sin
 class SamplerSK(enum.StrEnum):
     DPM = enum.auto()
     SDPM = enum.auto()
+    IPNDM = enum.auto()
+    SIPNDM = enum.auto()
     Euler = enum.auto()
     SEuler = enum.auto()
     UniPC = enum.auto()
@@ -236,6 +238,10 @@ class SamplerSK(enum.StrEnum):
                 return sampling.DPM, {"add_noise": False}
             case SamplerSK.SDPM:
                 return sampling.DPM, {"add_noise": True}
+            case SamplerSK.IPNDM:
+                return sampling.IPNDM, {"add_noise": False}
+            case SamplerSK.SIPNDM:
+                return sampling.IPNDM, {"add_noise": True}
             case SamplerSK.UniPC:
                 return sampling.UniPC, {}
             case SamplerSK.Euler:
