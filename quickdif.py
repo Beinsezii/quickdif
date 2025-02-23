@@ -1036,7 +1036,7 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
     )
     skrample_noise = QDParam("skrample_noise", NoiseSK, value=NoiseSK.Random, short="-Kn", multi=True, meta=True)
     skrample_order = QDParam("skrample_order", int, short="-Ko", multi=True, meta=True)
-    skrample_dtype = QDParam("skrample_dtype", DTypeSK, value=DTypeSK.F32, short="-Kdt", multi=True, meta=True)
+    skrample_dtype = QDParam("skrample_dtype", DTypeSK, value=DTypeSK.F64, short="-Kdt", multi=True, meta=True)
     ### Global
     lora = QDParam("lora", str, short="-l", meta=True, multi=True, help='Apply Loras, ex. "ms_paint.safetensors:::0.6"')
     batch_count = QDParam("batch_count", int, short="-b", value=1, help="Behavior dependant on 'iter'")
