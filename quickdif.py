@@ -20,6 +20,7 @@ from typing import Any, Callable
 
 import numpy as np
 import numpy.linalg as npl
+import skrample.pytorch.noise as noise
 import skrample.sampling as sampling
 import skrample.scheduling as scheduling
 from PIL import Image, ImageDraw, PngImagePlugin
@@ -319,6 +320,21 @@ class ModifierSK(enum.StrEnum):
                 return scheduling.Karras
             case ModifierSK.NONE:
                 return scheduling.NoMod
+        return 0
+
+
+@enum.unique
+class NoiseSK(enum.StrEnum):
+    Random = enum.auto()
+    Brownian = enum.auto()
+
+    @property
+    def noise_type(self) -> type[noise.TensorNoiseCommon]:
+        match self:
+            case NoiseSK.Random:
+                return noise.Random
+            case NoiseSK.Brownian:
+                return noise.Brownian
         return 0
 
 
@@ -1008,52 +1024,19 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         meta=True,
         help="Sampler timestep spacing",
     )
-    skrample_sampler = QDParam(
-        "skrample_sampler",
-        SamplerSK,
-        short="-K",
-        multi=True,
-        meta=True,
-    )
+    skrample_sampler = QDParam("skrample_sampler", SamplerSK, short="-K", multi=True, meta=True)
     skrample_schedule = QDParam(
-        "skrample_schedule",
-        ScheduleSK,
-        value=ScheduleSK.Default,
-        short="-Ks",
-        multi=True,
-        meta=True,
+        "skrample_schedule", ScheduleSK, value=ScheduleSK.Default, short="-Ks", multi=True, meta=True
     )
     skrample_predictor = QDParam(
-        "skrample_predictor",
-        PredictorSK,
-        value=PredictorSK.Default,
-        short="-Kp",
-        multi=True,
-        meta=True,
+        "skrample_predictor", PredictorSK, value=PredictorSK.Default, short="-Kp", multi=True, meta=True
     )
     skrample_modifier = QDParam(
-        "skrample_modifier",
-        ModifierSK,
-        value=ModifierSK.Default,
-        short="-Km",
-        multi=True,
-        meta=True,
+        "skrample_modifier", ModifierSK, value=ModifierSK.Default, short="-Km", multi=True, meta=True
     )
-    skrample_order = QDParam(
-        "skrample_order",
-        int,
-        short="-Ko",
-        multi=True,
-        meta=True,
-    )
-    skrample_dtype = QDParam(
-        "skrample_dtype",
-        DTypeSK,
-        value=DTypeSK.F32,
-        short="-Kdt",
-        multi=True,
-        meta=True,
-    )
+    skrample_noise = QDParam("skrample_noise", NoiseSK, value=NoiseSK.Random, short="-Kn", multi=True, meta=True)
+    skrample_order = QDParam("skrample_order", int, short="-Ko", multi=True, meta=True)
+    skrample_dtype = QDParam("skrample_dtype", DTypeSK, value=DTypeSK.F32, short="-Kdt", multi=True, meta=True)
     ### Global
     lora = QDParam("lora", str, short="-l", meta=True, multi=True, help='Apply Loras, ex. "ms_paint.safetensors:::0.6"')
     batch_count = QDParam("batch_count", int, short="-b", value=1, help="Behavior dependant on 'iter'")
@@ -2276,6 +2259,7 @@ def process_job(
                 schedule=schedule_type,
                 schedule_modifier=job["skrample_modifier"].schedule_modifier,
                 predictor=job["skrample_predictor"].predictor,
+                noise_type=job["skrample_noise"].noise_type,
                 compute_scale=job["skrample_dtype"].torch_dtype,
                 sampler_props=sampler_props,
                 schedule_props=schedule_props,
