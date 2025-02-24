@@ -20,7 +20,6 @@ from typing import Any, Callable
 
 import numpy as np
 import numpy.linalg as npl
-import skrample.pytorch.noise as noise
 import skrample.sampling as sampling
 import skrample.scheduling as scheduling
 from PIL import Image, ImageDraw, PngImagePlugin
@@ -329,7 +328,7 @@ class NoiseSK(enum.StrEnum):
     Brownian = enum.auto()
 
     @property
-    def noise_type(self) -> type[noise.TensorNoiseCommon]:
+    def noise_type(self) -> type["noise.TensorNoiseCommon"]:
         match self:
             case NoiseSK.Random:
                 return noise.Random
@@ -1305,6 +1304,7 @@ addenv("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 #
 # Load Torch and libs that depend on it after the CLI cause it's laggy.
 import diffusers  # noqa: E402
+import skrample.pytorch.noise as noise  # noqa: E402
 import torch  # noqa: E402
 from compel import Compel, ReturnedEmbeddingsType  # noqa: E402
 from diffusers.loaders.single_file import FromSingleFileMixin  # noqa: E402
