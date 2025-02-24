@@ -326,6 +326,8 @@ class ModifierSK(enum.StrEnum):
 class NoiseSK(enum.StrEnum):
     Random = enum.auto()
     Brownian = enum.auto()
+    Offset = enum.auto()
+    Pyramid = enum.auto()
 
     @property
     def noise_type(self) -> type["noise.TensorNoiseCommon"]:
@@ -334,6 +336,10 @@ class NoiseSK(enum.StrEnum):
                 return noise.Random
             case NoiseSK.Brownian:
                 return noise.Brownian
+            case NoiseSK.Offset:
+                return noise.Offset
+            case NoiseSK.Pyramid:
+                return noise.Pyramid
         return 0
 
 
