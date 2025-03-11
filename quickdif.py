@@ -254,6 +254,7 @@ class SamplerSK(enum.StrEnum):
 class ScheduleSK(enum.StrEnum):
     Default = enum.auto()
     Flow = enum.auto()
+    Linear = enum.auto()
     Scaled = enum.auto()
     Uniform = enum.auto()
     ZSNR = enum.auto()
@@ -265,6 +266,8 @@ class ScheduleSK(enum.StrEnum):
                 return None, {}
             case ScheduleSK.Flow:
                 return scheduling.Flow, {}
+            case ScheduleSK.Linear:
+                return scheduling.Linear, {}
             case ScheduleSK.Scaled:
                 return scheduling.Scaled, {"uniform": False}
             case ScheduleSK.Uniform:
