@@ -333,16 +333,16 @@ class NoiseSK(enum.StrEnum):
     Pyramid = enum.auto()
 
     @property
-    def noise_type(self) -> type["skpt.noise.TensorNoiseCommon"]:
+    def noise_type(self) -> type["sknoise.TensorNoiseCommon"]:
         match self:
             case NoiseSK.Random:
-                return skpt.noise.Random
+                return sknoise.Random
             case NoiseSK.Brownian:
-                return skpt.noise.Brownian
+                return sknoise.Brownian
             case NoiseSK.Offset:
-                return skpt.noise.Offset
+                return sknoise.Offset
             case NoiseSK.Pyramid:
-                return skpt.noise.Pyramid
+                return sknoise.Pyramid
         return 0
 
 
@@ -1375,7 +1375,7 @@ addenv("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 #
 # Load Torch and libs that depend on it after the CLI cause it's laggy.
 import diffusers  # noqa: E402
-import skrample.pytorch as skpt  # noqa: E402
+import skrample.pytorch.noise as sknoise  # noqa: E402
 import torch  # noqa: E402
 from compel import Compel, ReturnedEmbeddingsType  # noqa: E402
 from diffusers.loaders.single_file import FromSingleFileMixin  # noqa: E402
