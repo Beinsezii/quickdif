@@ -20,7 +20,11 @@ from typing import Any, Callable
 
 import numpy as np
 import numpy.linalg as npl
+import skrample.sampling as sampling
+import skrample.scheduling as scheduling
 from PIL import Image, ImageDraw, PngImagePlugin
+from skrample.sampling import HighOrderSampler, SkrampleSampler
+from skrample.scheduling import ScheduleModifier, SkrampleSchedule
 from tqdm import tqdm
 
 # LATENT COLORS {{{
@@ -218,6 +222,155 @@ def pexpand(prompt: str, body: tuple[str, str] = ("{", "}"), sep: str = "|", sin
 
 # Enums {{{
 @enum.unique
+class SamplerSK(enum.StrEnum):
+    DPM = enum.auto()
+    SDPM = enum.auto()
+    IPNDM = enum.auto()
+    SIPNDM = enum.auto()
+    Euler = enum.auto()
+    SEuler = enum.auto()
+    UniPC = enum.auto()
+
+    @property
+    def sampler(self) -> tuple[type[SkrampleSampler], dict[str, Any]]:
+        match self:
+            case SamplerSK.DPM:
+                return sampling.DPM, {"add_noise": False}
+            case SamplerSK.SDPM:
+                return sampling.DPM, {"add_noise": True}
+            case SamplerSK.IPNDM:
+                return sampling.IPNDM, {"add_noise": False}
+            case SamplerSK.SIPNDM:
+                return sampling.IPNDM, {"add_noise": True}
+            case SamplerSK.UniPC:
+                return sampling.UniPC, {}
+            case SamplerSK.Euler:
+                return sampling.Euler, {"add_noise": False}
+            case SamplerSK.SEuler:
+                return sampling.Euler, {"add_noise": True}
+
+
+@enum.unique
+class ScheduleSK(enum.StrEnum):
+    Default = enum.auto()
+    Flow = enum.auto()
+    Linear = enum.auto()
+    Scaled = enum.auto()
+    Uniform = enum.auto()
+    ZSNR = enum.auto()
+
+    @property
+    def schedule(self) -> tuple[type[SkrampleSchedule] | None, dict[str, Any]]:
+        match self:
+            case ScheduleSK.Default:
+                return None, {}
+            case ScheduleSK.Flow:
+                return scheduling.Flow, {}
+            case ScheduleSK.Linear:
+                return scheduling.Linear, {}
+            case ScheduleSK.Scaled:
+                return scheduling.Scaled, {"uniform": False}
+            case ScheduleSK.Uniform:
+                return scheduling.Scaled, {"uniform": True}
+            case ScheduleSK.ZSNR:
+                return scheduling.ZSNR, {"uniform": True}
+        return 0
+
+
+@enum.unique
+class PredictorSK(enum.StrEnum):
+    Default = enum.auto()
+    Epsilon = enum.auto()
+    Flow = enum.auto()
+    Sample = enum.auto()
+    Velocity = enum.auto()
+
+    @property
+    def predictor(self) -> sampling.PREDICTOR | None:
+        match self:
+            case PredictorSK.Default:
+                return None
+            case PredictorSK.Epsilon:
+                return sampling.EPSILON
+            case PredictorSK.Flow:
+                return sampling.FLOW
+            case PredictorSK.Sample:
+                return sampling.SAMPLE
+            case PredictorSK.Velocity:
+                return sampling.VELOCITY
+        return 0
+
+
+@enum.unique
+class ModifierSK(enum.StrEnum):
+    Default = enum.auto()
+    Beta = enum.auto()
+    Exponential = enum.auto()
+    Karras = enum.auto()
+    NONE = enum.auto()
+
+    @property
+    def schedule_modifier(self) -> type[ScheduleModifier] | None:
+        match self:
+            case ModifierSK.Default:
+                return None
+            case ModifierSK.Beta:
+                return scheduling.Beta
+            case ModifierSK.Exponential:
+                return scheduling.Exponential
+            case ModifierSK.Karras:
+                return scheduling.Karras
+            case ModifierSK.NONE:
+                return scheduling.NoMod
+        return 0
+
+
+@enum.unique
+class NoiseSK(enum.StrEnum):
+    Random = enum.auto()
+    Brownian = enum.auto()
+    Offset = enum.auto()
+    Pyramid = enum.auto()
+
+    @property
+    def noise_type(self) -> type["skpt.noise.TensorNoiseCommon"]:
+        match self:
+            case NoiseSK.Random:
+                return skpt.noise.Random
+            case NoiseSK.Brownian:
+                return skpt.noise.Brownian
+            case NoiseSK.Offset:
+                return skpt.noise.Offset
+            case NoiseSK.Pyramid:
+                return skpt.noise.Pyramid
+        return 0
+
+
+@enum.unique
+class DTypeSK(enum.StrEnum):
+    Default = enum.auto()
+    F64 = enum.auto()
+    F32 = enum.auto()
+    F16 = enum.auto()
+    BF16 = enum.auto()
+
+    @property
+    def torch_dtype(self) -> "torch.dtype | None":
+        match self:
+            case DTypeSK.F64:
+                return torch.float64
+            case DTypeSK.F32:
+                return torch.float32
+            case DTypeSK.F16:
+                return torch.float16
+            case DTypeSK.BF16:
+                return torch.bfloat16
+            case DTypeSK.Default:
+                return None
+        return 0
+
+
+@enum.unique
 class Iter(enum.StrEnum):
     Basic = enum.auto()
     Walk = enum.auto()
@@ -231,7 +384,12 @@ class Sampler(enum.StrEnum):
     Ddpm = enum.auto()
     Euler = enum.auto()
     EulerK = enum.auto()
+    EulerE = enum.auto()
+    EulerB = enum.auto()
     EulerF = enum.auto()
+    EulerFK = enum.auto()
+    EulerFE = enum.auto()
+    EulerFB = enum.auto()
     EulerA = enum.auto()
     Dpm = enum.auto()
     DpmK = enum.auto()
@@ -874,6 +1032,81 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         meta=True,
         help="Sampler timestep spacing",
     )
+    skrample_sampler = QDParam(
+        "skrample_sampler",
+        SamplerSK,
+        short="-K",
+        multi=True,
+        meta=True,
+        help="""Sampler from https://github.com/Beinsezii/skrample
+If this is set, the diffusers scheduler --scheduler -S will be ignored
+Variants with 's' are stochastic, so seuler -> Euler Ancestral""",
+    )
+    skrample_schedule = QDParam(
+        "skrample_schedule",
+        ScheduleSK,
+        value=ScheduleSK.Default,
+        short="-Ks",
+        multi=True,
+        meta=True,
+        help="""Noise schedule from https://github.com/Beinsezii/skrample
+Use Flow/Linear for flow-matching models like SD3 and Flux, otherwise use Scaled/Uniform.
+ZSNR is only for very particular models that explicitly need it, like Terminus or NoobAI-VPred.""",
+    )
+    skrample_predictor = QDParam(
+        "skrample_predictor",
+        PredictorSK,
+        value=PredictorSK.Default,
+        short="-Kp",
+        multi=True,
+        meta=True,
+        help="""Prediction function from https://github.com/Beinsezii/skrample
+This should only need to be set if a model explicitly does not use the default, like Terminus and NoobAI-VPred.""",
+    )
+    skrample_modifier = QDParam(
+        "skrample_modifier",
+        ModifierSK,
+        value=ModifierSK.Default,
+        short="-Km",
+        multi=True,
+        meta=True,
+        help="""Schedule modifiers from https://github.com/Beinsezii/skrample
+Affect the ramp of the noise schedule. All modifiers work with all schedules to varying degrees.""",
+    )
+    skrample_noise = QDParam(
+        "skrample_noise",
+        NoiseSK,
+        value=NoiseSK.Random,
+        short="-Kn",
+        multi=True,
+        meta=True,
+        help="""The type of noise to use for stochastic skrample samplers.
+Random is the default for quickdif and what is used for diffusers schedulers (-S).
+Brownian is what is what some other diffusion applications use for "SDE", such as "DPM++ SDE".
+Offset is equivalent to the offset noise algorithm; each channel is offset by a random amount.
+Pyramid is a hierarchical algorithm; similar to variance_noise.""",
+    )
+    skrample_order = QDParam(
+        "skrample_order",
+        int,
+        short="-Ko",
+        multi=True,
+        meta=True,
+        help="""Solver order for skrample_sampler.
+This is equivalent to the number in the sampler name of other diffusion applications.
+So -Ko 3 is equivalent to DPM++ 3M, or -S dpm3""",
+    )
+    skrample_dtype = QDParam(
+        "skrample_dtype",
+        DTypeSK,
+        value=DTypeSK.F64,
+        short="-Kdt",
+        multi=True,
+        meta=True,
+        help="""Skrample samplers support a dtype separate from the model dtype itself.
+Most diffusion applications use F32, sometimes labeled 'upcast sampling'.
+Performance penalty is typically imperceptible, so it's recommended to leave this at F64""",
+    )
     ### Global
     lora = QDParam("lora", str, short="-l", meta=True, multi=True, help='Apply Loras, ex. "ms_paint.safetensors:::0.6"')
     batch_count = QDParam("batch_count", int, short="-b", value=1, help="Behavior dependant on 'iter'")
@@ -1142,6 +1375,7 @@ addenv("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 #
 # Load Torch and libs that depend on it after the CLI cause it's laggy.
 import diffusers  # noqa: E402
+import skrample.pytorch as skpt  # noqa: E402
 import torch  # noqa: E402
 from compel import Compel, ReturnedEmbeddingsType  # noqa: E402
 from diffusers.loaders.single_file import FromSingleFileMixin  # noqa: E402
@@ -1184,6 +1418,7 @@ from diffusers.schedulers.scheduling_euler_discrete import EulerDiscreteSchedule
 from diffusers.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler  # noqa: E402
 from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler  # noqa: E402
 from diffusers.schedulers.scheduling_utils import SchedulerMixin  # noqa: E402
+from skrample.diffusers import SkrampleWrapperScheduler  # noqa: E402
 from torch import Tensor  # noqa: E402
 from torch.nn.attention import SDPBackend  # noqa: E402
 from torchao.quantization import (  # noqa: E402
@@ -1524,7 +1759,12 @@ def get_scheduler(sampler: Sampler, spacing: Spacing | None, default_scheduler: 
         Sampler.Ddpm: (DDPMScheduler, {}),
         Sampler.Euler: (EulerDiscreteScheduler, {}),
         Sampler.EulerK: (EulerDiscreteScheduler, {"use_karras_sigmas": True}),
+        Sampler.EulerE: (EulerDiscreteScheduler, {"use_exponential_sigmas": True}),
+        Sampler.EulerB: (EulerDiscreteScheduler, {"use_beta_sigmas": True}),
         Sampler.EulerF: (FlowMatchEulerDiscreteScheduler, {}),
+        Sampler.EulerFK: (FlowMatchEulerDiscreteScheduler, {"use_karras_sigmas": True}),
+        Sampler.EulerFE: (FlowMatchEulerDiscreteScheduler, {"use_exponential_sigmas": True}),
+        Sampler.EulerFB: (FlowMatchEulerDiscreteScheduler, {"use_beta_sigmas": True}),
         Sampler.EulerA: (EulerAncestralDiscreteScheduler, {}),
         Sampler.Dpm: (
             DPMSolverMultistepScheduler,
@@ -2071,11 +2311,34 @@ def process_job(
     # INFERENCE {{{
     pipe_params = signature(pipe).parameters
 
-    if "sampler" in job and hasattr(pipe, "scheduler"):
-        default_scheduler, pipe.scheduler = (
-            pipe.scheduler,
-            get_scheduler(job["sampler"], job.get("spacing", None), pipe.scheduler),
-        )
+    if ("sampler" in job or "skrample_sampler" in job) and hasattr(pipe, "scheduler"):
+        default_scheduler = pipe.scheduler
+        if "skrample_sampler" in job:
+            sampler_type, sampler_props = job["skrample_sampler"].sampler
+            schedule_type, schedule_props = job["skrample_schedule"].schedule
+
+            if issubclass(sampler_type, HighOrderSampler):
+                hos = sampler_type()
+                order = job.get("skrample_order", None)
+                if order is not None:
+                    if order > hos.max_order:
+                        print(f"!! Selected order {order} larger than {type(hos).__name__} max order {hos.max_order}")
+                    sampler_props["order"] = order
+
+            pipe.scheduler = SkrampleWrapperScheduler.from_diffusers_config(
+                sampler=sampler_type,
+                schedule=schedule_type,
+                schedule_modifier=job["skrample_modifier"].schedule_modifier,
+                predictor=job["skrample_predictor"].predictor,
+                noise_type=job["skrample_noise"].noise_type,
+                compute_scale=job["skrample_dtype"].torch_dtype,
+                sampler_props=sampler_props,
+                schedule_props=schedule_props,
+                **pipe.scheduler.config | {"timestep_spacing": job["spacing"]},
+            )
+
+        else:
+            pipe.scheduler = get_scheduler(job["sampler"], job.get("spacing", None), pipe.scheduler)
     else:
         default_scheduler = None
 
