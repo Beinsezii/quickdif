@@ -25,6 +25,7 @@ Quick and easy CLI inference that just works™ for a variety of Diffusers model
     * PAG / Perturbed-Attention Guidance
     * Many latent augmentation params
     * Many post processing effects
+    * Fully modular samplers/schedules, courtesy of [skrample](https://github.com/Beinsezii/skrample)
   * Iterate over most parameters and create grids
   * Expand prompts with `photo of {all|of|these}` or `photo of [one|of|these]`
   * Load settings from JSON, TOML, PNG
