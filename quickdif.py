@@ -1084,8 +1084,7 @@ Affect the ramp of the noise schedule. All modifiers work with all schedules to 
 Random is the default for quickdif and what is used for diffusers schedulers (-S).
 Brownian is what is what some other diffusion applications use for "SDE", such as "DPM++ SDE".
 Offset is equivalent to the offset noise algorithm; each channel is offset by a random amount.
-Pyramid is a hierarchical algorithm; similar to variance_noise.
-""",
+Pyramid is a hierarchical algorithm; similar to variance_noise.""",
     )
     skrample_order = QDParam(
         "skrample_order",
