@@ -1032,19 +1032,82 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         meta=True,
         help="Sampler timestep spacing",
     )
-    skrample_sampler = QDParam("skrample_sampler", SamplerSK, short="-K", multi=True, meta=True)
+    skrample_sampler = QDParam(
+        "skrample_sampler",
+        SamplerSK,
+        short="-K",
+        multi=True,
+        meta=True,
+        help="""Sampler from https://github.com/Beinsezii/skrample
+If this is set, the diffusers scheduler --scheduler -S will be ignored
+Variants with 's' are stochastic, so seuler -> Euler Ancestral""",
+    )
     skrample_schedule = QDParam(
-        "skrample_schedule", ScheduleSK, value=ScheduleSK.Default, short="-Ks", multi=True, meta=True
+        "skrample_schedule",
+        ScheduleSK,
+        value=ScheduleSK.Default,
+        short="-Ks",
+        multi=True,
+        meta=True,
+        help="""Noise schedule from https://github.com/Beinsezii/skrample
+Use Flow/Linear for flow-matching models like SD3 and Flux, otherwise use Scaled/Uniform.
+ZSNR is only for very particular models that explicitly need it, like Terminus or NoobAI-VPred.""",
     )
     skrample_predictor = QDParam(
-        "skrample_predictor", PredictorSK, value=PredictorSK.Default, short="-Kp", multi=True, meta=True
+        "skrample_predictor",
+        PredictorSK,
+        value=PredictorSK.Default,
+        short="-Kp",
+        multi=True,
+        meta=True,
+        help="""Prediction function from https://github.com/Beinsezii/skrample
+This should only need to be set if a model explicitly does not use the default, like Terminus and NoobAI-VPred.""",
     )
     skrample_modifier = QDParam(
-        "skrample_modifier", ModifierSK, value=ModifierSK.Default, short="-Km", multi=True, meta=True
+        "skrample_modifier",
+        ModifierSK,
+        value=ModifierSK.Default,
+        short="-Km",
+        multi=True,
+        meta=True,
+        help="""Schedule modifiers from https://github.com/Beinsezii/skrample
+Affect the ramp of the noise schedule. All modifiers work with all schedules to varying degrees.""",
     )
-    skrample_noise = QDParam("skrample_noise", NoiseSK, value=NoiseSK.Random, short="-Kn", multi=True, meta=True)
-    skrample_order = QDParam("skrample_order", int, short="-Ko", multi=True, meta=True)
-    skrample_dtype = QDParam("skrample_dtype", DTypeSK, value=DTypeSK.F64, short="-Kdt", multi=True, meta=True)
+    skrample_noise = QDParam(
+        "skrample_noise",
+        NoiseSK,
+        value=NoiseSK.Random,
+        short="-Kn",
+        multi=True,
+        meta=True,
+        help="""The type of noise to use for stochastic skrample samplers.
+Random is the default for quickdif and what is used for diffusers schedulers (-S).
+Brownian is what is what some other diffusion applications use for "SDE", such as "DPM++ SDE".
+Offset is equivalent to the offset noise algorithm; each channel is offset by a random amount.
+Pyramid is a hierarchical algorithm; similar to variance_noise.
+""",
+    )
+    skrample_order = QDParam(
+        "skrample_order",
+        int,
+        short="-Ko",
+        multi=True,
+        meta=True,
+        help="""Solver order for skrample_sampler.
+This is equivalent to the number in the sampler name of other diffusion applications.
+So -Ko 3 is equivalent to DPM++ 3M, or -S dpm3""",
+    )
+    skrample_dtype = QDParam(
+        "skrample_dtype",
+        DTypeSK,
+        value=DTypeSK.F64,
+        short="-Kdt",
+        multi=True,
+        meta=True,
+        help="""Skrample samplers support a dtype separate from the model dtype itself.
+Most diffusion applications use F32, sometimes labeled 'upcast sampling'.
+Performance penalty is typically imperceptible, so it's recommended to leave this at F64""",
+    )
     ### Global
     lora = QDParam("lora", str, short="-l", meta=True, multi=True, help='Apply Loras, ex. "ms_paint.safetensors:::0.6"')
     batch_count = QDParam("batch_count", int, short="-b", value=1, help="Behavior dependant on 'iter'")
