@@ -2334,7 +2334,7 @@ def process_job(
                 compute_scale=job["skrample_dtype"].torch_dtype,
                 sampler_props=sampler_props,
                 schedule_props=schedule_props,
-                **pipe.scheduler.config | {"timestep_spacing": job["spacing"]},
+                config=dict(pipe.scheduler.config) | {"timestep_spacing": job["spacing"]},
             )
 
         else:
