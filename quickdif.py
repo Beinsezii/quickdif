@@ -329,20 +329,26 @@ class ModifierSK(enum.StrEnum):
 class NoiseSK(enum.StrEnum):
     Random = enum.auto()
     Brownian = enum.auto()
+    BrownianReverse = enum.auto()
     Offset = enum.auto()
+    OffsetStatic = enum.auto()
     Pyramid = enum.auto()
 
     @property
-    def noise_type(self) -> type["sknoise.TensorNoiseCommon"]:
+    def noise_type(self) -> tuple[type["sknoise.TensorNoiseCommon"], "sknoise.TensorNoiseProps | None"]:
         match self:
             case NoiseSK.Random:
-                return sknoise.Random
+                return sknoise.Random, None
             case NoiseSK.Brownian:
-                return sknoise.Brownian
+                return sknoise.Brownian, None
+            case NoiseSK.BrownianReverse:
+                return sknoise.Brownian, sknoise.BrownianProps(reverse=True)
             case NoiseSK.Offset:
-                return sknoise.Offset
+                return sknoise.Offset, None
+            case NoiseSK.OffsetStatic:
+                return sknoise.Offset, sknoise.OffsetProps(static=True)
             case NoiseSK.Pyramid:
-                return sknoise.Pyramid
+                return sknoise.Pyramid, None
         return 0
 
 
@@ -2330,7 +2336,8 @@ def process_job(
                 schedule=schedule_type,
                 schedule_modifier=job["skrample_modifier"].schedule_modifier,
                 predictor=job["skrample_predictor"].predictor,
-                noise_type=job["skrample_noise"].noise_type,
+                noise_type=job["skrample_noise"].noise_type[0],
+                noise_props=job["skrample_noise"].noise_type[1],
                 compute_scale=job["skrample_dtype"].torch_dtype,
                 sampler_props=sampler_props,
                 schedule_props=schedule_props,
