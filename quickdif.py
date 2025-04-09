@@ -2346,8 +2346,7 @@ def process_job(
         default_scheduler = pipe.scheduler
 
         # Set diffusers first so skrample can read it
-        if sksampler in [SamplerSK.NONE, SamplerSK.Diffusers]:
-            pipe.scheduler = get_scheduler(sampler, job.get("spacing", None), pipe.scheduler)
+        pipe.scheduler = get_scheduler(sampler, job.get("spacing", None), pipe.scheduler)
 
         if sksampler != SamplerSK.NONE:
             sampler_type, sampler_props = sksampler.sampler
