@@ -23,6 +23,7 @@ import numpy.linalg as npl
 import skrample.sampling as sampling
 import skrample.scheduling as scheduling
 from PIL import Image, ImageDraw, PngImagePlugin
+from skrample.common import MergeStrategy
 from skrample.sampling import HighOrderSampler, SkrampleSampler
 from skrample.scheduling import ScheduleModifier, SkrampleSchedule
 from tqdm import tqdm
@@ -223,6 +224,8 @@ def pexpand(prompt: str, body: tuple[str, str] = ("{", "}"), sep: str = "|", sin
 # Enums {{{
 @enum.unique
 class SamplerSK(enum.StrEnum):
+    NONE = enum.auto()
+    Diffusers = enum.auto()
     DPM = enum.auto()
     SDPM = enum.auto()
     IPNDM = enum.auto()
@@ -232,8 +235,12 @@ class SamplerSK(enum.StrEnum):
     UniPC = enum.auto()
 
     @property
-    def sampler(self) -> tuple[type[SkrampleSampler], dict[str, Any]]:
+    def sampler(self) -> tuple[type[SkrampleSampler] | None, dict[str, Any]]:
         match self:
+            case SamplerSK.NONE:
+                return None, {}
+            case SamplerSK.Diffusers:
+                return None, {}
             case SamplerSK.DPM:
                 return sampling.DPM, {"add_noise": False}
             case SamplerSK.SDPM:
@@ -253,8 +260,8 @@ class SamplerSK(enum.StrEnum):
 @enum.unique
 class ScheduleSK(enum.StrEnum):
     Default = enum.auto()
-    Flow = enum.auto()
     Linear = enum.auto()
+    SigmoidCDF = enum.auto()
     Scaled = enum.auto()
     Uniform = enum.auto()
     ZSNR = enum.auto()
@@ -264,10 +271,10 @@ class ScheduleSK(enum.StrEnum):
         match self:
             case ScheduleSK.Default:
                 return None, {}
-            case ScheduleSK.Flow:
-                return scheduling.Flow, {}
             case ScheduleSK.Linear:
                 return scheduling.Linear, {}
+            case ScheduleSK.SigmoidCDF:
+                return scheduling.SigmoidCDF, {}
             case ScheduleSK.Scaled:
                 return scheduling.Scaled, {"uniform": False}
             case ScheduleSK.Uniform:
@@ -303,25 +310,25 @@ class PredictorSK(enum.StrEnum):
 
 @enum.unique
 class ModifierSK(enum.StrEnum):
-    Default = enum.auto()
+    NONE = enum.auto()
     Beta = enum.auto()
+    FlowShift = enum.auto()
     Exponential = enum.auto()
     Karras = enum.auto()
-    NONE = enum.auto()
 
     @property
     def schedule_modifier(self) -> type[ScheduleModifier] | None:
         match self:
-            case ModifierSK.Default:
+            case ModifierSK.NONE:
                 return None
             case ModifierSK.Beta:
                 return scheduling.Beta
+            case ModifierSK.FlowShift:
+                return scheduling.FlowShift
             case ModifierSK.Exponential:
                 return scheduling.Exponential
             case ModifierSK.Karras:
                 return scheduling.Karras
-            case ModifierSK.NONE:
-                return scheduling.NoMod
         return 0
 
 
@@ -329,20 +336,26 @@ class ModifierSK(enum.StrEnum):
 class NoiseSK(enum.StrEnum):
     Random = enum.auto()
     Brownian = enum.auto()
+    BrownianReverse = enum.auto()
     Offset = enum.auto()
+    OffsetStatic = enum.auto()
     Pyramid = enum.auto()
 
     @property
-    def noise_type(self) -> type["sknoise.TensorNoiseCommon"]:
+    def noise(self) -> tuple[type["sknoise.TensorNoiseCommon"], "sknoise.TensorNoiseProps | None"]:
         match self:
             case NoiseSK.Random:
-                return sknoise.Random
+                return sknoise.Random, None
             case NoiseSK.Brownian:
-                return sknoise.Brownian
+                return sknoise.Brownian, None
+            case NoiseSK.BrownianReverse:
+                return sknoise.Brownian, sknoise.BrownianProps(reverse=True)
             case NoiseSK.Offset:
-                return sknoise.Offset
+                return sknoise.Offset, None
+            case NoiseSK.OffsetStatic:
+                return sknoise.Offset, sknoise.OffsetProps(static=True)
             case NoiseSK.Pyramid:
-                return sknoise.Pyramid
+                return sknoise.Pyramid, None
         return 0
 
 
@@ -1036,10 +1049,11 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         "skrample_sampler",
         SamplerSK,
         short="-K",
+        value=SamplerSK.NONE,
         multi=True,
         meta=True,
         help="""Sampler from https://github.com/Beinsezii/skrample
-If this is set, the diffusers scheduler --scheduler -S will be ignored
+If this is customized, the diffusers scheduler --scheduler -S will be ignored
 Variants with 's' are stochastic, so seuler -> Euler Ancestral""",
     )
     skrample_schedule = QDParam(
@@ -1066,12 +1080,21 @@ This should only need to be set if a model explicitly does not use the default, 
     skrample_modifier = QDParam(
         "skrample_modifier",
         ModifierSK,
-        value=ModifierSK.Default,
+        value=ModifierSK.NONE,
         short="-Km",
         multi=True,
         meta=True,
         help="""Schedule modifiers from https://github.com/Beinsezii/skrample
 Affect the ramp of the noise schedule. All modifiers work with all schedules to varying degrees.""",
+    )
+    skrample_modifier_merge = QDParam(
+        "skrample_modifier_merge",
+        MergeStrategy,
+        value=MergeStrategy.UniqueBefore,
+        short="-KM",
+        multi=True,
+        meta=True,
+        help="Controls how set skrample modifiers are merged to the base schedule modifiers.",
     )
     skrample_noise = QDParam(
         "skrample_noise",
@@ -1743,7 +1766,7 @@ def set_vae(pipe: DiffusionPipeline, tile: bool):
     # }}}
 
 
-def get_scheduler(sampler: Sampler, spacing: Spacing | None, default_scheduler: Any) -> type[SchedulerMixin]:
+def get_scheduler(sampler: Sampler, spacing: Spacing | None, default_scheduler: Any) -> SchedulerMixin:
     # {{{
     sampler_args = {
         "steps_offset": 0,
@@ -2233,6 +2256,14 @@ def process_job(
     variance_power = job.pop("variance_power", 0)
     variance_scale = job.pop("variance_scale", 0)
     image_ops: list[dict[str, Any]] = job.pop("image_ops")
+    sampler: Sampler = job.pop("sampler", Sampler.Default)
+    sksampler: SamplerSK = job.pop("skrample_sampler", SamplerSK.NONE)
+    skschedule: ScheduleSK = job.pop("skrample_schedule", ScheduleSK.Default)
+    skmodifier: ModifierSK = job.pop("skrample_modifier", ModifierSK.NONE)
+    skmodmerge: MergeStrategy = job.pop("skrample_modifier_merge", MergeStrategy.UniqueBefore)
+    sknoise: NoiseSK = job.pop("skrample_noise", NoiseSK.Random)
+    skpredictor: PredictorSK = job.pop("skrample_predictor", PredictorSK.Default)
+    skdtype: DTypeSK = job.pop("skrample_dtype", DTypeSK.F64)
 
     # PIPE
     if piperef.name != model or piperef.loras != lora_meta or piperef.dtype != model_dtype:
@@ -2309,15 +2340,23 @@ def process_job(
     # CONDITIONING }}}
 
     # INFERENCE {{{
-    pipe_params = signature(pipe).parameters
+    pipe_params = signature(pipe).parameters  # type: ignore Callable
 
-    if ("sampler" in job or "skrample_sampler" in job) and hasattr(pipe, "scheduler"):
+    if hasattr(pipe, "scheduler"):
         default_scheduler = pipe.scheduler
-        if "skrample_sampler" in job:
-            sampler_type, sampler_props = job["skrample_sampler"].sampler
-            schedule_type, schedule_props = job["skrample_schedule"].schedule
 
-            if issubclass(sampler_type, HighOrderSampler):
+        # Set diffusers first so skrample can read it
+        pipe.scheduler = get_scheduler(sampler, job.get("spacing", None), pipe.scheduler)
+
+        if sksampler != SamplerSK.NONE:
+            sampler_type, sampler_props = sksampler.sampler
+            schedule_type, schedule_props = skschedule.schedule
+            noise_type, noise_props = sknoise.noise
+
+            if skpredictor.predictor is not None:
+                sampler_props["predictor"] = skpredictor.predictor
+
+            if sampler_type is not None and issubclass(sampler_type, HighOrderSampler):
                 hos = sampler_type()
                 order = job.get("skrample_order", None)
                 if order is not None:
@@ -2326,19 +2365,21 @@ def process_job(
                     sampler_props["order"] = order
 
             pipe.scheduler = SkrampleWrapperScheduler.from_diffusers_config(
+                pipe.scheduler,  # type: ignore ConfigMixin
                 sampler=sampler_type,
                 schedule=schedule_type,
-                schedule_modifier=job["skrample_modifier"].schedule_modifier,
-                predictor=job["skrample_predictor"].predictor,
-                noise_type=job["skrample_noise"].noise_type,
-                compute_scale=job["skrample_dtype"].torch_dtype,
+                # TODO: merge strategy, multi
+                schedule_modifiers=[(skmodifier.schedule_modifier, {})] if skmodifier.schedule_modifier else [],
+                noise_type=noise_type,
+                noise_props=noise_props,
+                compute_scale=skdtype.torch_dtype,
                 sampler_props=sampler_props,
                 schedule_props=schedule_props,
-                **pipe.scheduler.config | {"timestep_spacing": job["spacing"]},
+                modifier_merge_strategy=skmodmerge,
             )
 
         else:
-            pipe.scheduler = get_scheduler(job["sampler"], job.get("spacing", None), pipe.scheduler)
+            pipe.scheduler = get_scheduler(sampler, job.get("spacing", None), pipe.scheduler)
     else:
         default_scheduler = None
 
