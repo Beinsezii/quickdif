@@ -18,11 +18,6 @@ dependencies = [
     "transformers>=4.45.2,<4.51",
 ]
 
-[project.optional-dependencies]
-navi-flash = [
-    "flash-attn @ git+https://github.com/ROCm/flash-attention@howiejay/navi_support",
-]
-
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
