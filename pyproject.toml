@@ -18,6 +18,11 @@ dependencies = [
     "transformers>=4.45.2",
 ]
 
+[project.optional-dependencies]
+sageattn = [
+    "sageattention==1.0.6",
+]
+
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"

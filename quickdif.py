@@ -513,7 +513,7 @@ class NoiseType(enum.StrEnum):
 class AttentionPatch(enum.StrEnum):
     NONE = enum.auto()
     Flash = enum.auto()
-    Triton = enum.auto()
+    Sage = enum.auto()
 
 
 @enum.unique
@@ -1639,53 +1639,19 @@ def patch_attn(attention: AttentionPatch):
             except ImportError as e:
                 print(f"# # #\nCould not load Flash Attention for hijack:\n{e}\n# # #")
 
-        # # Wheel version segfaults?
-        # case AttentionPatch.Triton:
-        #     try:
-        #         from triton.ops.flash_attention import attention as flash_attention_triton
-        #
-        #         def sdpa_hijack_triton(q, k, v, m, p, c, s):
-        #             assert m is None
-        #             assert p == 0.0
-        #             # (q, k, v, causal, sm_scale, sequence_parallel=False)
-        #             result = flash_attention_triton(
-        #                 q.transpose(1, 2),
-        #                 k.transpose(1, 2),
-        #                 v.transpose(1, 2),
-        #                 c,
-        #                 s if s else q.shape[-1] ** (-0.5),
-        #             )
-        #             assert isinstance(result, Tensor)
-        #             return result.transpose(1, 2)
-        #
-        #         _patch_sdpa(sdpa_hijack_triton)
-        #     except ImportError as e:
-        #         print(f"# # #\nCould not load Triton for hijack:\n{e}\n# # #")
-
-        case AttentionPatch.Triton:
+        case AttentionPatch.Sage:
             try:
-                from flash_attn_triton import flash_attn_func as flash_attention_func_triton
+                from sageattention import sageattn
 
-                def sdpa_hijack_triton(q, k, v, m, p, c, s):
-                    assert q.shape[-1] <= 128
-                    # assert m is None
+                def sdpa_hijack_sage(q, k, v, m, p, c, s):
+                    assert m is None
                     assert p == 0.0
-                    # (q, k, v, bias=None, causal=False, softmax_scale=None)
-                    result = flash_attention_func_triton(
-                        q.transpose(1, 2),
-                        k.transpose(1, 2),
-                        v.transpose(1, 2),
-                        # None,
-                        m,
-                        c,
-                        s if s else q.shape[-1] ** (-0.5),
-                    )
-                    assert isinstance(result, Tensor)
-                    return result.transpose(1, 2)
+                    result = sageattn(q, k, v, is_causal=c, sm_scale=s)
+                    return result
 
-                _patch_sdpa(sdpa_hijack_triton)
+                _patch_sdpa(sdpa_hijack_sage)
             except ImportError as e:
-                print(f"# # #\nCould not load Triton for hijack:\n{e}\n# # #")
+                print(f"# # #\nCould not load SageAttention for hijack:\n{e}\n# # #")
 
         case _:
             raise ValueError("Unreachable!")
@@ -2500,12 +2466,7 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
     pbar = tqdm(desc="Images", total=total_images, smoothing=0)
 
     if parameters.attn_patch.value is not AttentionPatch.NONE:
-        if parameters.compile.value is Compile.Off:
-            patch_attn(parameters.attn_patch.value)
-        else:
-            print(
-                f"\n!! Ignoreing attention patch `{parameters.attn_patch.value}` as compile is set to `{parameters.compile.value}`"
-            )
+        patch_attn(parameters.attn_patch.value)
 
     kernel_ctx = nullcontext()
     if parameters.sdpb.value:
