@@ -1166,10 +1166,7 @@ Performance penalty is typically imperceptible, so it's recommended to leave thi
         "attn-patch",
         AttentionPatch,
         value=AttentionPatch.NONE,
-        help="""
-Patch the SDPA function with a custom external attention processor.
-Not compatible with --compile.
-AMD Navi 3 users should install `git+https://github.com/ROCm/flash-attention@howiejay/navi_support` and use the `flash` patch for maximum speed""",
+        help="Patch the SDPA function with a custom external attention processor.",
     )
     sdpb = QDParam("sdpb", SDPB, multi=True, help="Override the SDP attention backend(s) to use")
     compile = QDParam("compile", Compile, value=Compile.Off, help="Compile network with torch.compile()")
