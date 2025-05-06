@@ -23,7 +23,7 @@ import numpy.linalg as npl
 import skrample.sampling as sampling
 import skrample.scheduling as scheduling
 from PIL import Image, ImageDraw, PngImagePlugin
-from skrample.common import MergeStrategy
+from skrample.common import MergeStrategy, Predictor, predict_epsilon, predict_flow, predict_sample, predict_velocity
 from skrample.sampling import HighOrderSampler, SkrampleSampler
 from skrample.scheduling import ScheduleModifier, SkrampleSchedule
 from tqdm import tqdm
@@ -228,8 +228,7 @@ class SamplerSK(enum.StrEnum):
     Diffusers = enum.auto()
     DPM = enum.auto()
     SDPM = enum.auto()
-    IPNDM = enum.auto()
-    SIPNDM = enum.auto()
+    Adams = enum.auto()
     Euler = enum.auto()
     SEuler = enum.auto()
     UniPC = enum.auto()
@@ -245,10 +244,8 @@ class SamplerSK(enum.StrEnum):
                 return sampling.DPM, {"add_noise": False}
             case SamplerSK.SDPM:
                 return sampling.DPM, {"add_noise": True}
-            case SamplerSK.IPNDM:
-                return sampling.IPNDM, {"add_noise": False}
-            case SamplerSK.SIPNDM:
-                return sampling.IPNDM, {"add_noise": True}
+            case SamplerSK.Adams:
+                return sampling.Adams, {}
             case SamplerSK.UniPC:
                 return sampling.UniPC, {}
             case SamplerSK.Euler:
@@ -293,18 +290,18 @@ class PredictorSK(enum.StrEnum):
     Velocity = enum.auto()
 
     @property
-    def predictor(self) -> sampling.PREDICTOR | None:
+    def predictor(self) -> Predictor | None:
         match self:
             case PredictorSK.Default:
                 return None
             case PredictorSK.Epsilon:
-                return sampling.EPSILON
+                return predict_epsilon
             case PredictorSK.Flow:
-                return sampling.FLOW
+                return predict_flow
             case PredictorSK.Sample:
-                return sampling.SAMPLE
+                return predict_sample
             case PredictorSK.Velocity:
-                return sampling.VELOCITY
+                return predict_velocity
         return 0
 
 
@@ -2319,9 +2316,6 @@ def process_job(
             schedule_type, schedule_props = skschedule.schedule
             noise_type, noise_props = sknoise.noise
 
-            if skpredictor.predictor is not None:
-                sampler_props["predictor"] = skpredictor.predictor
-
             if sampler_type is not None and issubclass(sampler_type, HighOrderSampler):
                 hos = sampler_type()
                 order = job.get("skrample_order", None)
@@ -2336,6 +2330,7 @@ def process_job(
                 schedule=schedule_type,
                 # TODO: merge strategy, multi
                 schedule_modifiers=[(skmodifier.schedule_modifier, {})] if skmodifier.schedule_modifier else [],
+                predictor=skpredictor.predictor,
                 noise_type=noise_type,
                 noise_props=noise_props,
                 compute_scale=skdtype.torch_dtype,
