@@ -231,6 +231,7 @@ class SamplerSK(enum.StrEnum):
     Adams = enum.auto()
     Euler = enum.auto()
     UniPC = enum.auto()
+    SPC = enum.auto()
 
     @property
     def sampler(self) -> tuple[type[SkrampleSampler] | None, dict[str, Any]]:
@@ -249,6 +250,8 @@ class SamplerSK(enum.StrEnum):
                 return sampling.UniPC, {}
             case SamplerSK.Euler:
                 return sampling.Euler, {}
+            case SamplerSK.SPC:
+                return sampling.SPC, {}
 
 
 @enum.unique
