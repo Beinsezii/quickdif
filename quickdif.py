@@ -2317,11 +2317,12 @@ def process_job(
             noise_type, noise_props = sknoise.noise
 
             if sampler_type is not None and issubclass(sampler_type, HighOrderSampler):
-                hos = sampler_type()
                 order = job.get("skrample_order", None)
                 if order is not None:
-                    if order > hos.max_order:
-                        print(f"!! Selected order {order} larger than {type(hos).__name__} max order {hos.max_order}")
+                    if order > sampler_type.max_order():
+                        print(
+                            f"!! Selected order {order} larger than {sampler_type.__name__} max order {sampler_type.max_order()}"
+                        )
                     sampler_props["order"] = order
 
             pipe.scheduler = SkrampleWrapperScheduler.from_diffusers_config(
