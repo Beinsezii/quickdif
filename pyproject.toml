@@ -19,9 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-sageattn = [
-    "sageattention==1.0.6",
-]
+sageattn = ["sageattention==1.0.6"]
 
 [build-system]
 requires = ["setuptools"]
@@ -32,6 +30,9 @@ py-modules = ["quickdif"]
 
 [tool.ruff]
 line-length = 120
+
+[tool.ruff.lint]
+ignore = ["E402"]
 
 [dependency-groups]
 dev = ["pytest>=8.3.3"]

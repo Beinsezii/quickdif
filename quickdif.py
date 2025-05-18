@@ -1,7 +1,6 @@
 import argparse
 import enum
 import functools
-import gc
 import json
 import os
 import random
@@ -485,27 +484,27 @@ class NoiseType(enum.StrEnum):
     Cpu16 = enum.auto()
     Cpu16B = enum.auto()
     Cpu32 = enum.auto()
-    Cuda16 = enum.auto()
-    Cuda16B = enum.auto()
-    Cuda32 = enum.auto()
+    Acc16 = enum.auto()
+    Acc16B = enum.auto()
+    Acc32 = enum.auto()
 
     @property
-    def torch_device(self) -> str:
+    def torch_device(self) -> str | None:
         match self:
             case NoiseType.Cpu16 | NoiseType.Cpu16B | NoiseType.Cpu32:
                 return "cpu"
-            case NoiseType.Cuda16 | NoiseType.Cuda16B | NoiseType.Cuda32:
-                return "cuda"
+            case NoiseType.Acc16 | NoiseType.Acc16B | NoiseType.Acc32:
+                return None
 
     @property
     def torch_dtype(self):
         "Returns torch.dtype"
         match self:
-            case NoiseType.Cpu16 | NoiseType.Cuda16:
+            case NoiseType.Cpu16 | NoiseType.Acc16:
                 return torch.float16
-            case NoiseType.Cpu16B | NoiseType.Cuda16B:
+            case NoiseType.Cpu16B | NoiseType.Acc16B:
                 return torch.bfloat16
-            case NoiseType.Cpu32 | NoiseType.Cuda32:
+            case NoiseType.Cpu32 | NoiseType.Acc32:
                 return torch.float32
 
 
@@ -1397,6 +1396,7 @@ addenv("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 import diffusers  # noqa: E402
 import skrample.pytorch.noise as sknoise  # noqa: E402
 import torch  # noqa: E402
+from accelerate.accelerator import Accelerator
 from compel import Compel, ReturnedEmbeddingsType  # noqa: E402
 from diffusers.loaders.single_file import FromSingleFileMixin  # noqa: E402
 from diffusers.pipelines.auto_pipeline import (  # noqa: E402
@@ -1453,6 +1453,8 @@ from torchao.quantization import (  # noqa: E402
     uintx_weight_only,
 )
 from transformers import CLIPTokenizer, T5EncoderModel  # noqa: E402
+
+ACC = Accelerator()
 
 if "SanaPipeline" in dir(diffusers) and "sana" not in AUTO_TEXT2IMAGE_PIPELINES_MAPPING:
     AUTO_TEXT2IMAGE_PIPELINES_MAPPING |= {
@@ -1517,11 +1519,6 @@ class SmartSigint:
 
 
 # BOTTOM LEVEL
-
-
-def flush():
-    gc.collect()
-    torch.cuda.empty_cache()
 
 
 def is_xl_vae(pipe: DiffusionPipeline) -> bool:
@@ -2057,7 +2054,7 @@ def get_pipe(
 
     if weight_quant is not None:
         if offload == Offload.NONE:
-            quantize_device = "cuda"
+            quantize_device = ACC.device
         else:
             quantize_device = None
         if hasattr(pipe, "unet"):
@@ -2079,10 +2076,10 @@ def get_pipe(
     match offload:
         case Offload.NONE:
             if hasattr(pipe, "prior_pipe"):
-                pipe.prior_pipe = pipe.prior_pipe.to("cuda")
+                pipe.prior_pipe = pipe.prior_pipe.to(ACC.device)
             if hasattr(pipe, "decoder_pipe"):
-                pipe.decoder_pipe = pipe.decoder_pipe.to("cuda")
-            pipe = pipe.to("cuda")
+                pipe.decoder_pipe = pipe.decoder_pipe.to(ACC.device)
+            pipe = pipe.to(ACC.device)
         case Offload.Model:
             pipe.enable_model_cpu_offload()
         case Offload.Sequential:
@@ -2130,7 +2127,7 @@ def make_noise(
                 [1, shape[1], variance_scale, variance_scale],
                 generator=generator,
                 dtype=noise_type.torch_dtype,
-                device=noise_type.torch_device,
+                device=noise_type.torch_device or ACC.device,
             )
             latent += torch.nn.UpsamplingBilinear2d((shape[2], shape[3]))(variance).mul(variance_power)[0].to("cpu")
             generator.set_state(state)
@@ -2139,7 +2136,7 @@ def make_noise(
             latents.shape[1:],
             generator=generator,
             dtype=noise_type.torch_dtype,
-            device=noise_type.torch_device,
+            device=noise_type.torch_device or ACC.device,
         )
         if noise_power != 1:
             noise *= noise_power
@@ -2193,8 +2190,6 @@ def process_job(
 ) -> list[tuple[dict[str, Any], Image.Image]]:
     # {{{
 
-    torch.cuda.empty_cache()
-
     # POP SEED first because the meta is set in PngInfo directly
     seed = job.pop("seed")
 
@@ -2231,8 +2226,9 @@ def process_job(
     # PIPE
     if piperef.name != model or piperef.loras != lora_meta or piperef.dtype != model_dtype:
         with SmartSigint(num=2, job_name="model load"):
-            del piperef.pipe  # Remove only reference
-            flush()
+            if piperef.pipe is not None:
+                piperef.pipe.to("meta")
+            del piperef.pipe
             piperef.pipe = get_pipe(
                 model,
                 model_dtype,
@@ -2256,7 +2252,8 @@ def process_job(
 
     # INPUT TENSOR
     generators = [
-        torch.Generator(noise_type.torch_device).manual_seed(seed + n) for n in range(parameters.batch_size.value)
+        torch.Generator(noise_type.torch_device or ACC.device).manual_seed(seed + n)
+        for n in range(parameters.batch_size.value)
     ]
     if input_image is None:
         latents, latents_resolution = make_noise(
@@ -2455,7 +2452,7 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
     piperef = PipeRef()
     jobs = build_jobs(parameters)
 
-    if parameters.tunable.value:
+    if parameters.tunable.value and torch.cuda.is_available():
         torch.cuda.tunable.enable(val=True)
 
     total_images = len(jobs) * parameters.batch_size.value
