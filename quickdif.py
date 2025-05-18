@@ -555,8 +555,11 @@ class Compile(enum.StrEnum):
     RO_Dyn_Full = enum.auto()
 
     @property
-    def kwargs(self) -> dict[str, Any]:
-        result = {}
+    def plugin(self) -> "TorchDynamoPlugin | None":
+        if self is Compile.Off:
+            return None
+
+        result = TorchDynamoPlugin(DynamoBackend.INDUCTOR)
 
         if self in [
             Compile.On_Dyn,
@@ -566,7 +569,7 @@ class Compile(enum.StrEnum):
             Compile.RO_Dyn,
             Compile.RO_Dyn_Full,
         ]:
-            result["dynamic"] = True
+            result.dynamic = True
 
         if self in [
             Compile.On_Full,
@@ -576,7 +579,7 @@ class Compile(enum.StrEnum):
             Compile.RO_Full,
             Compile.RO_Dyn_Full,
         ]:
-            result["fullgraph"] = True
+            result.fullgraph = True
 
         if self in [
             Compile.Max,
@@ -584,14 +587,14 @@ class Compile(enum.StrEnum):
             Compile.Max_Full,
             Compile.Max_Dyn_Full,
         ]:
-            result["mode"] = "max-autotune"
+            result.mode = "max-autotune"
         elif self in [
             Compile.RO,
             Compile.RO_Dyn,
             Compile.RO_Full,
             Compile.RO_Dyn_Full,
         ]:
-            result["mode"] = "reduce-overhead"
+            result.mode = "reduce-overhead"
 
         return result
 
@@ -1397,6 +1400,7 @@ import diffusers  # noqa: E402
 import skrample.pytorch.noise as sknoise  # noqa: E402
 import torch  # noqa: E402
 from accelerate.accelerator import Accelerator
+from accelerate.utils.dataclasses import DynamoBackend, TorchDynamoPlugin
 from compel import Compel, ReturnedEmbeddingsType  # noqa: E402
 from diffusers.loaders.single_file import FromSingleFileMixin  # noqa: E402
 from diffusers.pipelines.auto_pipeline import (  # noqa: E402
@@ -1453,8 +1457,6 @@ from torchao.quantization import (  # noqa: E402
     uintx_weight_only,
 )
 from transformers import CLIPTokenizer, T5EncoderModel  # noqa: E402
-
-ACC = Accelerator()
 
 if "SanaPipeline" in dir(diffusers) and "sana" not in AUTO_TEXT2IMAGE_PIPELINES_MAPPING:
     AUTO_TEXT2IMAGE_PIPELINES_MAPPING |= {
@@ -1925,11 +1927,11 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
 
 def get_pipe(
     model: str,
+    acc: Accelerator,
     dtype: DType,
     offload: Offload,
     loras: None | list[str],
     img2img: bool,
-    compile: Compile,
     tile_vae: bool,
     pag: bool,
 ) -> DiffusionPipeline:
@@ -1998,6 +2000,8 @@ def get_pipe(
                 f"Could not find a PAG pipeline variant for `{type(pipe).__name__} and `pag` parameter will be ignored:\n  {e}"
             )
 
+    assert pipe is not None
+
     pipe.safety_checker = None
     pipe.watermarker = None
 
@@ -2007,15 +2011,14 @@ def get_pipe(
     if loras is not None:
         apply_loras(loras, pipe)
 
-    if compile is not Compile.Off:
-        if hasattr(pipe, "unet"):
-            pipe.unet = torch.compile(pipe.unet, **compile.kwargs)
-        if hasattr(pipe, "transformer"):
-            pipe.transformer = torch.compile(pipe.transformer, **compile.kwargs)
-        if hasattr(pipe, "prior_pipe"):
-            pipe.prior_pipe.prior = torch.compile(pipe.prior_pipe.prior, **compile.kwargs)
-        if hasattr(pipe, "decoder_pipe"):
-            pipe.decoder_pipe.decoder = torch.compile(pipe.decoder_pipe.decoder, **compile.kwargs)
+    if hasattr(pipe, "unet"):
+        pipe.unet = acc.prepare_model(pipe.unet)
+    if hasattr(pipe, "transformer"):
+        pipe.transformer = acc.prepare_model(pipe.transformer)
+    if hasattr(pipe, "prior_pipe"):
+        pipe.prior_pipe.prior = acc.prepare_model(pipe.prior_pipe.prior)
+    if hasattr(pipe, "decoder_pipe"):
+        pipe.decoder_pipe.decoder = acc.prepare_model(pipe.decoder_pipe.decoder)
 
     weight_quant = None
     match dtype:
@@ -2054,7 +2057,7 @@ def get_pipe(
 
     if weight_quant is not None:
         if offload == Offload.NONE:
-            quantize_device = ACC.device
+            quantize_device = acc.device
         else:
             quantize_device = None
         if hasattr(pipe, "unet"):
@@ -2076,10 +2079,10 @@ def get_pipe(
     match offload:
         case Offload.NONE:
             if hasattr(pipe, "prior_pipe"):
-                pipe.prior_pipe = pipe.prior_pipe.to(ACC.device)
+                pipe.prior_pipe = pipe.prior_pipe.to(acc.device)
             if hasattr(pipe, "decoder_pipe"):
-                pipe.decoder_pipe = pipe.decoder_pipe.to(ACC.device)
-            pipe = pipe.to(ACC.device)
+                pipe.decoder_pipe = pipe.decoder_pipe.to(acc.device)
+            pipe = pipe.to(acc.device)
         case Offload.Model:
             pipe.enable_model_cpu_offload()
         case Offload.Sequential:
@@ -2095,6 +2098,7 @@ def get_pipe(
 def make_noise(
     pipe: DiffusionPipeline,
     generators: list[torch.Generator],
+    acc: Accelerator,
     # Parameters
     batch_size: int,
     color: LatentColor | None,
@@ -2127,20 +2131,20 @@ def make_noise(
                 [1, shape[1], variance_scale, variance_scale],
                 generator=generator,
                 dtype=noise_type.torch_dtype,
-                device=noise_type.torch_device or ACC.device,
+                device=noise_type.torch_device or acc.device,
             )
-            latent += torch.nn.UpsamplingBilinear2d((shape[2], shape[3]))(variance).mul(variance_power)[0].to("cpu")
+            latent += torch.nn.UpsamplingBilinear2d((shape[2], shape[3]))(variance).mul(variance_power)[0].cpu()
             generator.set_state(state)
         # Init noise
         noise = torch.randn(
             latents.shape[1:],
             generator=generator,
             dtype=noise_type.torch_dtype,
-            device=noise_type.torch_device or ACC.device,
+            device=noise_type.torch_device or acc.device,
         )
         if noise_power != 1:
             noise *= noise_power
-        latent += noise.to("cpu")
+        latent += noise.cpu()
 
     # Colored latents
     if color is not None and color_power != 0:
@@ -2184,6 +2188,7 @@ def make_noise(
 def process_job(
     parameters: Parameters,
     piperef: PipeRef,
+    acc: Accelerator,
     job: dict[str, Any],
     meta: dict[str, str],
     input_image: Image.Image | None,
@@ -2231,11 +2236,11 @@ def process_job(
             del piperef.pipe
             piperef.pipe = get_pipe(
                 model,
+                acc,
                 model_dtype,
                 parameters.offload.value,
                 loras,
                 input_image is not None,
-                parameters.compile.value,
                 parameters.tile.value,
                 any(parameters.pag.value),
             )
@@ -2252,13 +2257,14 @@ def process_job(
 
     # INPUT TENSOR
     generators = [
-        torch.Generator(noise_type.torch_device or ACC.device).manual_seed(seed + n)
+        torch.Generator(noise_type.torch_device or acc.device).manual_seed(seed + n)
         for n in range(parameters.batch_size.value)
     ]
     if input_image is None:
         latents, latents_resolution = make_noise(
             pipe,
             generators,
+            acc,
             # Parameters
             parameters.batch_size.value,
             color,
@@ -2448,6 +2454,7 @@ def process_job(
 
 def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None):
     # {{{
+    acc = Accelerator(dynamo_plugin=parameters.compile.value.plugin)
     images = []
     piperef = PipeRef()
     jobs = build_jobs(parameters)
@@ -2468,7 +2475,7 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
 
     with kernel_ctx:
         for job in jobs:
-            results = process_job(parameters, piperef, job, meta.copy(), image)
+            results = process_job(parameters, piperef, acc, job, meta.copy(), image)
             if parameters.grid.value is not None:
                 images += results
             pbar.update(parameters.batch_size.value)
