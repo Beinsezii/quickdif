@@ -2231,23 +2231,22 @@ def process_job(
 
     # PIPE
     if piperef.name != model or piperef.loras != lora_meta or piperef.dtype != model_dtype:
-        with SmartSigint(num=2, job_name="model load"):
-            if piperef.pipe is not None:
-                piperef.pipe.to("meta")
-            del piperef.pipe
-            piperef.pipe = get_pipe(
-                model,
-                acc,
-                model_dtype,
-                parameters.offload.value,
-                loras,
-                input_image is not None,
-                parameters.tile.value,
-                any(parameters.pag.value),
-            )
-            piperef.name = model
-            piperef.loras = lora_meta
-            piperef.dtype = model_dtype
+        if piperef.pipe is not None:
+            piperef.pipe.to("meta")
+        del piperef.pipe
+        piperef.pipe = get_pipe(
+            model,
+            acc,
+            model_dtype,
+            parameters.offload.value,
+            loras,
+            input_image is not None,
+            parameters.tile.value,
+            any(parameters.pag.value),
+        )
+        piperef.name = model
+        piperef.loras = lora_meta
+        piperef.dtype = model_dtype
     pipe = piperef.pipe
     if pipe is None:
         return []
@@ -2379,63 +2378,62 @@ def process_job(
             del job[k]
 
     results: list[tuple[dict[str, Any], Image.Image, PngImagePlugin.PngInfo]] = []
-    with SmartSigint(job_name="current batch"):
-        for n, image_array in enumerate(pipe(output_type="np", **job).images):
-            pnginfo = PngImagePlugin.PngInfo()
-            for k, v in meta.items():
-                pnginfo.add_text(k, str(v))
-                pnginfo.add_text("seed", str(seed + n))
+    for n, image_array in enumerate(pipe(output_type="np", **job).images):
+        pnginfo = PngImagePlugin.PngInfo()
+        for k, v in meta.items():
+            pnginfo.add_text(k, str(v))
+            pnginfo.add_text("seed", str(seed + n))
 
-            for ops in image_ops:
-                info = copy(pnginfo)
-                for k, v in ops.items():
-                    info.add_text(k, str(v))
+        for ops in image_ops:
+            info = copy(pnginfo)
+            for k, v in ops.items():
+                info.add_text(k, str(v))
 
-                # Direct array ops
-                op_arr: np.ndarray = np.asarray(image_array)  # mutable reference to make pyright happy
+            # Direct array ops
+            op_arr: np.ndarray = np.asarray(image_array)  # mutable reference to make pyright happy
 
-                if "power" in ops:
-                    # ^2.2 for approx sRGB EOTF
-                    okl = lrgb_to_oklab(spowf_np(op_arr, 2.2))
+            if "power" in ops:
+                # ^2.2 for approx sRGB EOTF
+                okl = lrgb_to_oklab(spowf_np(op_arr, 2.2))
 
-                    # ≈1/3 cause OKL's top heavy lightness curve
-                    offset = [0.35, 1, 1]
-                    # Halve chromacities' power slope
-                    power = [ops["power"], spowf(ops["power"], 1 / 2), spowf(ops["power"], 1 / 2)]
+                # ≈1/3 cause OKL's top heavy lightness curve
+                offset = [0.35, 1, 1]
+                # Halve chromacities' power slope
+                power = [ops["power"], spowf(ops["power"], 1 / 2), spowf(ops["power"], 1 / 2)]
 
-                    okl = spowf_np((okl + offset), power) - offset
+                okl = spowf_np((okl + offset), power) - offset
 
-                    # back to sRGB with approx OETF
-                    op_arr = spowf_np(oklab_to_lrgb(okl), 1 / 2.2)
+                # back to sRGB with approx OETF
+                op_arr = spowf_np(oklab_to_lrgb(okl), 1 / 2.2)
 
-                if "posterize" in ops:
-                    if ops["posterize"] > 1:
-                        factor = float((ops["posterize"] - 1) / 256)
-                        op_arr = (op_arr * 255 * factor).round() / factor / 255
+            if "posterize" in ops:
+                if ops["posterize"] > 1:
+                    factor = float((ops["posterize"] - 1) / 256)
+                    op_arr = (op_arr * 255 * factor).round() / factor / 255
 
-                # PIL ops
-                op_pil: Image.Image = Image.fromarray((op_arr * 255).clip(0, 255).astype(np.uint8))
-                del op_arr
+            # PIL ops
+            op_pil: Image.Image = Image.fromarray((op_arr * 255).clip(0, 255).astype(np.uint8))
+            del op_arr
 
-                if "pixelate" in ops:
-                    if ops["pixelate"] > 1:
-                        w, h = op_pil.width, op_pil.height
-                        op_pil = op_pil.resize(
-                            (round(w / ops["pixelate"]), round(h / ops["pixelate"])),
-                            resample=Image.Resampling.BOX,
-                        )
-                        op_pil = op_pil.resize((w, h), resample=Image.Resampling.NEAREST)
-
-                # insert extra non-png meta for grid making
-                results.append(
-                    (
-                        meta
-                        | ops
-                        | {"seed": seed + n, "resolution": op_pil.size, "dtype": model_dtype, "lora": lora_meta or "-"},
-                        op_pil,
-                        info,
+            if "pixelate" in ops:
+                if ops["pixelate"] > 1:
+                    w, h = op_pil.width, op_pil.height
+                    op_pil = op_pil.resize(
+                        (round(w / ops["pixelate"]), round(h / ops["pixelate"])),
+                        resample=Image.Resampling.BOX,
                     )
+                    op_pil = op_pil.resize((w, h), resample=Image.Resampling.NEAREST)
+
+            # insert extra non-png meta for grid making
+            results.append(
+                (
+                    meta
+                    | ops
+                    | {"seed": seed + n, "resolution": op_pil.size, "dtype": model_dtype, "lora": lora_meta or "-"},
+                    op_pil,
+                    info,
                 )
+            )
 
     if default_scheduler is not None:
         pipe.scheduler = default_scheduler
@@ -2469,21 +2467,22 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
     if parameters.sdpb.value:
         kernel_ctx = torch.nn.attention.sdpa_kernel([k.torch_sdp_backend for k in parameters.sdpb.value])
 
-    save_threads: list[concurrent.futures.Future[None]] = []
     with kernel_ctx, concurrent.futures.ThreadPoolExecutor() as tpe:
         im_num = 0
         for job in jobs:
-            results = process_job(parameters, piperef, acc, job, meta.copy(), image)
-            if parameters.grid.value is not None:
-                images += results
+            with SmartSigint(job_name="current batch"):
+                results = process_job(parameters, piperef, acc, job, meta.copy(), image)
 
-            for _, im, info in results:
-                im_path = parameters.output.value.joinpath(f"{im_num:05}.png")
-                while im_path.exists():
-                    im_num += 1
+                if parameters.grid.value is not None:
+                    images += results
+
+                for _, im, info in results:
                     im_path = parameters.output.value.joinpath(f"{im_num:05}.png")
-                save_threads.append(tpe.submit(Image.Image.save, im, im_path, "PNG", pnginfo=info, compress_level=4))
-                im_num += 1
+                    while im_path.exists():
+                        im_num += 1
+                        im_path = parameters.output.value.joinpath(f"{im_num:05}.png")
+                    tpe.submit(Image.Image.save, im, im_path, "PNG", pnginfo=info, compress_level=9)
+                    im_num += 1
 
             pbar.update(parameters.batch_size.value)
 
@@ -2495,7 +2494,7 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
                 while gd_path.exists():
                     gd_num += 1
                     gd_path = parameters.output.value.joinpath(f"grid_{gd_num:05}.png")
-                save_threads.append(tpe.submit(Image.Image.save, gd, gd_path, "PNG", compress_level=4))
+                tpe.submit(Image.Image.save, gd, gd_path, "PNG", compress_level=4)
                 gd_num += 1
 
             if len(others) > 0:
