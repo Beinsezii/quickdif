@@ -231,6 +231,7 @@ class SamplerSK(enum.StrEnum):
     Adams = enum.auto()
     Euler = enum.auto()
     UniPC = enum.auto()
+    UniP = enum.auto()
     SPC = enum.auto()
 
     @property
@@ -248,6 +249,8 @@ class SamplerSK(enum.StrEnum):
                 return sampling.Adams, {}
             case SamplerSK.UniPC:
                 return sampling.UniPC, {}
+            case SamplerSK.UniP:
+                return sampling.UniP, {}
             case SamplerSK.Euler:
                 return sampling.Euler, {}
             case SamplerSK.SPC:
