@@ -1,4 +1,5 @@
 import argparse
+import concurrent.futures
 import enum
 import functools
 import json
@@ -2192,7 +2193,7 @@ def process_job(
     job: dict[str, Any],
     meta: dict[str, str],
     input_image: Image.Image | None,
-) -> list[tuple[dict[str, Any], Image.Image]]:
+) -> list[tuple[dict[str, Any], Image.Image, PngImagePlugin.PngInfo]]:
     # {{{
 
     # POP SEED first because the meta is set in PngInfo directly
@@ -2377,8 +2378,7 @@ def process_job(
         if k not in pipe_params:
             del job[k]
 
-    results: list[tuple[dict[str, Any], Image.Image]] = []
-    filenum = 0
+    results: list[tuple[dict[str, Any], Image.Image, PngImagePlugin.PngInfo]] = []
     with SmartSigint(job_name="current batch"):
         for n, image_array in enumerate(pipe(output_type="np", **job).images):
             pnginfo = PngImagePlugin.PngInfo()
@@ -2390,10 +2390,6 @@ def process_job(
                 info = copy(pnginfo)
                 for k, v in ops.items():
                     info.add_text(k, str(v))
-                p = parameters.output.value.joinpath(f"{filenum:05}.png")
-                while p.exists():
-                    filenum += 1
-                    p = parameters.output.value.joinpath(f"{filenum:05}.png")
 
                 # Direct array ops
                 op_arr: np.ndarray = np.asarray(image_array)  # mutable reference to make pyright happy
@@ -2430,7 +2426,6 @@ def process_job(
                         )
                         op_pil = op_pil.resize((w, h), resample=Image.Resampling.NEAREST)
 
-                op_pil.save(p, format="PNG", pnginfo=info, compress_level=4)
                 # insert extra non-png meta for grid making
                 results.append(
                     (
@@ -2438,6 +2433,7 @@ def process_job(
                         | ops
                         | {"seed": seed + n, "resolution": op_pil.size, "dtype": model_dtype, "lora": lora_meta or "-"},
                         op_pil,
+                        info,
                     )
                 )
 
@@ -2455,7 +2451,7 @@ def process_job(
 def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None):
     # {{{
     acc = Accelerator(dynamo_plugin=parameters.compile.value.plugin)
-    images = []
+    images: list[tuple[dict[str, Any], Image.Image, PngImagePlugin.PngInfo]] = []
     piperef = PipeRef()
     jobs = build_jobs(parameters)
 
@@ -2473,24 +2469,38 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
     if parameters.sdpb.value:
         kernel_ctx = torch.nn.attention.sdpa_kernel([k.torch_sdp_backend for k in parameters.sdpb.value])
 
-    with kernel_ctx:
+    save_threads: list[concurrent.futures.Future[None]] = []
+    with kernel_ctx, concurrent.futures.ThreadPoolExecutor() as tpe:
+        im_num = 0
         for job in jobs:
             results = process_job(parameters, piperef, acc, job, meta.copy(), image)
             if parameters.grid.value is not None:
                 images += results
+
+            for _, im, info in results:
+                im_path = parameters.output.value.joinpath(f"{im_num:05}.png")
+                while im_path.exists():
+                    im_num += 1
+                    im_path = parameters.output.value.joinpath(f"{im_num:05}.png")
+                save_threads.append(tpe.submit(Image.Image.save, im, im_path, "PNG", pnginfo=info, compress_level=4))
+                im_num += 1
+
             pbar.update(parameters.batch_size.value)
 
-    if parameters.grid.value is not None:
-        filenum = 0
-        grids, others = parameters.grid.value.fold(images)
-        for i in grids:
-            p = parameters.output.value.joinpath(f"grid_{filenum:05}.png")
-            while p.exists():
-                filenum += 1
-                p = parameters.output.value.joinpath(f"grid_{filenum:05}.png")
-            i.save(p, format="PNG", compress_level=4)
-        if len(others) > 0:
-            print(f"###\n{len(others)} images not included in grid output\n###")
+        if parameters.grid.value is not None:
+            gd_num = 0
+            grids, others = parameters.grid.value.fold((m, i) for m, i, _ in images)
+            for gd in grids:
+                gd_path = parameters.output.value.joinpath(f"grid_{gd_num:05}.png")
+                while gd_path.exists():
+                    gd_num += 1
+                    gd_path = parameters.output.value.joinpath(f"grid_{gd_num:05}.png")
+                save_threads.append(tpe.submit(Image.Image.save, gd, gd_path, "PNG", compress_level=4))
+                gd_num += 1
+
+            if len(others) > 0:
+                print(f"###\n{len(others)} images not included in grid output\n###")
+
     # }}}
 
 
