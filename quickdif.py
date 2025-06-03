@@ -315,20 +315,32 @@ class ModifierSK(enum.StrEnum):
     FlowShift = enum.auto()
     Exponential = enum.auto()
     Karras = enum.auto()
+    Hyper = enum.auto()
+    Vyper = enum.auto()
+    Hype = enum.auto()
+    Vype = enum.auto()
 
     @property
-    def schedule_modifier(self) -> type[ScheduleModifier] | None:
+    def schedule_modifier(self) -> tuple[type[ScheduleModifier], dict[str, Any]] | None:
         match self:
             case ModifierSK.NONE:
                 return None
             case ModifierSK.Beta:
-                return scheduling.Beta
+                return scheduling.Beta, {}
             case ModifierSK.FlowShift:
-                return scheduling.FlowShift
+                return scheduling.FlowShift, {}
             case ModifierSK.Exponential:
-                return scheduling.Exponential
+                return scheduling.Exponential, {}
             case ModifierSK.Karras:
-                return scheduling.Karras
+                return scheduling.Karras, {}
+            case ModifierSK.Hyper:
+                return scheduling.Hyper, {"tail": True}
+            case ModifierSK.Vyper:
+                return scheduling.Hyper, {"tail": True, "scale": -scheduling.Hyper.scale}
+            case ModifierSK.Hype:
+                return scheduling.Hyper, {"tail": False}
+            case ModifierSK.Vype:
+                return scheduling.Hyper, {"tail": False, "scale": -scheduling.Hyper.scale}
         return 0
 
 
@@ -2333,7 +2345,7 @@ def process_job(
                 sampler=sampler_type,
                 schedule=schedule_type,
                 # TODO: merge strategy, multi
-                schedule_modifiers=[(skmodifier.schedule_modifier, {})] if skmodifier.schedule_modifier else [],
+                schedule_modifiers=[skmodifier.schedule_modifier] if skmodifier.schedule_modifier else [],
                 predictor=skpredictor.predictor,
                 noise_type=noise_type,
                 noise_props=noise_props,
