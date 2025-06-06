@@ -35,5 +35,8 @@ line-length = 120
 [tool.ruff.lint]
 ignore = ["E402"]
 
+[tool.pytest.ini_options]
+python_files = "tests/*.py"
+
 [dependency-groups]
 dev = ["pytest>=8.3.3"]
