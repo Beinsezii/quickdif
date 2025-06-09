@@ -76,7 +76,12 @@ def addenv(k: str, val: str):
         os.environ[k] = val
 
 
-def get_suffix(string: str, separator: str = ":::", typing: type = str, default: Any = None) -> tuple[str, Any | None]:
+def get_suffix[T: str | float | int | bool, U: str | float | int | bool | None](
+    string: str,
+    separator: str = ":::",
+    typing: type[T] = str,
+    default: U = None,
+) -> tuple[str, T | U]:
     split = string.rsplit(separator, 1)
     match len(split):
         case 1:
@@ -342,6 +347,27 @@ class ModifierSK(enum.StrEnum):
             case ModifierSK.Vype:
                 return scheduling.Hyper, {"tail": False, "scale": -scheduling.Hyper.scale}
         return 0
+
+    @classmethod
+    def parse_suffix(cls, item: str) -> tuple[type[ScheduleModifier], dict[str, Any]] | None:
+        modifier, scale = get_suffix(item, typing=float)
+        assert modifier in ModifierSK, f"Modifier {modifier} unknown. Must be one of {tuple(cls)}"
+        self = cls(modifier)
+        modifier = self.schedule_modifier
+
+        if modifier is None:
+            return None
+
+        mod_cls, mod_props = modifier
+        if scale is not None:
+            if issubclass(mod_cls, scheduling.FlowShift):
+                mod_props["shift"] = scale
+            elif issubclass(mod_cls, scheduling.Karras | scheduling.Exponential):
+                mod_props["rho"] = scale
+            elif issubclass(mod_cls, scheduling.Hyper):
+                mod_props["scale"] = -scale if self in (ModifierSK.Vype, ModifierSK.Vyper) else scale
+
+        return mod_cls, mod_props
 
 
 @enum.unique
@@ -1094,7 +1120,7 @@ This should only need to be set if a model explicitly does not use the default, 
     )
     skrample_modifier = QDParam(
         "skrample_modifier",
-        ModifierSK,
+        str,
         value=ModifierSK.NONE,
         short="-Km",
         multi=True,
@@ -1325,7 +1351,7 @@ def parse_cli(parameters: Parameters) -> Image.Image | None:
                     parameters.resolution.value = (meta_image.width, meta_image.height)
                     for k, v in getattr(meta_image, "text", {}).items():
                         if k in parameters:
-                            if k == "lora":
+                            if k in ["lora", "skrample_modifier"]:
                                 parameters.get(k).value = v.split("\x1f")
                             elif parameters.get(k).meta:
                                 try:
@@ -1370,6 +1396,9 @@ def parse_cli(parameters: Parameters) -> Image.Image | None:
             parameters.get(key).value = [
                 expanded for nested in [pexpand(p) for p in parameters.get(key).value] for expanded in nested
             ]
+
+    for sm in (i for sl in splitlist(parameters.skrample_modifier.value) for i in sl):
+        ModifierSK.parse_suffix(sm)
 
     if args.get("print", False):
         print("\n".join([f"{p.name}: {p.value}" for p in parameters.params()]))
@@ -1879,7 +1908,7 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
     for param in parameters.params():
         if param.multi:
             match param.name:
-                case "seed" | "lora" | "model" | "dtype" | "sdpb":
+                case "seed" | "lora" | "model" | "dtype" | "sdpb" | "skrample_modifier":
                     pass
                 case "power" | "pixelate" | "posterize":
                     if param.value:
@@ -1889,6 +1918,8 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
                         jobs = merger(jobs, param.name, param.value)
 
     # manually ordered merges
+    if parameters.skrample_modifier.value:
+        jobs = merger(jobs, "skrample_modifier", splitlist(parameters.skrample_modifier.value))
     if parameters.lora.value:
         # Potentially this could go above model if fusion is avoided?
         # TODO: measure fused vs unfused perf
@@ -2235,11 +2266,14 @@ def process_job(
     sampler: Sampler = job.pop("sampler", Sampler.Default)
     sksampler: SamplerSK = job.pop("skrample_sampler", SamplerSK.NONE)
     skschedule: ScheduleSK = job.pop("skrample_schedule", ScheduleSK.Default)
-    skmodifier: ModifierSK = job.pop("skrample_modifier", ModifierSK.NONE)
+    skmodifier: list[str] = job.pop("skrample_modifier", [])
     skmodmerge: MergeStrategy = job.pop("skrample_modifier_merge", MergeStrategy.UniqueBefore)
     sknoise: NoiseSK = job.pop("skrample_noise", NoiseSK.Random)
     skpredictor: PredictorSK = job.pop("skrample_predictor", PredictorSK.Default)
     skdtype: DTypeSK = job.pop("skrample_dtype", DTypeSK.F64)
+
+    if skmodifier:
+        meta["skrample_modifier"] = "\x1f".join(skmodifier)
 
     # PIPE
     if piperef.name != model or piperef.loras != lora_meta or piperef.dtype != model_dtype:
@@ -2344,8 +2378,7 @@ def process_job(
                 pipe.scheduler,  # type: ignore ConfigMixin
                 sampler=sampler_type,
                 schedule=schedule_type,
-                # TODO: merge strategy, multi
-                schedule_modifiers=[skmodifier.schedule_modifier] if skmodifier.schedule_modifier else [],
+                schedule_modifiers=[p for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p],
                 predictor=skpredictor.predictor,
                 noise_type=noise_type,
                 noise_props=noise_props,
@@ -2353,6 +2386,7 @@ def process_job(
                 sampler_props=sampler_props,
                 schedule_props=schedule_props,
                 modifier_merge_strategy=skmodmerge,
+                allow_dynamic=not any("shift" in p[1] for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p),
             )
 
         else:
