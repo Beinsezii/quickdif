@@ -635,7 +635,6 @@ class LatentColor(enum.StrEnum):
 
 
 class Resolution:
-    # {{{
     def __init__(self, resolution: str | tuple[int, int]) -> None:
         if isinstance(resolution, str):
             self._str = resolution
@@ -684,13 +683,10 @@ class Resolution:
     def __str__(self) -> str:
         return self._str if self._str is not None else self.__repr__()
 
-    # }}}
-
 
 class Grid:
     other_iters = ["resolution", "lora", "dtype"]
 
-    # {{{
     def __init__(self, axes: None | str | tuple[str | None, str | None]) -> None:
         self._x = None
         self._y = None
@@ -826,11 +822,8 @@ class Grid:
     def __str__(self) -> str:
         return self._str if self._str is not None else self.__repr__()
 
-    # }}}
-
 
 class QDParam:
-    # {{{
     def __init__(
         self,
         name: str,
@@ -880,11 +873,8 @@ class QDParam:
             else:
                 self._value = self._cast(new)
 
-    # }}}
-
 
 class Parameters:
-    # {{{
     ### Batching
     model = QDParam(
         "model",
@@ -1230,11 +1220,8 @@ For information, see `https://rocmdocs.amd.com/projects/MIOpen/en/latest/how-to/
     def __setattr__(*args) -> None:  # Effectively make the class static
         raise ValueError
 
-    # }}}
-
 
 def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
-    # {{{
     parser = argparse.ArgumentParser(
         description="Quick and easy inference for a variety of Diffusers models. Not all models support all options",
         add_help=False,
@@ -1289,11 +1276,9 @@ def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
     parser.add_argument("--help", action="help")
 
     return parser
-    # }}}
 
 
 def parse_cli(parameters: Parameters) -> Image.Image | None:
-    # {{{
     args = vars(build_parser(parameters).parse_args())
 
     for ext in "json", "toml":
@@ -1399,7 +1384,6 @@ def parse_cli(parameters: Parameters) -> Image.Image | None:
         input_image = Image.open(args["input"]).convert("RGB")
 
     return input_image
-    # }}}
 
 
 do_miopen_autotune = False
@@ -1418,7 +1402,7 @@ if not do_miopen_autotune:
 # Enables memory efficient attention on GFX11/Navi31
 addenv("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 
-# TORCH PRELUDE {{{
+
 #
 # Load Torch and libs that depend on it after the CLI cause it's laggy.
 import diffusers
@@ -1502,7 +1486,6 @@ diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING = OrderedDic
 diffusers.pipelines.auto_pipeline.SUPPORTED_TASKS_MAPPINGS[0] = (
     diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING
 )
-# }}}
 
 
 @dataclass
@@ -1515,7 +1498,6 @@ class PipeRef:
 
 # elegent solution from <https://stackoverflow.com/questions/842557/>
 class SmartSigint:
-    # {{{
     def __init__(self, num=1, job_name=None) -> None:
         self.num = num
         self.job_name = job_name if job_name is not None else "current job"
@@ -1543,8 +1525,6 @@ class SmartSigint:
 
     def __exit__(self, *_):
         self.terminate()
-
-    # }}}
 
 
 # BOTTOM LEVEL
@@ -1628,7 +1608,6 @@ def _patch_sdpa(
 
 
 def patch_attn(attention: AttentionPatch) -> None:
-    # {{{
     match attention:
         case AttentionPatch.NONE:
             pass
@@ -1671,11 +1650,9 @@ def patch_attn(attention: AttentionPatch) -> None:
         case _:
             msg = "Unreachable!"
             raise ValueError(msg)
-    # }}}
 
 
 def apply_loras(loras: list[str], pipe: DiffusionPipeline) -> None:
-    # {{{
     adapters = []
     for n, lora in enumerate(loras):
         path, scale = get_suffix(lora, typing=float, default=1.0)
@@ -1697,7 +1674,6 @@ def apply_loras(loras: list[str], pipe: DiffusionPipeline) -> None:
         )
         pipe.fuse_lora(adapter_names=[a["name"] for a in adapters])
         pipe.unload_lora_weights()
-    # }}}
 
 
 def loras_to_str(loras: list[str]) -> str | None:
@@ -1710,7 +1686,6 @@ def loras_to_str(loras: list[str]) -> str | None:
 
 
 def get_compel(pipe: DiffusionPipeline) -> Compel | None:
-    # {{{
     try:
         if hasattr(pipe, "tokenizer") and isinstance(pipe.tokenizer, CLIPTokenizer):
             if hasattr(pipe, "tokenizer_2"):
@@ -1734,22 +1709,18 @@ def get_compel(pipe: DiffusionPipeline) -> Compel | None:
         print(f"Compel not enabled:\n{e}\nRich prompting not available.")
 
     return compel
-    # }}}
 
 
 def set_vae(pipe: DiffusionPipeline, tile: bool) -> None:
-    # {{{
     if tile:
         pipe.vae.enable_tiling()
     else:
         pipe.vae.enable_slicing()
     if pipe.dtype != torch.float16:
         pipe.vae.config.force_upcast = False
-    # }}}
 
 
 def get_scheduler(sampler: Sampler, spacing: Spacing | None, default_scheduler: Any) -> SchedulerMixin:
-    # {{{
     sampler_args = {
         "steps_offset": 0,
         "set_alpha_to_one": True,
@@ -1828,11 +1799,9 @@ def get_scheduler(sampler: Sampler, spacing: Spacing | None, default_scheduler: 
     }[sampler]
 
     return scheduler.from_config(default_scheduler.config, **(sampler_args | scheduler_args))
-    # }}}
 
 
 def get_latent_params(pipe: DiffusionPipeline) -> tuple[int, float, int] | None:
-    # {{{
     factor: float | None = None
     channels: int | None = None
     default_size: int | None = None
@@ -1857,14 +1826,12 @@ def get_latent_params(pipe: DiffusionPipeline) -> tuple[int, float, int] | None:
         return (channels, factor, default_size if default_size is not None else round(1024 / factor))
     else:
         return None
-    # }}}
 
 
 # MID LEVEL
 
 
 def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
-    # {{{
     job = {
         "num_images_per_prompt": parameters.batch_size.value,
         "clean_caption": False,  # stop IF nag. what does this even do
@@ -1944,7 +1911,6 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
                 j[key] = expands[0]
 
     return jobs
-    # }}}
 
 
 def get_pipe(
@@ -1957,7 +1923,6 @@ def get_pipe(
     tile_vae: bool,
     pag: bool,
 ) -> DiffusionPipeline:
-    # {{{
     pipe_args = {
         "add_watermarker": False,
         "safety_checker": None,
@@ -2114,7 +2079,6 @@ def get_pipe(
             raise ValueError
 
     return pipe
-    # }}}
 
 
 # Does not use Parameters because effectively all of these are per-job
@@ -2132,8 +2096,6 @@ def make_noise(
     variance_power: float,
     variance_scale: int,
 ) -> tuple[torch.Tensor | None, Resolution | None]:
-    # {{{
-
     latent_params = get_latent_params(pipe)
     if latent_params is None:
         return (None, None)
@@ -2201,8 +2163,6 @@ def make_noise(
 
     return (latents, Resolution((round(width * factor), round(height * factor))))
 
-    # }}}
-
 
 # TOP LEVEL
 
@@ -2216,8 +2176,6 @@ def process_job(
     meta: dict[str, str],
     input_image: Image.Image | None,
 ) -> list[tuple[dict[str, Any], Image.Image, PngImagePlugin.PngInfo]]:
-    # {{{
-
     # POP SEED first because the meta is set in PngInfo directly
     seed = job.pop("seed")
 
@@ -2313,7 +2271,6 @@ def process_job(
     job["generator"] = generators
     print("seeds:", " ".join([str(seed + n) for n in range(parameters.batch_size.value)]))
 
-    # CONDITIONING {{{
     compel = get_compel(pipe)
     if compel is not None:
         pos = job.pop("prompt") if "prompt" in job else ""
@@ -2328,9 +2285,6 @@ def process_job(
         pcond, ncond = compel.pad_conditioning_tensors_to_same_length([pcond, ncond])
         job |= {"prompt_embeds": pcond, "negative_prompt_embeds": ncond}
 
-    # CONDITIONING }}}
-
-    # INFERENCE {{{
     pipe_params = signature(pipe).parameters  # type: ignore Callable
 
     if hasattr(pipe, "scheduler"):
@@ -2466,12 +2420,9 @@ def process_job(
         os.environ["TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL"] = aot
 
     return results
-    # }}}
-    # }}}
 
 
 def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None) -> None:
-    # {{{
     acc = Accelerator(dynamo_plugin=parameters.compile.value.plugin)
     images: list[tuple[dict[str, Any], Image.Image, PngImagePlugin.PngInfo]] = []
     piperef = PipeRef()
@@ -2523,8 +2474,6 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
 
             if len(others) > 0:
                 print(f"###\n{len(others)} images not included in grid output\n###")
-
-    # }}}
 
 
 if __name__ == "__main__":
