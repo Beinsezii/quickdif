@@ -9,7 +9,7 @@ import re
 import signal
 import tomllib
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextlib import nullcontext
 from copy import copy
 from dataclasses import dataclass
@@ -730,7 +730,7 @@ class Grid:
     def axes(self) -> tuple[str | None, str | None]:
         return (self.x, self.y)
 
-    def fold(self, images: list[tuple[dict[str, Any], Image.Image]]) -> tuple[list[Image.Image], list[Image.Image]]:
+    def fold(self, images: Iterable[tuple[dict[str, Any], Image.Image]]) -> tuple[list[Image.Image], list[Image.Image]]:
         results: list[Image.Image] = []
         # n, x, y
         grids: list[list[list[tuple[dict[str, Any], Image.Image]]]] = []
@@ -1878,7 +1878,7 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
     image_ops = [{}]
 
     if parameters.iter.value is Iter.Shuffle:
-        jobs = [job] * parameters.batch_count.value
+        jobs = [job] * parameters.batch_count.value_single
         merger = lambda sets, name, vals: [i | {name: v} for i, v in zip(sets, oversample(vals, len(sets)))]  # noqa: E731
     else:
         jobs = [job]
@@ -1897,12 +1897,12 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
                         jobs = merger(jobs, param.name, param.value)
 
     # manually ordered merges
-    if parameters.skrample_modifier.value:
-        jobs = merger(jobs, "skrample_modifier", splitlist(parameters.skrample_modifier.value))
-    if parameters.lora.value:
+    if parameters.skrample_modifier.value_multi:
+        jobs = merger(jobs, "skrample_modifier", splitlist(parameters.skrample_modifier.value_multi))
+    if parameters.lora.value_multi:
         # Potentially this could go above model if fusion is avoided?
         # TODO: measure fused vs unfused perf
-        jobs = merger(jobs, "lora", splitlist(parameters.lora.value))
+        jobs = merger(jobs, "lora", splitlist(parameters.lora.value_multi))
     if parameters.model.value:
         jobs = merger(jobs, "model", parameters.model.value)
     if parameters.dtype.value:
@@ -1912,16 +1912,18 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
     seeds = (
         [torch.randint(high=i32max, low=-i32max, size=(1,)).item()]
         if not parameters.seed.value
-        else parameters.seed.value
+        else parameters.seed.value_multi
     )
-    seeds = [s + c * parameters.batch_size.value for c in range(parameters.batch_count.value) for s in seeds]
+    seeds = [
+        s + c * parameters.batch_size.value_single for c in range(parameters.batch_count.value_single) for s in seeds
+    ]
     match parameters.iter.value:
         case Iter.Shuffle:
             jobs = merger(jobs, "seed", seeds)
         case Iter.Walk:
             # inverse merge so seeds always iter first
             jobs = [
-                j | {"seed": s + (n * parameters.batch_size.value * parameters.batch_count.value)}
+                j | {"seed": s + (n * parameters.batch_size.value_single * parameters.batch_count.value_single)}
                 for n, j in enumerate(jobs)
                 for s in seeds
             ]
@@ -2255,11 +2257,11 @@ def process_job(
             model,
             acc,
             model_dtype,
-            parameters.offload.value,
+            parameters.offload.value_single,
             loras,
             input_image is not None,
-            parameters.tile.value,
-            any(parameters.pag.value),
+            parameters.tile.value_single,
+            any(parameters.pag.value_multi),
         )
         piperef.name = model
         piperef.loras = lora_meta
@@ -2275,7 +2277,7 @@ def process_job(
     # INPUT TENSOR
     generators = [
         torch.Generator(noise_type.torch_device or acc.device).manual_seed(seed + n)
-        for n in range(parameters.batch_size.value)
+        for n in range(parameters.batch_size.value_single)
     ]
     if input_image is None:
         latents, latents_resolution = make_noise(
@@ -2283,7 +2285,7 @@ def process_job(
             generators,
             acc,
             # Parameters
-            parameters.batch_size.value,
+            parameters.batch_size.value_single,
             color,
             color_power,
             noise_power,
@@ -2303,7 +2305,7 @@ def process_job(
         else:
             job["image"] = input_image
     job["generator"] = generators
-    print("seeds:", " ".join([str(seed + n) for n in range(parameters.batch_size.value)]))
+    print("seeds:", " ".join([str(seed + n) for n in range(parameters.batch_size.value_single)]))
 
     compel = get_compel(pipe)
     if compel is not None:
@@ -2457,7 +2459,7 @@ def process_job(
 
 
 def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None) -> None:
-    acc = Accelerator(dynamo_plugin=parameters.compile.value.plugin)
+    acc = Accelerator(dynamo_plugin=parameters.compile.value_single.plugin)
     images: list[tuple[dict[str, Any], Image.Image, PngImagePlugin.PngInfo]] = []
     piperef = PipeRef()
     jobs = build_jobs(parameters)
@@ -2465,16 +2467,16 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
     if parameters.tunable.value and torch.cuda.is_available():
         torch.cuda.tunable.enable(val=True)
 
-    total_images = len(jobs) * parameters.batch_size.value
+    total_images = len(jobs) * parameters.batch_size.value_single
     print(f"\nGenerating {len(jobs)} batches of {parameters.batch_size.value} images for {total_images} total...")
     pbar = tqdm(desc="Images", total=total_images, smoothing=0)
 
-    if parameters.attn_patch.value is not AttentionPatch.NONE:
-        patch_attn(parameters.attn_patch.value)
+    if parameters.attn_patch.value_single is not AttentionPatch.NONE:
+        patch_attn(parameters.attn_patch.value_single)
 
     kernel_ctx = nullcontext()
-    if parameters.sdpb.value:
-        kernel_ctx = torch.nn.attention.sdpa_kernel([k.torch_sdp_backend for k in parameters.sdpb.value])
+    if parameters.sdpb.value_multi:
+        kernel_ctx = torch.nn.attention.sdpa_kernel([k.torch_sdp_backend for k in parameters.sdpb.value_multi])
 
     with kernel_ctx, concurrent.futures.ThreadPoolExecutor() as tpe:
         im_num = 0
@@ -2486,23 +2488,23 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
                     images += results
 
                 for _, im, info in results:
-                    im_path = parameters.output.value.joinpath(f"{im_num:05}.png")
+                    im_path = parameters.output.value_single.joinpath(f"{im_num:05}.png")
                     while im_path.exists():
                         im_num += 1
-                        im_path = parameters.output.value.joinpath(f"{im_num:05}.png")
+                        im_path = parameters.output.value_single.joinpath(f"{im_num:05}.png")
                     tpe.submit(Image.Image.save, im, im_path, "PNG", pnginfo=info, compress_level=9)
                     im_num += 1
 
-            pbar.update(parameters.batch_size.value)
+            pbar.update(parameters.batch_size.value_single)
 
         if parameters.grid.value is not None:
             gd_num = 0
-            grids, others = parameters.grid.value.fold((m, i) for m, i, _ in images)
+            grids, others = parameters.grid.value_single.fold((m, i) for m, i, _ in images)
             for gd in grids:
-                gd_path = parameters.output.value.joinpath(f"grid_{gd_num:05}.png")
+                gd_path = parameters.output.value_single.joinpath(f"grid_{gd_num:05}.png")
                 while gd_path.exists():
                     gd_num += 1
-                    gd_path = parameters.output.value.joinpath(f"grid_{gd_num:05}.png")
+                    gd_path = parameters.output.value_single.joinpath(f"grid_{gd_num:05}.png")
                 tpe.submit(Image.Image.save, gd, gd_path, "PNG", compress_level=4)
                 gd_num += 1
 
