@@ -66,10 +66,10 @@ def addenv(k: str, val: str) -> None:
         os.environ[k] = val
 
 
-def get_suffix[T: str | float | int | bool, U: str | float | int | bool | None](
+def get_suffix[T, U](
     string: str,
     separator: str = ":::",
-    typing: type[T] = str,
+    typing: Callable[[str], T] = str,
     default: U = None,
 ) -> tuple[str, T | U]:
     split = string.rsplit(separator, 1)
@@ -838,21 +838,21 @@ class Grid:
         return self._str if self._str is not None else self.__repr__()
 
 
-class QDParam:
+class QDParam[T: str | bool | int | float | Path | Resolution | Grid]:
     def __init__(
         self,
         name: str,
-        typing: type,
-        value: Any = None,
+        typing: type[T],
+        value: T | None = None,
         short: str | None = None,
-        help: str | None = None,
+        docs: str | None = None,
         multi: bool = False,
         meta: bool = False,
         positional: bool = False,
     ) -> None:
         self.name = name
         self.typing = typing
-        self.help = help
+        self.docs = docs
         self.short = short
         self.multi = multi
         self.meta = meta
@@ -861,15 +861,15 @@ class QDParam:
         self.value = value
         self.default = copy(self.value)
 
-    def _cast(self, new):
+    def _cast(self, new: str | T) -> T:
         return new if isinstance(new, self.typing) else self.typing(new)
 
     @property
-    def value(self) -> Any:
+    def value(self) -> T | list[T] | None:
         return self._value
 
     @value.setter
-    def value(self, new) -> None:
+    def value(self, new: str | T | list[T | str] | None) -> None:
         if isinstance(new, list):
             if len(new) == 0:
                 new = None
@@ -877,8 +877,7 @@ class QDParam:
             self._value = new
         elif isinstance(new, list):
             if self.multi:
-                new = [self._cast(v) for v in new]
-                self._value = new
+                self._value = [self._cast(v) for v in new]
             else:
                 msg = f"Refusing to assign list '{new}' to non-multi QDParam '{self.name}'"
                 raise ValueError(msg)
@@ -887,6 +886,21 @@ class QDParam:
                 self._value = [self._cast(new)]
             else:
                 self._value = self._cast(new)
+
+    @property
+    def value_multi(self) -> list[T]:
+        if isinstance(self._value, list):
+            return self._value
+        elif self._value is None:
+            return []
+        else:
+            return [self._value]
+
+    @property
+    def value_single(self) -> T:
+        if isinstance(self._value, list) or self._value is None:
+            raise ValueError(self._value)
+        return self._value
 
 
 class Parameters:
@@ -898,17 +912,17 @@ class Parameters:
         value="stabilityai/stable-diffusion-xl-base-1.0",
         meta=True,
         multi=True,
-        help="Safetensor file or HuggingFace model ID. Append `:::` to denote revision",
+        docs="Safetensor file or HuggingFace model ID. Append `:::` to denote revision",
     )
-    prompt = QDParam("prompt", str, multi=True, meta=True, positional=True, help="Positive prompt")
-    negative = QDParam("negative", str, short="-n", multi=True, meta=True, help="Negative prompt")
-    seed = QDParam("seed", int, short="-e", multi=True, meta=True, help="Seed for RNG")
+    prompt = QDParam("prompt", str, multi=True, meta=True, positional=True, docs="Positive prompt")
+    negative = QDParam("negative", str, short="-n", multi=True, meta=True, docs="Negative prompt")
+    seed = QDParam("seed", int, short="-e", multi=True, meta=True, docs="Seed for RNG")
     resolution = QDParam(
         "resolution",
         Resolution,
         short="-r",
         multi=True,
-        help="Resolution in either [width]x[height] or aspect_x:aspect_y[:round][@megapixels|^square] formats.",
+        docs="Resolution in either [width]x[height] or aspect_x:aspect_y[:round][@megapixels|^square] formats.",
     )
     steps = QDParam(
         "steps",
@@ -917,7 +931,7 @@ class Parameters:
         value=30,
         multi=True,
         meta=True,
-        help="Amount of denoising steps. Prior/Decoder models this only affects the Prior",
+        docs="Amount of denoising steps. Prior/Decoder models this only affects the Prior",
     )
     decoder_steps = QDParam(
         "decoder_steps",
@@ -926,7 +940,7 @@ class Parameters:
         value=-8,
         multi=True,
         meta=True,
-        help="Amount of denoising steps for the Decoder if applicable",
+        docs="Amount of denoising steps for the Decoder if applicable",
     )
     guidance = QDParam(
         "guidance",
@@ -935,7 +949,9 @@ class Parameters:
         value=5.0,
         multi=True,
         meta=True,
-        help="CFG/Classier-Free Guidance. Will guide diffusion more strongly towards the prompts. High values will produce unnatural images",
+        docs="CFG/Classier-Free Guidance. "
+        "Will guide diffusion more strongly towards the prompts. "
+        "High values will produce unnatural images",
     )
     decoder_guidance = QDParam(
         "decoder_guidance",
@@ -943,7 +959,7 @@ class Parameters:
         short="-dg",
         multi=True,
         meta=True,
-        help="Guidance for the Decoder stage if applicable",
+        docs="Guidance for the Decoder stage if applicable",
     )
     rescale = QDParam(
         "rescale",
@@ -952,7 +968,8 @@ class Parameters:
         value=0.0,
         multi=True,
         meta=True,
-        help="Rescale the noise during guidance. Moderate values may help produce more natural images when using strong guidance",
+        docs="Rescale the noise during guidance. "
+        "Moderate values may help produce more natural images when using strong guidance",
     )
     pag = QDParam(
         "pag",
@@ -960,7 +977,7 @@ class Parameters:
         value=0.0,
         multi=True,
         meta=True,
-        help="Perturbed-Attention Guidance scale",
+        docs="Perturbed-Attention Guidance scale",
     )
     denoise = QDParam(
         "denoise",
@@ -968,7 +985,7 @@ class Parameters:
         short="-d",
         multi=True,
         meta=True,
-        help="Denoising amount for Img2Img. Higher values will change more",
+        docs="Denoising amount for Img2Img. Higher values will change more",
     )
     noise_type = QDParam(
         "noise_type",
@@ -977,7 +994,8 @@ class Parameters:
         value=NoiseType.Cpu32,
         multi=True,
         meta=True,
-        help="Device and precision to source RNG from. To reproduce seeds from other diffusion programs it may be necessary to change this",
+        docs="Device and precision to source RNG from. "
+        "To reproduce seeds from other diffusion programs it may be necessary to change this",
     )
     noise_power = QDParam(
         "noise_power",
@@ -985,7 +1003,7 @@ class Parameters:
         short="-np",
         multi=True,
         meta=True,
-        help="Multiplier to the initial latent noise if applicable. <1 for smoother, >1 for more details",
+        docs="Multiplier to the initial latent noise if applicable. <1 for smoother, >1 for more details",
     )
     color = QDParam(
         "color",
@@ -994,7 +1012,7 @@ class Parameters:
         value=LatentColor.Black,
         multi=True,
         meta=True,
-        help="Color of initial latent noise if applicable. Currently only for XL and SD-FT-MSE latent spaces",
+        docs="Color of initial latent noise if applicable. Currently only for XL and SD-FT-MSE latent spaces",
     )
     color_power = QDParam(
         "color_power",
@@ -1002,7 +1020,7 @@ class Parameters:
         short="-c",
         multi=True,
         meta=True,
-        help="Power/opacity of colored latent noise",
+        docs="Power/opacity of colored latent noise",
     )
     variance_scale = QDParam(
         "variance_scale",
@@ -1011,7 +1029,7 @@ class Parameters:
         value=2,
         multi=True,
         meta=True,
-        help="Amount of 'zones' for variance noise. '2' will make a 2x2 grid or 4 tiles",
+        docs="Amount of 'zones' for variance noise. '2' will make a 2x2 grid or 4 tiles",
     )
     variance_power = QDParam(
         "variance_power",
@@ -1019,28 +1037,30 @@ class Parameters:
         short="-vp",
         multi=True,
         meta=True,
-        help="Power/opacity for variance noise. Variance noise simply adds randomly generated colored zones to encourage new compositions on overfitted models",
+        docs="Power/opacity for variance noise. "
+        "Variance noise simply adds randomly generated colored zones to "
+        "encourage new compositions on overfitted models",
     )
     power = QDParam(
         "power",
         float,
         multi=True,
         meta=True,
-        help="Simple filter which scales final image values away from gray based on an exponent",
+        docs="Simple filter which scales final image values away from gray based on an exponent",
     )
     pixelate = QDParam(
         "pixelate",
         float,
         multi=True,
         meta=True,
-        help="Pixelate image using a divisor. Best used with a pixel art Lora",
+        docs="Pixelate image using a divisor. Best used with a pixel art Lora",
     )
     posterize = QDParam(
         "posterize",
         int,
         multi=True,
         meta=True,
-        help="Set amount of colors per channel. Best used with --pixelate",
+        docs="Set amount of colors per channel. Best used with --pixelate",
     )
     sampler = QDParam(
         "sampler",
@@ -1049,7 +1069,7 @@ class Parameters:
         value=Sampler.Default,
         multi=True,
         meta=True,
-        help="""Sampler to use in denoising. Naming scheme is as follows:
+        docs="""Sampler to use in denoising. Naming scheme is as follows:
 euler/ddim/etc. - Literal names;
 k - Use karras sigmas;
 s - Use SDE stochastic noise;
@@ -1063,7 +1083,7 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         short="-dt",
         value=DType.F16,
         multi=True,
-        help="Data format for inference. Should be left at FP16 unless the device or model does not work properly",
+        docs="Data format for inference. Should be left at FP16 unless the device or model does not work properly",
     )
     spacing = QDParam(
         "spacing",
@@ -1071,7 +1091,7 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         value=Spacing.Trailing,
         multi=True,
         meta=True,
-        help="Sampler timestep spacing",
+        docs="Sampler timestep spacing",
     )
     skrample_sampler = QDParam(
         "skrample_sampler",
@@ -1080,7 +1100,7 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         value=SamplerSK.NONE,
         multi=True,
         meta=True,
-        help="""Sampler from https://github.com/Beinsezii/skrample
+        docs="""Sampler from https://github.com/Beinsezii/skrample
 If this is customized, the diffusers scheduler --scheduler -S will be ignored
 Variants with 's' are stochastic, so seuler -> Euler Ancestral""",
     )
@@ -1091,7 +1111,7 @@ Variants with 's' are stochastic, so seuler -> Euler Ancestral""",
         short="-Ks",
         multi=True,
         meta=True,
-        help="""Noise schedule from https://github.com/Beinsezii/skrample
+        docs="""Noise schedule from https://github.com/Beinsezii/skrample
 Use Flow/Linear for flow-matching models like SD3 and Flux, otherwise use Scaled/Uniform.
 ZSNR is only for very particular models that explicitly need it, like Terminus or NoobAI-VPred.""",
     )
@@ -1102,7 +1122,7 @@ ZSNR is only for very particular models that explicitly need it, like Terminus o
         short="-Kp",
         multi=True,
         meta=True,
-        help="""Prediction function from https://github.com/Beinsezii/skrample
+        docs="""Prediction function from https://github.com/Beinsezii/skrample
 This should only need to be set if a model explicitly does not use the default, like Terminus and NoobAI-VPred.""",
     )
     skrample_modifier = QDParam(
@@ -1112,7 +1132,7 @@ This should only need to be set if a model explicitly does not use the default, 
         short="-Km",
         multi=True,
         meta=True,
-        help="""Schedule modifiers from https://github.com/Beinsezii/skrample
+        docs="""Schedule modifiers from https://github.com/Beinsezii/skrample
 Affect the ramp of the noise schedule. All modifiers work with all schedules to varying degrees.""",
     )
     skrample_modifier_merge = QDParam(
@@ -1122,7 +1142,7 @@ Affect the ramp of the noise schedule. All modifiers work with all schedules to 
         short="-KM",
         multi=True,
         meta=True,
-        help="Controls how set skrample modifiers are merged to the base schedule modifiers.",
+        docs="Controls how set skrample modifiers are merged to the base schedule modifiers.",
     )
     skrample_noise = QDParam(
         "skrample_noise",
@@ -1131,7 +1151,7 @@ Affect the ramp of the noise schedule. All modifiers work with all schedules to 
         short="-Kn",
         multi=True,
         meta=True,
-        help="""The type of noise to use for stochastic skrample samplers.
+        docs="""The type of noise to use for stochastic skrample samplers.
 Random is the default for quickdif and what is used for diffusers schedulers (-S).
 Brownian is what is what some other diffusion applications use for "SDE", such as "DPM++ SDE".
 Offset is equivalent to the offset noise algorithm; each channel is offset by a random amount.
@@ -1143,7 +1163,7 @@ Pyramid is a hierarchical algorithm; similar to variance_noise.""",
         short="-Ko",
         multi=True,
         meta=True,
-        help="""Solver order for skrample_sampler.
+        docs="""Solver order for skrample_sampler.
 This is equivalent to the number in the sampler name of other diffusion applications.
 So -Ko 3 is equivalent to DPM++ 3M, or -S dpm3""",
     )
@@ -1154,19 +1174,19 @@ So -Ko 3 is equivalent to DPM++ 3M, or -S dpm3""",
         short="-Kdt",
         multi=True,
         meta=True,
-        help="""Skrample samplers support a dtype separate from the model dtype itself.
+        docs="""Skrample samplers support a dtype separate from the model dtype itself.
 Most diffusion applications use F32, sometimes labeled 'upcast sampling'.
 Performance penalty is typically imperceptible, so it's recommended to leave this at F64""",
     )
     ### Global
-    lora = QDParam("lora", str, short="-l", meta=True, multi=True, help='Apply Loras, ex. "ms_paint.safetensors:::0.6"')
-    batch_count = QDParam("batch_count", int, short="-b", value=1, help="Behavior dependant on 'iter'")
-    batch_size = QDParam("batch_size", int, short="-B", value=1, help="Amount of images to produce in each job")
+    lora = QDParam("lora", str, short="-l", meta=True, multi=True, docs='Apply Loras, ex. "ms_paint.safetensors:::0.6"')
+    batch_count = QDParam("batch_count", int, short="-b", value=1, docs="Behavior dependant on 'iter'")
+    batch_size = QDParam("batch_size", int, short="-B", value=1, docs="Amount of images to produce in each job")
     iter = QDParam(
         "iter",
         Iter,
         value=Iter.Basic,
-        help="""Controls how jobs are created:
+        docs="""Controls how jobs are created:
 'basic' - Run every combination of parameters 'batch_count' times, incrementing seed each 'batch_count';
 'walk' - Run every combination of parameters 'batch_count' times, incrementing seed for every individual job;
 'shuffle' - Pick randomly from all given parameters 'batch_count' times""",
@@ -1174,7 +1194,7 @@ Performance penalty is typically imperceptible, so it's recommended to leave thi
     grid = QDParam(
         "grid",
         Grid,
-        help="Compile the images into a final grid using up to two parameters, formatted [X or none] ,: [Y or none]",
+        docs="Compile the images into a final grid using up to two parameters, formatted [X or none] ,: [Y or none]",
     )
     ### System
     output = QDParam(
@@ -1182,37 +1202,38 @@ Performance penalty is typically imperceptible, so it's recommended to leave thi
         Path,
         short="-o",
         value=Path("./quickdif_output/"),
-        help="Output directory for images",
+        docs="Output directory for images",
     )
     offload = QDParam(
         "offload",
         Offload,
         value=Offload.NONE,
-        help="Set amount of CPU offload. In most UIs, 'model' is equivalent to --med-vram while 'sequential' is equivalent to --low-vram",
+        docs="Set amount of CPU offload. "
+        "In most UIs, 'model' is equivalent to --med-vram while 'sequential' is equivalent to --low-vram",
     )
     attn_patch = QDParam(
         "attn-patch",
         AttentionPatch,
         value=AttentionPatch.NONE,
-        help="Patch the SDPA function with a custom external attention processor.",
+        docs="Patch the SDPA function with a custom external attention processor.",
     )
-    sdpb = QDParam("sdpb", SDPB, multi=True, help="Override the SDP attention backend(s) to use")
-    compile = QDParam("compile", Compile, value=Compile.Off, help="Compile network with torch.compile()")
-    tunable = QDParam("tunable", bool, value=False, help="Enable tunable pytorch operations")
+    sdpb = QDParam("sdpb", SDPB, multi=True, docs="Override the SDP attention backend(s) to use")
+    compile = QDParam("compile", Compile, value=Compile.Off, docs="Compile network with torch.compile()")
+    tunable = QDParam("tunable", bool, value=False, docs="Enable tunable pytorch operations")
     tile = QDParam(
         "tile",
         bool,
-        help="Tile VAE. Slicing is already used by default so only set tile if creating very large images",
+        docs="Tile VAE. Slicing is already used by default so only set tile if creating very large images",
     )
     miopen_autotune = QDParam(
         "miopen_autotune",
         bool,
         value=False,
-        help="""Set whether AMD MIOpen autotuning is enabled.
+        docs="""Set whether AMD MIOpen autotuning is enabled.
 This only applies if the environment variable `MIOPEN_FIND_MODE` is unset.
 For information, see `https://rocmdocs.amd.com/projects/MIOpen/en/latest/how-to/find-and-immediate.html#find-modes`""",
     )
-    comment = QDParam("comment", str, meta=True, help="Add a comment to the image.")
+    comment = QDParam("comment", str, meta=True, docs="Add a comment to the image.")
 
     def pairs(self) -> list[tuple[str, QDParam]]:
         return [(k, v) for k, v in getmembers(self) if isinstance(v, QDParam)]
@@ -1232,8 +1253,8 @@ For information, see `https://rocmdocs.amd.com/projects/MIOpen/en/latest/how-to/
     def __contains__(self, key: str) -> bool:
         return key in self.labels()
 
-    def __setattr__(*args) -> None:  # Effectively make the class static
-        raise ValueError
+    def __setattr__(self, _: str, __: None) -> None:
+        raise NotImplementedError
 
 
 def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
@@ -1250,15 +1271,15 @@ def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
 
         kwargs = {}
 
-        help = [param.help]
+        docs = [param.docs]
         if isinstance(param.value, list) and len(param.value) == 1:
-            help += [f'Default "{param.value[0]}"']
+            docs += [f'Default "{param.value[0]}"']
         elif param.value is not None:
-            help += [f'Default "{param.value}"']
-        help = ". ".join([h for h in help if h is not None])
+            docs += [f'Default "{param.value}"']
+        docs = ". ".join([h for h in docs if h is not None])
 
-        if help:
-            kwargs["help"] = help
+        if docs:
+            kwargs["help"] = docs
 
         if param.typing is bool and param.multi is False:
             kwargs["action"] = argparse.BooleanOptionalAction
@@ -1330,7 +1351,7 @@ def parse_cli(parameters: Parameters) -> Image.Image | None:
                         pass
             except UnicodeDecodeError:
                 with Image.open(BytesIO(data)) as meta_image:
-                    parameters.resolution.value = (meta_image.width, meta_image.height)
+                    parameters.resolution.value = "x".join(map(str, meta_image.size))
                     for k, v in getattr(meta_image, "text", {}).items():
                         if k in parameters:
                             if k in ["lora", "skrample_modifier"]:
@@ -1343,13 +1364,13 @@ def parse_cli(parameters: Parameters) -> Image.Image | None:
                                         f"Config value '{v}' cannot be assigned to parameter '{parameters.get(k).name}', ignoring"
                                     )
 
-    for id, val in args.items():
+    for key, val in args.items():
         if (
-            id in parameters
+            key in parameters
             and val is not None
-            and not (isinstance(val, list) and len(val) == 0 and parameters.get(id).positional)
+            and not (isinstance(val, list) and len(val) == 0 and parameters.get(key).positional)
         ):
-            parameters.get(id).value = val
+            parameters.get(key).value = val
 
     args = {k: v for k, v in args.items() if k not in parameters}
 
@@ -1357,12 +1378,12 @@ def parse_cli(parameters: Parameters) -> Image.Image | None:
         dump = {}
         for k, v in parameters.pairs():
             if v.value != v.default:
-                v = v.value
-                if isinstance(v, Path) or isinstance(v, Grid):
-                    v = str(v)
-                elif isinstance(v, list):
-                    if all(isinstance(x, Resolution) for x in v):
-                        v = [str(v) for v in v]
+                val = v.value
+                if isinstance(val, Path) or isinstance(val, Grid):
+                    val = str(val)
+                elif isinstance(val, list):
+                    if all(isinstance(x, Resolution) for x in val):
+                        val = [str(val) for val in val]
                 dump[k] = v
         s = json.dumps(dump)
         try:
@@ -1374,22 +1395,20 @@ def parse_cli(parameters: Parameters) -> Image.Image | None:
         exit()
 
     for key in "prompt", "negative":
-        if parameters.get(key).value is not None:
-            parameters.get(key).value = [
-                expanded for nested in [pexpand(p) for p in parameters.get(key).value] for expanded in nested
-            ]
+        if (param := parameters.get(key)).value is not None:
+            param.value = [expanded for nested in [pexpand(p) for p in param.value] for expanded in nested]
 
-    for sm in (i for sl in splitlist(parameters.skrample_modifier.value) for i in sl):
+    for sm in (i for sl in splitlist(parameters.skrample_modifier.value_multi) for i in sl):
         ModifierSK.parse_suffix(sm)
 
     if args.get("print", False):
         print("\n".join([f"{p.name}: {p.value}" for p in parameters.params()]))
         exit()
 
-    if parameters.output.value.is_dir():
+    if parameters.output.value_single.is_dir():
         pass
-    elif not parameters.output.value.exists():
-        parameters.output.value.mkdir()
+    elif not parameters.output.value_single.exists():
+        parameters.output.value_single.mkdir()
     else:
         msg = "out must be directory"
         raise ValueError(msg)
