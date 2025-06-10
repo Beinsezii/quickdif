@@ -685,12 +685,13 @@ class Resolution:
 
 
 class Grid:
-    other_iters = ["resolution", "lora", "dtype"]
+    other_iters: tuple[str, ...] = ("resolution", "lora", "dtype")
 
     def __init__(self, axes: None | str | tuple[str | None, str | None]) -> None:
-        self._x = None
-        self._y = None
-        self._str = None
+        self._x: str | None = None
+        self._y: str | None = None
+        self._str: str | None = None
+
         if isinstance(axes, str):
             m = re.match(r"^ *([A-Za-z_]+)? *?([,:]?) *([A-Za-z_]+)? *$", axes)
             if m is None:
@@ -702,12 +703,14 @@ class Grid:
             self._x, self._y = axes
 
         params = Parameters()
+
         if self._x is not None:
             self._x = self._x.casefold()
             if self._x == "none":
                 self._x = None
             else:
                 assert params.get(self._x).meta or self._x in self.other_iters
+
         if self._y is not None:
             self._y = self._y.casefold()
             if self._y == "none":
@@ -761,6 +764,7 @@ class Grid:
 
                 # add Y
                 if self.y is not None:
+                    assert self.x is not None, "Pure vertical grids not implemented"
                     do_break = False
                     for gx in grids[n]:
                         if (
@@ -778,7 +782,8 @@ class Grid:
                 n += 1
 
         # Compile results
-        base_style = {"fill": (255, 255, 255), "stroke_fill": (0, 0, 0)}
+        fill = (255, 255, 255)
+        stroke_fill = (0, 0, 0)
         for g in grids:
             cells_x = cells_y = cell_w = cell_h = 0
             for x in g:
@@ -788,9 +793,9 @@ class Grid:
                     cell_w = max(cell_w, y[1].width)
                     cell_h = max(cell_h, y[1].height)
 
-            style = base_style | {"font_size": cell_w // 25}
-            pad = style["font_size"] // 4
-            style["stroke_width"] = max(1, style["font_size"] // 10)
+            font_size = cell_w // 25
+            stroke_width = max(1, font_size // 10)
+            pad = font_size // 4
 
             canvas = Image.new("RGB", (cells_x * cell_w, cells_y * cell_h), (0, 0, 0))
             for nx, ix in enumerate(g):
@@ -802,7 +807,14 @@ class Grid:
                     # X labels
                     if ny == 0 and self.x is not None:
                         draw = ImageDraw.Draw(canvas)
-                        draw.text((nx * cell_w + pad, ny * cell_h), f"{self.x} : {iy[0][self.x]}", **style)
+                        draw.text(
+                            (nx * cell_w + pad, ny * cell_h),
+                            f"{self.x} : {iy[0][self.x]}",
+                            fill=fill,
+                            stroke_fill=stroke_fill,
+                            font_size=font_size,
+                            stroke_width=stroke_width,
+                        )
                     # Y labels
                     if nx == 0 and self.y is not None:
                         draw = ImageDraw.Draw(canvas)
@@ -810,7 +822,10 @@ class Grid:
                             (nx * cell_w + pad, (ny + 1) * cell_h - 5),
                             f"{self.y} : {iy[0][self.y]}",
                             anchor="lb",
-                            **style,
+                            fill=fill,
+                            stroke_fill=stroke_fill,
+                            font_size=font_size,
+                            stroke_width=stroke_width,
                         )
             results.append(canvas)
 
