@@ -1223,6 +1223,7 @@ Performance penalty is typically imperceptible, so it's recommended to leave thi
     tile = QDParam(
         "tile",
         bool,
+        value=False,
         docs="Tile VAE. Slicing is already used by default so only set tile if creating very large images",
     )
     miopen_autotune = QDParam(
