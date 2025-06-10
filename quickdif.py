@@ -37,37 +37,28 @@ COLS_SD3 = {"black": [0.3509, -0.8920, -2.2919, -3.0386, 1.4051, -2.2471, -2.539
 COLS_XL = {"black": [-2.8325, 0.5036, 0.3537, 0.3401], "white": [2.3400, 0.2188, 1.2240, -1.0676], "red": [-2.5746, -2.5922, 1.4629, -1.6051], "green": [-0.4603, 1.8433, 3.5376, 1.1637], "blue": [0.0598, 2.1372, -2.2897, 0.5443], "cyan": [1.6232, 3.4135, 0.6123, 1.0585], "magenta": [-0.1147, -0.6371, -1.5609, -1.1584], "yellow": [-0.8686, -1.3799, 4.3088, -1.0480]}  # noqa: E501
 # fmt: on
 
-# MATRICES {{{
 XYZ_M1 = np.array(
-    # {{{
     [
         [0.4124, 0.3576, 0.1805],
         [0.2126, 0.7152, 0.0722],
         [0.0193, 0.1192, 0.9505],
     ]
-).T  # }}}
+).T
 
 OKLAB_M1 = np.array(
-    # {{{
     [
         [0.8189330101, 0.0329845436, 0.0482003018],
         [0.3618667424, 0.9293118715, 0.2643662691],
         [-0.1288597137, 0.0361456387, 0.6338517070],
     ]
-)  # }}}
+)
 OKLAB_M2 = np.array(
-    # {{{
     [
         [0.2104542553, 1.9779984951, 0.0259040371],
         [0.7936177850, -2.4285922050, 0.7827717662],
         [-0.0040720468, 0.4505937099, -0.8086757660],
     ]
-)  # }}}
-
-# }}}
-
-
-# UTILS {{{
+)
 
 
 def addenv(k: str, val: str) -> None:
@@ -92,7 +83,7 @@ def get_suffix[T: str | float | int | bool, U: str | float | int | bool | None](
             raise ValueError(msg)
 
 
-def oversample(population: list, k: int):
+def oversample[T](population: list[T], k: int) -> list[T]:
     samples = []
     while len(samples) < k:
         samples += random.sample(population, min(len(population), k - len(samples)))
@@ -100,7 +91,12 @@ def oversample(population: list, k: int):
     return samples
 
 
-def splitlist(values: list[str], separator: str = ":::", trim_groups=False, trim_items=True) -> list[list[str]]:
+def splitlist(
+    values: list[str],
+    separator: str = ":::",
+    trim_groups: bool = False,
+    trim_items: bool = True,
+) -> list[list[str]]:
     """Split a list into sub-lists based on a separator.
     `trim_groups` will disallow empty sub-lists, while `trim_items` will disallow empty strings."""
     results = []
@@ -126,12 +122,12 @@ def roundint(n: int | float, step: int) -> int:
         return round(n - (n % step))
 
 
-def spowf(n: float | int, pow: int | float) -> float:
-    return copysign(abs(n) ** pow, n)
+def spowf(n: float | int, power: int | float) -> float:
+    return copysign(abs(n) ** power, n)
 
 
-def spowf_np(array: np.ndarray, pow: int | float | list[int | float]) -> np.ndarray:
-    return np.copysign(abs(array) ** pow, array)
+def spowf_np(array: np.ndarray, power: int | float | list[int | float]) -> np.ndarray:
+    return np.copysign(abs(array) ** power, array)
 
 
 def lrgb_to_oklab(array: np.ndarray) -> np.ndarray:
@@ -142,10 +138,6 @@ def oklab_to_lrgb(array: np.ndarray) -> np.ndarray:
     return spowf_np((array @ npl.inv(OKLAB_M2)), 3) @ npl.inv(XYZ_M1 @ OKLAB_M1)
 
 
-# }}}
-
-
-# pexpand {{{
 @functools.cache
 def _pexpand_bounds(string: str, body: tuple[str, str]) -> None | tuple[int, int]:
     start = len(string) + 1
@@ -196,8 +188,8 @@ def _pexpand(prompt: str, body: tuple[str, str] = ("{", "}"), sep: str = "|", si
         results = [prompt]
 
     # Recurse on unexpanded bodies
-    results, iter = [], results
-    for result in iter:
+    results, iterate = [], results
+    for result in iterate:
         if _pexpand_bounds(result, body) is None:
             results.append(result)
         else:
@@ -212,7 +204,7 @@ def _pexpand(prompt: str, body: tuple[str, str] = ("{", "}"), sep: str = "|", si
 
 
 @functools.cache
-def _pexpand_cache(*args, **kwargs):
+def _pexpand_cache(*args, **kwargs) -> list[str]:  # noqa: ANN002, ANN003
     return _pexpand(*args, **kwargs)
 
 
@@ -223,10 +215,6 @@ def pexpand(prompt: str, body: tuple[str, str] = ("{", "}"), sep: str = "|", sin
         return _pexpand_cache(prompt, body, sep, single)
 
 
-# }}}
-
-
-# Enums {{{
 @enum.unique
 class SamplerSK(enum.StrEnum):
     NONE = enum.auto()
@@ -490,8 +478,7 @@ class DType(enum.StrEnum):
     U1 = enum.auto()
 
     @property
-    def torch_dtype(self):
-        "Returns torch.dtype"
+    def torch_dtype(self) -> "torch.dtype":
         match self:
             case DType.F16:
                 return torch.float16
@@ -536,8 +523,7 @@ class NoiseType(enum.StrEnum):
                 return None
 
     @property
-    def torch_dtype(self):
-        "Returns torch.dtype"
+    def torch_dtype(self) -> "torch.dtype":
         match self:
             case NoiseType.Cpu16 | NoiseType.Acc16:
                 return torch.float16
@@ -562,8 +548,7 @@ class SDPB(enum.StrEnum):
     CuDNN = enum.auto()
 
     @property
-    def torch_sdp_backend(self):
-        "Returns torch.nn.attention.SDPBackend"
+    def torch_sdp_backend(self) -> "torch._C._SDPBackend":
         match self:
             case SDPB.Math:
                 return SDPBackend.MATH
@@ -573,9 +558,7 @@ class SDPB(enum.StrEnum):
                 return SDPBackend.EFFICIENT_ATTENTION
             case SDPB.CuDNN:
                 return SDPBackend.CUDNN_ATTENTION
-            case _:
-                msg = "Unreachable"
-                raise ValueError(msg)
+        return 0
 
 
 @enum.unique
@@ -649,9 +632,6 @@ class LatentColor(enum.StrEnum):
     Yellow = enum.auto()
     Black = enum.auto()
     White = enum.auto()
-
-
-# }}}
 
 
 class Resolution:
