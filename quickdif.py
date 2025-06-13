@@ -1985,13 +1985,15 @@ def get_pipe(
 
         pipe: DiffusionPipeline | None = None
         for cls in pipes:
-            maybe_pipe = None
+            assert issubclass(cls, DiffusionPipeline)  # my life for type intersection
 
+            maybe_pipe: DiffusionPipeline | None = None
             try:
                 maybe_pipe = cls.from_single_file(model, **pipe_args)
             except Exception as e:
                 # better way?
-                if str(e).startswith("Failed to load T5EncoderModel.") and isinstance(cls, StableDiffusion3Pipeline):
+                if str(e).startswith("Failed to load T5EncoderModel.") and issubclass(cls, StableDiffusion3Pipeline):
+                    del e  # free gc
                     maybe_pipe = cls.from_single_file(model, text_encoder_3=None, tokenizer_3=None, **pipe_args)
                     break
 
@@ -2003,19 +2005,19 @@ def get_pipe(
 
         if pipe is None:
             msg = f'Could not load "{model}" as single file pipeline'
-            raise Exception(msg)
+            raise ValueError(msg)
     else:
         pipe = AutoPipelineForText2Image.from_pretrained(model, **pipe_args)
 
     if img2img:
-        pipe = AutoPipelineForImage2Image.from_pipe(pipe)
+        pipe = AutoPipelineForImage2Image.from_pipe(pipe, torch_dtype=None)  # avoid recasts
 
     if pag:
         try:
             if img2img:
-                pipe = AutoPipelineForImage2Image.from_pipe(pipe, enable_pag=True)
+                pipe = AutoPipelineForImage2Image.from_pipe(pipe, enable_pag=True, torch_dtype=None)
             else:
-                pipe = AutoPipelineForText2Image.from_pipe(pipe, enable_pag=True)
+                pipe = AutoPipelineForText2Image.from_pipe(pipe, enable_pag=True, torch_dtype=None)
         except Exception as e:
             print(
                 f"Could not find a PAG pipeline variant for `{type(pipe).__name__} "
