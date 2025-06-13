@@ -10,13 +10,14 @@ import signal
 import tomllib
 from collections import OrderedDict
 from collections.abc import Callable, Iterable
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from copy import copy
 from dataclasses import dataclass
 from inspect import getmembers, signature
 from io import BytesIO, UnsupportedOperation
 from math import copysign
 from pathlib import Path
+from types import FrameType, TracebackType
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -1343,7 +1344,8 @@ def parse_cli(parameters: Parameters) -> Image.Image | None:
                                     parameters.get(k).value = v
                                 except ValueError:
                                     print(
-                                        f"Config value '{v}' cannot be assigned to parameter '{parameters.get(k).name}', ignoring"
+                                        f"Config value '{v}' cannot be assigned to parameter "
+                                        f"'{parameters.get(k).name}', ignoring"
                                     )
                             else:
                                 print(f'Unknown key in serial config "{k}"')
@@ -1362,7 +1364,8 @@ def parse_cli(parameters: Parameters) -> Image.Image | None:
                                     parameters.get(k).value = v
                                 except ValueError:
                                     print(
-                                        f"Config value '{v}' cannot be assigned to parameter '{parameters.get(k).name}', ignoring"
+                                        f"Config value '{v}' cannot be assigned to parameter "
+                                        f"'{parameters.get(k).name}', ignoring"
                                     )
 
     for key, val in args.items():
@@ -1446,6 +1449,7 @@ import torch
 from accelerate.accelerator import Accelerator
 from accelerate.utils.dataclasses import DynamoBackend, TorchDynamoPlugin
 from compel import Compel, ReturnedEmbeddingsType
+from diffusers.configuration_utils import ConfigMixin
 from diffusers.pipelines.auto_pipeline import (
     AUTO_TEXT2IMAGE_PIPELINES_MAPPING,
     AutoPipelineForImage2Image,
@@ -1532,24 +1536,25 @@ class PipeRef:
 
 
 # elegent solution from <https://stackoverflow.com/questions/842557/>
-class SmartSigint:
-    def __init__(self, num=1, job_name=None) -> None:
-        self.num = num
-        self.job_name = job_name if job_name is not None else "current job"
+class SmartSigint(AbstractContextManager):
+    def __init__(self, num: int = 1, job_name: str | None = None) -> None:
+        self.num: int = num
+        self.job_name: str = job_name if job_name is not None else "current job"
 
-    def __enter__(self):
-        self.count = 0
+    def __enter__(self) -> None:
+        self.count: int = 0
         self.received = None
-        self.old_handler = signal.signal(signal.SIGINT, self.handler)
+        self.old_handler: signal._HANDLER = signal.signal(signal.SIGINT, self.handler)
 
-    def handler(self, sig, frame) -> None:
+    def handler(self, sig: int, frame: FrameType | None) -> None:
         self.received = (sig, frame)
         if self.count >= self.num:
             print(f"\nSIGINT received {self.count + 1} times, forcibly aborting {self.job_name}")
             self.terminate()
         else:
             print(
-                f"\nSIGINT received, waiting for {self.job_name} to complete before exiting.\nRequire {self.num - self.count} more to abort."
+                f"\nSIGINT received, waiting for {self.job_name} to complete before exiting."
+                f"\nRequire {self.num - self.count} more to abort."
             )
         self.count += 1
 
@@ -1558,7 +1563,9 @@ class SmartSigint:
         if self.received and callable(self.old_handler):
             self.old_handler(*self.received)
 
-    def __exit__(self, *_):
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: TracebackType | None, /
+    ) -> None:
         self.terminate()
 
 
@@ -1566,55 +1573,36 @@ class SmartSigint:
 
 
 def is_xl_vae(pipe: DiffusionPipeline) -> bool:
-    # TODO: agnostic detection?
-    return any(
-        isinstance(pipe, c)
-        for c in [
-            HunyuanDiTPAGPipeline,
-            HunyuanDiTPipeline,
-            KolorsImg2ImgPipeline,
-            KolorsPAGPipeline,
-            KolorsPipeline,
-            LuminaText2ImgPipeline,
-            PixArtSigmaPAGPipeline,
-            PixArtSigmaPipeline,
-            StableDiffusionXLImg2ImgPipeline,
-            StableDiffusionXLPAGPipeline,
-            StableDiffusionXLPipeline,
-        ]
+    # TODO (beinsezii): agnostic detection?
+    return isinstance(
+        pipe,
+        HunyuanDiTPAGPipeline
+        | HunyuanDiTPipeline
+        | KolorsImg2ImgPipeline
+        | KolorsPAGPipeline
+        | KolorsPipeline
+        | LuminaText2ImgPipeline
+        | PixArtSigmaPAGPipeline
+        | PixArtSigmaPipeline
+        | StableDiffusionXLImg2ImgPipeline
+        | StableDiffusionXLPAGPipeline
+        | StableDiffusionXLPipeline,
     )
 
 
 def is_sd_vae(pipe: DiffusionPipeline) -> bool:
-    return any(
-        isinstance(pipe, c)
-        for c in [
-            PixArtAlphaPipeline,
-            StableDiffusionImg2ImgPipeline,
-            StableDiffusionPAGPipeline,
-            StableDiffusionPipeline,
-        ]
+    return isinstance(
+        pipe,
+        PixArtAlphaPipeline | StableDiffusionImg2ImgPipeline | StableDiffusionPAGPipeline | StableDiffusionPipeline,
     )
 
 
 def is_sd3_vae(pipe: DiffusionPipeline) -> bool:
-    return any(
-        isinstance(pipe, c)
-        for c in [
-            StableDiffusion3Pipeline,
-            StableDiffusion3Img2ImgPipeline,
-            StableDiffusion3PAGPipeline,
-        ]
-    )
+    return isinstance(pipe, StableDiffusion3Pipeline | StableDiffusion3Img2ImgPipeline | StableDiffusion3PAGPipeline)
 
 
 def is_flux_vae(pipe: DiffusionPipeline) -> bool:
-    return any(
-        isinstance(pipe, c)
-        for c in [
-            FluxPipeline,
-        ]
-    )
+    return isinstance(pipe, FluxPipeline)
 
 
 def _patch_sdpa(
@@ -1624,7 +1612,15 @@ def _patch_sdpa(
 
     torch_sdpa = torch.nn.functional.scaled_dot_product_attention
 
-    def sdpa_hijack_flash(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None):
+    def sdpa_hijack_flash(
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        attn_mask: Tensor | None = None,
+        dropout_p: float = 0.0,
+        is_causal: bool = False,
+        scale: float | None = None,
+    ) -> Tensor:
         try:
             return patch_func(query, key, value, attn_mask, dropout_p, is_causal, scale)
         except Exception:
@@ -1649,9 +1645,9 @@ def patch_attn(attention: AttentionPatch) -> None:
 
         case AttentionPatch.Flash:
             try:
-                from flash_attn import flash_attn_func
+                from flash_attn import flash_attn_func  # type: ignore # Missing import
 
-                def sdpa_hijack_flash(q, k, v, m, p, c, s):
+                def sdpa_hijack_flash(q, k, v, m, p, c, s):  # noqa: ANN001, ANN202
                     assert m is None
                     result = flash_attn_func(
                         q=q.transpose(1, 2),
@@ -1672,7 +1668,7 @@ def patch_attn(attention: AttentionPatch) -> None:
             try:
                 from sageattention import sageattn
 
-                def sdpa_hijack_sage(q, k, v, m, p, c, s):
+                def sdpa_hijack_sage(q, k, v, m, p, c, s):  # noqa: ANN001, ANN202
                     assert m is None
                     assert p == 0.0
                     result = sageattn(q, k, v, is_causal=c, sm_scale=s)
@@ -1755,7 +1751,9 @@ def set_vae(pipe: DiffusionPipeline, tile: bool) -> None:
         pipe.vae.config.force_upcast = False
 
 
-def get_scheduler(sampler: Sampler, spacing: Spacing | None, default_scheduler: Any) -> SchedulerMixin:
+def get_scheduler(sampler: Sampler, spacing: Spacing | None, default_scheduler: SchedulerMixin) -> SchedulerMixin:
+    assert isinstance(default_scheduler, ConfigMixin)
+
     sampler_args = {
         "steps_offset": 0,
         "set_alpha_to_one": True,
@@ -1901,8 +1899,6 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
     if parameters.skrample_modifier.value_multi:
         jobs = merger(jobs, "skrample_modifier", splitlist(parameters.skrample_modifier.value_multi))
     if parameters.lora.value_multi:
-        # Potentially this could go above model if fusion is avoided?
-        # TODO: measure fused vs unfused perf
         jobs = merger(jobs, "lora", splitlist(parameters.lora.value_multi))
     if parameters.model.value:
         jobs = merger(jobs, "model", parameters.model.value)
@@ -2022,7 +2018,8 @@ def get_pipe(
                 pipe = AutoPipelineForText2Image.from_pipe(pipe, enable_pag=True)
         except Exception as e:
             print(
-                f"Could not find a PAG pipeline variant for `{type(pipe).__name__} and `pag` parameter will be ignored:\n  {e}"
+                f"Could not find a PAG pipeline variant for `{type(pipe).__name__} "
+                f"and `pag` parameter will be ignored:\n  {e}"
             )
 
     assert pipe is not None
@@ -2066,19 +2063,19 @@ def get_pipe(
         # GS=128 doesn't work? <64 GS is better spent on more bits
         # HQQ adds too much mem, better spent on more bits
         case DType.U7:
-            weight_quant = uintx_weight_only(torch.uint7, 32)
+            weight_quant = uintx_weight_only(torch.uint7, 32)  # type: ignore # torch uint
         case DType.U6:
-            weight_quant = uintx_weight_only(torch.uint6, 32)
+            weight_quant = uintx_weight_only(torch.uint6, 32)  # type: ignore # torch uint
         case DType.U5:
-            weight_quant = uintx_weight_only(torch.uint5, 32)
+            weight_quant = uintx_weight_only(torch.uint5, 32)  # type: ignore # torch uint
         case DType.U4:
-            weight_quant = uintx_weight_only(torch.uint4, 32)
+            weight_quant = uintx_weight_only(torch.uint4, 32)  # type: ignore # torch uint
         case DType.U3:
-            weight_quant = uintx_weight_only(torch.uint3, 32)
+            weight_quant = uintx_weight_only(torch.uint3, 32)  # type: ignore # torch uint
         case DType.U2:
-            weight_quant = uintx_weight_only(torch.uint2, 32)
+            weight_quant = uintx_weight_only(torch.uint2, 32)  # type: ignore # torch uint
         case DType.U1:
-            weight_quant = uintx_weight_only(torch.uint1, 32)
+            weight_quant = uintx_weight_only(torch.uint1, 32)  # type: ignore # torch uint
 
     if weight_quant is not None:
         if offload == Offload.NONE:
@@ -2144,7 +2141,7 @@ def make_noise(
         width, height = default_size, default_size
     shape = (batch_size, channels, height, width)
     latents = torch.zeros(shape, dtype=pipe.dtype, device="cpu")
-    for latent, generator in zip(latents, generators):
+    for ln, generator in zip(range(len(latents)), generators):
         # Variance
         if variance_power != 0 and variance_scale > 0:
             # save state so init noise seeds are the same with/without
@@ -2155,7 +2152,7 @@ def make_noise(
                 dtype=noise_type.torch_dtype,
                 device=noise_type.torch_device or acc.device,
             )
-            latent += torch.nn.UpsamplingBilinear2d((shape[2], shape[3]))(variance).mul(variance_power)[0].cpu()
+            latents[ln] += torch.nn.UpsamplingBilinear2d((shape[2], shape[3]))(variance).mul(variance_power)[0].cpu()
             generator.set_state(state)
         # Init noise
         noise = torch.randn(
@@ -2166,7 +2163,7 @@ def make_noise(
         )
         if noise_power != 1:
             noise *= noise_power
-        latent += noise.cpu()
+        latents[ln] += noise.cpu()
 
     # Colored latents
     if color is not None and color_power != 0:
@@ -2182,11 +2179,12 @@ def make_noise(
             cols = None
             print(f"# # #\nParameter `color_power` cannot be used for {type(pipe).__name__}\n# # #")
         if cols:
-            sigma = EulerDiscreteScheduler.from_config(pipe.scheduler.config).init_noise_sigma
+            euler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
+            assert isinstance(euler, EulerDiscreteScheduler)
             latents += (
                 torch.tensor(cols[color], dtype=pipe.dtype, device="cpu")
                 .mul(color_power)
-                .div(sigma)
+                .div(euler.init_noise_sigma)
                 .expand([shape[0], shape[2], shape[3], shape[1]])
                 .permute((0, 3, 1, 2))
             )
@@ -2270,9 +2268,11 @@ def process_job(
     pipe = piperef.pipe
     if pipe is None:
         return []
+    assert isinstance(pipe, Callable)
 
+    aot: str | None = None
     if "Sana" in pipe.__class__.__name__:  # Sana is too touchy
-        aot = os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", 0)
+        aot = os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0")
         os.environ["TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL"] = "0"
 
     # INPUT TENSOR
@@ -2340,7 +2340,8 @@ def process_job(
                 if order is not None:
                     if order > sampler_type.max_order():
                         print(
-                            f"!! Selected order {order} larger than {sampler_type.__name__} max order {sampler_type.max_order()}"
+                            f"!! Selected order {order} larger than "
+                            f"{sampler_type.__name__} max order {sampler_type.max_order()}"
                         )
                     sampler_props["order"] = order
 
@@ -2453,7 +2454,7 @@ def process_job(
     if default_scheduler is not None:
         pipe.scheduler = default_scheduler
 
-    if "Sana" in pipe.__class__.__name__:
+    if aot is not None:
         os.environ["TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL"] = aot
 
     return results
