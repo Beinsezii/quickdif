@@ -69,7 +69,6 @@ select = [
     "W",    # style warnings
 ]
 ignore = [
-    "E402",   # Import not at top
     "G004",   # Log f-string
     "PIE808", # range start 0
     "PLR",    # silly
@@ -78,7 +77,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"latent_colors.py" = ["T201"]
+"latent_colors.py" = ["T201"]  # prints
+"quickdif.py" = ["E402"]  # import not on top
 
 [tool.pytest.ini_options]
 python_files = "tests/*.py"
