@@ -27,17 +27,17 @@ jobs:
       - name: Install
         run: uv pip install .[dev] --extra-index-url https://download.pytorch.org/whl/cpu
 
-      # - name: Ruff Check
-      #   if: '!cancelled()'
-      #   run: uv run --no-sync ruff check
+      - name: Ruff Check
+        if: '!cancelled()'
+        run: uv run --no-sync ruff check
 
-      # - name: Ruff Format
-      #   if: '!cancelled()'
-      #   run: uv run --no-sync ruff format --check
+      - name: Ruff Format
+        if: '!cancelled()'
+        run: uv run --no-sync ruff format --check
 
-      # - name: Pyright
-      #   if: '!cancelled()'
-      #   run: uv run --no-sync pyright
+      - name: Pyright
+        if: '!cancelled()'
+        run: uv run --no-sync pyright
 
       - name: Pytest
         if: '!cancelled()'
