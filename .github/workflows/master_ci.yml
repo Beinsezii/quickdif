@@ -1,0 +1,44 @@
+name: Master CI
+
+on: 
+  push:
+    branches:
+      - 'master'
+      - 'release_*'
+  pull_request:
+    branches:
+      - 'master'
+      - 'release_*'
+
+env:
+  HF_HUB_ETAG_TIMEOUT: 35
+  HF_HUB_DOWNLOAD_TIMEOUT: 35
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - run: uv venv --python 3.12
+      - name: Install
+        run: uv pip install . --group dev --extra-index-url https://download.pytorch.org/whl/cpu
+
+      - name: Ruff Check
+        if: '!cancelled()'
+        run: uv run --no-sync ruff check
+
+      - name: Ruff Format
+        if: '!cancelled()'
+        run: uv run --no-sync ruff format --check
+
+      - name: Pyright
+        if: '!cancelled()'
+        run: uv run --no-sync pyright
+
+      - name: Pytest
+        if: '!cancelled()'
+        run: uv run --no-sync pytest

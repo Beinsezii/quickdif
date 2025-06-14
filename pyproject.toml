@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 sageattn = ["sageattention==1.0.6"]
+all = ["quickdif[sageattn]"]
 
 [build-system]
 requires = ["setuptools"]
@@ -31,12 +32,56 @@ py-modules = ["quickdif"]
 
 [tool.ruff]
 line-length = 120
+namespace-packages = ["tests"]
 
 [tool.ruff.lint]
-ignore = ["E402"]
+select = [
+    "A",    # std types
+    "ANN",  # annotations
+    "BLE",  # blanket except
+    "C4",   # comprehension
+    "E",    # style errors
+    "EM",   # error messages
+    "EXE",  # shebangs
+    "F",    # format
+    "FA",   # future
+    "FLY",  # expr fstring
+    "FURB", # syn upgrades
+    "G",    # log messages
+    "I",    # imports
+    "ICN",  # import conventions
+    "INP001",
+    "ISC",  # str cat
+    "LOG",  # logging
+    "NPY",  # numpy
+    "PERF", # perflint
+    "PIE",  # misc
+    "PL",   # pylint
+    "PT",   # pytest
+    "Q",    # quotes
+    "RUF",  # variety
+    "T10",  # pdb.trace
+    "T20",  # print
+    "TC",   # type checking
+    "TD",   # todos
+    "TRY",  # try/catch
+    "UP",   # syn upgrades
+    "W",    # style warnings
+]
+ignore = [
+    "E402",   # Import not at top
+    "G004",   # Log f-string
+    "PIE808", # range start 0
+    "PLR",    # silly
+    "TD003",  # todo require link
+    "UP015",  # open() mode='r'
+]
+
+[tool.ruff.lint.per-file-ignores]
+"latent_colors.py" = ["T201"]
 
 [tool.pytest.ini_options]
 python_files = "tests/*.py"
 
 [dependency-groups]
-dev = ["pytest>=8.3.3"]
+dev = ["quickdif[all]", "ruff>=0.11.13", "pyright>=1.1.401", "pytest>=8.4.0"]

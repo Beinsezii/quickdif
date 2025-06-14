@@ -12,6 +12,7 @@
 checkpoints
 diffusers
 lora
+tunableop_results0.csv
 uv.lock
 
 # Byte-compiled / optimized / DLL files
