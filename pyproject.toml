@@ -76,6 +76,9 @@ ignore = [
     "UP015",  # open() mode='r'
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"latent_colors.py" = ["T201"]
+
 [tool.pytest.ini_options]
 python_files = "tests/*.py"
 
