@@ -69,6 +69,7 @@ select = [
 ]
 ignore = [
     "E402",   # Import not at top
+    "G004",   # Log f-string
     "PIE808", # range start 0
     "PLR",    # silly
     "TD003",  # todo require link
