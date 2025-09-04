@@ -1537,7 +1537,7 @@ if "SanaPipeline" in dir(diffusers) and "sana" not in AUTO_TEXT2IMAGE_PIPELINES_
     }
 
 if "QwenImagePipeline" in dir(diffusers) and "qwen" not in AUTO_TEXT2IMAGE_PIPELINES_MAPPING:
-    AUTO_TEXT2IMAGE_PIPELINES_MAPPING["qwen"] = getattr(diffusers, "QwenImagePipeline")
+    AUTO_TEXT2IMAGE_PIPELINES_MAPPING["qwen"] = getattr(diffusers, "QwenImagePipeline")  # type: ignore
 
 if hasattr(torch.backends.cuda, "allow_fp16_bf16_reduction_math_sdp"):
     torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
