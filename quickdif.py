@@ -1536,6 +1536,9 @@ if "SanaPipeline" in dir(diffusers) and "sana" not in AUTO_TEXT2IMAGE_PIPELINES_
         "sana-pag": getattr(diffusers, "SanaPAGPipeline"),
     }
 
+if "QwenImagePipeline" in dir(diffusers) and "qwen" not in AUTO_TEXT2IMAGE_PIPELINES_MAPPING:
+    AUTO_TEXT2IMAGE_PIPELINES_MAPPING["qwen"] = getattr(diffusers, "QwenImagePipeline")  # type: ignore
+
 if hasattr(torch.backends.cuda, "allow_fp16_bf16_reduction_math_sdp"):
     torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
 
@@ -1667,7 +1670,7 @@ def patch_attn(attention: AttentionPatch) -> None:
 
         case AttentionPatch.Flash:
             try:
-                from flash_attn import flash_attn_func  # type: ignore # Missing import
+                from flash_attn import flash_attn_func  # type: ignore # Missing import  # noqa: PLC0415
 
                 def sdpa_hijack_flash(q, k, v, m, p, c, s):  # noqa: ANN001, ANN202
                     assert m is None
@@ -1688,7 +1691,7 @@ def patch_attn(attention: AttentionPatch) -> None:
 
         case AttentionPatch.Sage:
             try:
-                from sageattention import sageattn
+                from sageattention import sageattn  # noqa: PLC0415
 
                 def sdpa_hijack_sage(q, k, v, m, p, c, s):  # noqa: ANN001, ANN202
                     assert m is None
@@ -1863,6 +1866,8 @@ def get_latent_params(pipe: DiffusionPipeline) -> tuple[int, float, int] | None:
     # The packing causes the config to report (64, 16, 64) or something
     if type(pipe).__name__.startswith("Flux"):
         return (16, 8, 128)
+    elif hasattr(pipe, "_unpack_latents"):
+        return None
 
     if hasattr(pipe, "vae_scale_factor"):
         factor = pipe.vae_scale_factor
@@ -2483,7 +2488,7 @@ def process_job(
 
 
 def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None) -> None:
-    acc = Accelerator(dynamo_plugin=parameters.compile.value_single.plugin)
+    acc = Accelerator(device_placement=False, dynamo_plugin=parameters.compile.value_single.plugin)
     images: list[tuple[dict[str, Any], Image.Image, PngImagePlugin.PngInfo]] = []
     piperef = PipeRef()
     jobs = build_jobs(parameters)
