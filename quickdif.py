@@ -1670,7 +1670,7 @@ def patch_attn(attention: AttentionPatch) -> None:
 
         case AttentionPatch.Flash:
             try:
-                from flash_attn import flash_attn_func  # type: ignore # Missing import
+                from flash_attn import flash_attn_func  # type: ignore # Missing import  # noqa: PLC0415
 
                 def sdpa_hijack_flash(q, k, v, m, p, c, s):  # noqa: ANN001, ANN202
                     assert m is None
@@ -1691,7 +1691,7 @@ def patch_attn(attention: AttentionPatch) -> None:
 
         case AttentionPatch.Sage:
             try:
-                from sageattention import sageattn
+                from sageattention import sageattn  # noqa: PLC0415
 
                 def sdpa_hijack_sage(q, k, v, m, p, c, s):  # noqa: ANN001, ANN202
                     assert m is None
