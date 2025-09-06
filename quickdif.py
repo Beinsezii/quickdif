@@ -2505,12 +2505,15 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
         kernel_ctx = torch.nn.attention.sdpa_kernel([k.torch_sdp_backend for k in parameters.sdpb.value_multi])
 
     with kernel_ctx, concurrent.futures.ThreadPoolExecutor() as tpe, acc.split_between_processes(jobs) as rank_jobs:
+        batch_size = parameters.batch_size.value_single
         LOGQD.info(
-            f"Generating {len(rank_jobs)} batches of {parameters.batch_size.value} images "
-            f"on process {acc.process_index} for {len(jobs) * parameters.batch_size.value_single} total"
+            f"Generating {len(rank_jobs)} batches of {batch_size} images "
+            f"on process {acc.process_index} for {len(jobs) * batch_size} total"
         )
+
         im_num = 0
-        for job in tqdm(rank_jobs, desc="Images", smoothing=0, unit_scale=parameters.batch_size.value_single):
+        # INFO (beinsezii): don't set for 1.0 or else it turns into decimals?
+        for job in tqdm(rank_jobs, desc="Images", smoothing=0, unit_scale=batch_size if batch_size > 1 else False):
             with SmartSigint(job_name="current batch"):
                 results = process_job(
                     parameters,
