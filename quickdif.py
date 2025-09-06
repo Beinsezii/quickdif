@@ -1464,6 +1464,7 @@ addenv("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 
 #
 # Load Torch and libs that depend on it after the CLI cause it's laggy.
+import accelerate
 import diffusers
 import skrample.pytorch.noise as sknoise
 import torch
@@ -2061,13 +2062,13 @@ def get_pipe(
         apply_loras(loras, pipe)
 
     if hasattr(pipe, "unet"):
-        pipe.unet = acc.prepare_model(pipe.unet)
+        pipe.unet = acc.prepare_model(pipe.unet, evaluation_mode=True)
     if hasattr(pipe, "transformer"):
-        pipe.transformer = acc.prepare_model(pipe.transformer)
+        pipe.transformer = acc.prepare_model(pipe.transformer, evaluation_mode=True)
     if hasattr(pipe, "prior_pipe"):
-        pipe.prior_pipe.prior = acc.prepare_model(pipe.prior_pipe.prior)
+        pipe.prior_pipe.prior = acc.prepare_model(pipe.prior_pipe.prior, evaluation_mode=True)
     if hasattr(pipe, "decoder_pipe"):
-        pipe.decoder_pipe.decoder = acc.prepare_model(pipe.decoder_pipe.decoder)
+        pipe.decoder_pipe.decoder = acc.prepare_model(pipe.decoder_pipe.decoder, evaluation_mode=True)
 
     weight_quant = None
     match dtype:
@@ -2496,10 +2497,6 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
     if parameters.tunable.value and torch.cuda.is_available():
         torch.cuda.tunable.enable(val=True)
 
-    total_images = len(jobs) * parameters.batch_size.value_single
-    LOGQD.info(f"Generating {len(jobs)} batches of {parameters.batch_size.value} images for {total_images} total")
-    pbar = tqdm(desc="Images", total=total_images, smoothing=0)
-
     if parameters.attn_patch.value_single is not AttentionPatch.NONE:
         patch_attn(parameters.attn_patch.value_single)
 
@@ -2507,33 +2504,55 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
     if parameters.sdpb.value_multi:
         kernel_ctx = torch.nn.attention.sdpa_kernel([k.torch_sdp_backend for k in parameters.sdpb.value_multi])
 
-    with kernel_ctx, concurrent.futures.ThreadPoolExecutor() as tpe:
+    with kernel_ctx, concurrent.futures.ThreadPoolExecutor() as tpe, acc.split_between_processes(jobs) as rank_jobs:
+        LOGQD.info(
+            f"Generating {len(rank_jobs)} batches of {parameters.batch_size.value} images "
+            f"on process {acc.process_index} for {len(jobs) * parameters.batch_size.value_single} total"
+        )
         im_num = 0
-        for job in jobs:
+        for job in tqdm(rank_jobs, desc="Images", smoothing=0, unit_scale=parameters.batch_size.value_single):
             with SmartSigint(job_name="current batch"):
-                results = process_job(parameters, piperef, acc, job, meta.copy(), image)
+                results = process_job(
+                    parameters,
+                    piperef,
+                    acc,
+                    job,  # type: ignore
+                    meta.copy(),
+                    image,
+                )
 
                 if parameters.grid.value is not None:
                     images += results
 
                 for _, im, info in results:
                     im_path = parameters.output.value_single.joinpath(f"{im_num:05}.png")
-                    while im_path.exists():
-                        im_num += 1
-                        im_path = parameters.output.value_single.joinpath(f"{im_num:05}.png")
+                    while True:
+                        try:
+                            im_path.touch(exist_ok=False)
+                        except FileExistsError:
+                            im_num += 1
+                            im_path = parameters.output.value_single.joinpath(f"{im_num:05}.png")
+                            continue
+                        break
                     tpe.submit(Image.Image.save, im, im_path, "PNG", pnginfo=info, compress_level=9)
                     im_num += 1
 
-            pbar.update(parameters.batch_size.value_single)
-
         if parameters.grid.value is not None:
+            images = accelerate.utils.gather_object(images)
+            if not acc.is_main_process:
+                return
             gd_num = 0
             grids, others = parameters.grid.value_single.fold((m, i) for m, i, _ in images)
             for gd in grids:
                 gd_path = parameters.output.value_single.joinpath(f"grid_{gd_num:05}.png")
-                while gd_path.exists():
-                    gd_num += 1
-                    gd_path = parameters.output.value_single.joinpath(f"grid_{gd_num:05}.png")
+                while True:
+                    try:
+                        gd_path.touch(exist_ok=False)
+                    except FileExistsError:
+                        gd_num += 1
+                        gd_path = parameters.output.value_single.joinpath(f"grid_{gd_num:05}.png")
+                        continue
+                    break
                 tpe.submit(Image.Image.save, gd, gd_path, "PNG", compress_level=4)
                 gd_num += 1
 
