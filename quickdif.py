@@ -382,7 +382,6 @@ class ModifierSK(enum.StrEnum):
 class NoiseSK(enum.StrEnum):
     Random = enum.auto()
     Brownian = enum.auto()
-    BrownianReverse = enum.auto()
     Offset = enum.auto()
     OffsetStatic = enum.auto()
     Pyramid = enum.auto()
@@ -394,8 +393,6 @@ class NoiseSK(enum.StrEnum):
                 return sknoise.Random, None
             case NoiseSK.Brownian:
                 return sknoise.Brownian, None
-            case NoiseSK.BrownianReverse:
-                return sknoise.Brownian, sknoise.BrownianProps(reverse=True)
             case NoiseSK.Offset:
                 return sknoise.Offset, None
             case NoiseSK.OffsetStatic:
