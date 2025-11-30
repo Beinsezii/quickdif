@@ -1467,7 +1467,6 @@ import skrample.pytorch.noise as sknoise
 import torch
 from accelerate.accelerator import Accelerator
 from accelerate.utils.dataclasses import DynamoBackend, TorchDynamoPlugin
-from compel import Compel, ReturnedEmbeddingsType
 from diffusers.configuration_utils import ConfigMixin
 from diffusers.loaders.single_file_utils import SingleFileComponentError
 from diffusers.pipelines.auto_pipeline import (
@@ -1523,7 +1522,7 @@ from torchao.quantization import (
     quantize_,
     uintx_weight_only,
 )
-from transformers import CLIPTokenizer, T5EncoderModel
+from transformers import T5EncoderModel
 
 if TYPE_CHECKING:
     from diffusers.loaders.single_file import FromSingleFileMixin
@@ -1736,32 +1735,6 @@ def loras_to_str(loras: list[str]) -> str | None:
         if scale != 0.0
     ]
     return "\x1f".join(scaled_loras) if scaled_loras else None
-
-
-def get_compel(pipe: DiffusionPipeline) -> Compel | None:
-    try:
-        if hasattr(pipe, "tokenizer") and isinstance(pipe.tokenizer, CLIPTokenizer):
-            if hasattr(pipe, "tokenizer_2"):
-                if isinstance(pipe.tokenizer_2, CLIPTokenizer) and not hasattr(pipe, "tokenizer_3"):
-                    compel = Compel(
-                        tokenizer=[pipe.tokenizer, pipe.tokenizer_2],
-                        text_encoder=[pipe.text_encoder, pipe.text_encoder_2],
-                        returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
-                        requires_pooled=[False, True],
-                        truncate_long_prompts=False,
-                    )
-                else:
-                    compel = None
-            else:
-                compel = Compel(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder, truncate_long_prompts=False)
-        else:
-            compel = None
-
-    except BaseException:
-        LOGQD.exception("Rich prompting not available.")
-        compel = None
-
-    return compel
 
 
 def set_vae(pipe: DiffusionPipeline, tile: bool) -> None:
@@ -2332,20 +2305,6 @@ def process_job(
             job["image"] = input_image
     job["generator"] = generators
     LOGQD.info(f"seeds: {' '.join([str(seed + n) for n in range(parameters.batch_size.value_single)])}")
-
-    compel = get_compel(pipe)
-    if compel is not None:
-        pos = job.pop("prompt") if "prompt" in job else ""
-        neg = job.pop("negative") if "negative" in job else ""
-        if hasattr(pipe, "tokenizer_2"):
-            ncond, npool = compel.build_conditioning_tensor(neg)
-            pcond, ppool = compel.build_conditioning_tensor(pos)
-            job = job | {"pooled_prompt_embeds": ppool, "negative_pooled_prompt_embeds": npool}
-        else:
-            pcond = compel.build_conditioning_tensor(pos)
-            ncond = compel.build_conditioning_tensor(neg)
-        pcond, ncond = compel.pad_conditioning_tensors_to_same_length([pcond, ncond])
-        job |= {"prompt_embeds": pcond, "negative_prompt_embeds": ncond}
 
     pipe_params = signature(pipe).parameters  # type: ignore Callable
 
