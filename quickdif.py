@@ -514,6 +514,72 @@ class DType(enum.StrEnum):
             case _:
                 return torch.bfloat16
 
+    @property
+    def quant_config(self) -> "AOBaseConfig | None":
+        match self:
+            case DType.F32 | DType.F16 | DType.BF16:
+                return None
+            case DType.F8:
+                return Float8WeightOnlyConfig(torch.float8_e4m3fn)
+            case DType.F8D:
+                return Float8DynamicActivationFloat8WeightConfig(torch.float8_e4m3fn, torch.float8_e4m3fn)
+            case DType.F6:
+                return FPXWeightOnlyConfig(3, 2)
+            case DType.I8:
+                return Int8WeightOnlyConfig()
+            case DType.I8D:
+                return Int8DynamicActivationInt8WeightConfig()
+            case DType.I4:
+                return Int4WeightOnlyConfig()
+            case DType.I4D:
+                return Int8DynamicActivationInt4WeightConfig()
+            case DType.U7:
+                return UIntXWeightOnlyConfig(torch.uint7, 32)  # type: ignore # torch uint
+            case DType.U6:
+                return UIntXWeightOnlyConfig(torch.uint6, 32)  # type: ignore # torch uint
+            case DType.U5:
+                return UIntXWeightOnlyConfig(torch.uint5, 32)  # type: ignore # torch uint
+            case DType.U4:
+                return UIntXWeightOnlyConfig(torch.uint4, 32)  # type: ignore # torch uint
+            case DType.U3:
+                return UIntXWeightOnlyConfig(torch.uint3, 32)  # type: ignore # torch uint
+            case DType.U2:
+                return UIntXWeightOnlyConfig(torch.uint2, 32)  # type: ignore # torch uint
+            case DType.U1:
+                return UIntXWeightOnlyConfig(torch.uint1, 32)  # type: ignore # torch uint
+
+        raise NotImplementedError
+
+    @property
+    def bits(self) -> int:
+        match self:
+            case DType.F32 | DType.F16 | DType.BF16:
+                return self.torch_dtype.itemsize * 8
+            # I looked through torch for a way to determins this automatically and could not find one.
+            # Everything assumes whole bytes.
+            case DType.F8 | DType.F8D | DType.I8 | DType.I8D:
+                return 8
+            case DType.I4 | DType.I4D:
+                return 4
+            case DType.F6:
+                return 6
+            case DType.U7:
+                return 7
+            case DType.U6:
+                return 6
+            case DType.U5:
+                return 5
+            case DType.U4:
+                return 4
+            case DType.U3:
+                return 3
+            case DType.U2:
+                return 2
+            case DType.U1:
+                return 1
+
+        raise NotImplementedError
+
 
 @enum.unique
 class Offload(enum.StrEnum):
@@ -1098,7 +1164,7 @@ Ex. 'sdpm2k' is equivalent to 'DPM++ 2M SDE Karras'""",
         "dtype",
         DType,
         short="-dt",
-        value=DType.F16,
+        value=DType.BF16,
         multi=True,
         docs="Data format for inference. Should be left at FP16 unless the device or model does not work properly",
     )
@@ -1227,6 +1293,26 @@ Performance penalty is typically imperceptible, so it's recommended to leave thi
         value=Offload.NONE,
         docs="Set amount of CPU offload. "
         "In most UIs, 'model' is equivalent to --med-vram while 'sequential' is equivalent to --low-vram",
+    )
+    quantize_threshold = QDParam(
+        "quantize_threshold",
+        float,
+        value=0,
+        multi=False,
+        meta=False,
+        docs="""If using a quantized dtype, will stop quantizing pipeline components after this size in GiB is reached.
+Uses total size for `offload = "none"` otherwise individual component size.
+Recommended to set this to your GPU memory with a margin based on upper image sizes for the given model.""",
+    )
+    quantize_minimum = QDParam(
+        "quantize_minimum",
+        float,
+        value=2,
+        multi=False,
+        meta=False,
+        docs="""If using a quantized dtype, a pipeline component must be at least this large in GiB to be quantized.
+Recommended to leave this unless you absolutely need the memory,
+as smaller components typically lose quality faster than larger components.""",
     )
     attn_patch = QDParam(
         "attn-patch",
@@ -1511,21 +1597,22 @@ from diffusers.schedulers.scheduling_utils import SchedulerMixin
 from skrample.diffusers import SkrampleWrapperScheduler
 from torch import Tensor
 from torch.nn.attention import SDPBackend
-from torchao.quantization import (
-    float8_dynamic_activation_float8_weight,
-    float8_weight_only,
-    fpx_weight_only,
-    int4_weight_only,
-    int8_dynamic_activation_int4_weight,
-    int8_dynamic_activation_int8_weight,
-    int8_weight_only,
+from torchao.quantization.quant_api import (
+    Float8DynamicActivationFloat8WeightConfig,
+    Float8WeightOnlyConfig,
+    FPXWeightOnlyConfig,
+    Int4WeightOnlyConfig,
+    Int8DynamicActivationInt4WeightConfig,
+    Int8DynamicActivationInt8WeightConfig,
+    Int8WeightOnlyConfig,
+    UIntXWeightOnlyConfig,
     quantize_,
-    uintx_weight_only,
 )
-from transformers import T5EncoderModel
+from torchao.utils import TorchAOBaseTensor
 
 if TYPE_CHECKING:
     from diffusers.loaders.single_file import FromSingleFileMixin
+    from torchao.core.config import AOBaseConfig
 
 if "SanaPipeline" in dir(diffusers) and "sana" not in AUTO_TEXT2IMAGE_PIPELINES_MAPPING:
     AUTO_TEXT2IMAGE_PIPELINES_MAPPING |= {
@@ -1955,6 +2042,8 @@ def get_pipe(
     img2img: bool,
     tile_vae: bool,
     pag: bool,
+    quantize_threshold_gb: float,
+    quantize_minimum_gb: float,
 ) -> DiffusionPipeline:
     pipe_args = {
         "add_watermarker": False,
@@ -1966,10 +2055,6 @@ def get_pipe(
 
     if "Kolors" in model:
         pipe_args["variant"] = "fp16"
-    elif ("stable-cascade" in model.casefold() or "flux.1" in model.casefold()) and pipe_args[
-        "torch_dtype"
-    ] == torch.float16:
-        pipe_args["torch_dtype"] = torch.bfloat16
 
     model, revision = get_suffix(model)
     if revision is not None:
@@ -2031,73 +2116,58 @@ def get_pipe(
     if hasattr(pipe, "vae"):
         set_vae(pipe, tile_vae)
 
-    if loras is not None:
+    if loras is not None:  # Before quant because fused
         apply_loras(loras, pipe)
+
+    if (quant_config := dtype.quant_config) is not None:
+        quant_min_size: int = round(quantize_minimum_gb * 1024**3)
+        autoquant_threshold: int = round(quantize_threshold_gb * 1024**3)
+
+        components: list[tuple[int, str, torch.nn.Module]] = [
+            (sum(p.numel() * p.element_size() for p in c.parameters()), k, c)
+            for k, c in pipe.components.items()
+            if isinstance(c, torch.nn.Module)
+        ]
+        components.sort(key=lambda x: x[0], reverse=True)  # Larger modules first
+
+        pipe_size: int = sum(c[0] for c in components)
+        # This is actually not fully accurate because of the extra elements for scaling groups
+        # I looked through AO docs and source code, couldn't find a way to get the quantized data pointer
+        bit_ratio = dtype.torch_dtype.itemsize * 8 / dtype.bits
+        assert bit_ratio >= 1
+
+        for data_size, key, component in components:
+            if offload != offload.NONE:
+                pipe_size = data_size  # when offloading the pipe size is basically just each module's size
+
+            if autoquant_threshold >= pipe_size or data_size < quant_min_size:
+                break  # break since sort, all other modules will fail
+
+            # TODO (beinsezii): could possibly only quantize repeating layers
+            quantize_(component, quant_config, device=acc.device if offload == Offload.NONE else None)
+
+            data_reduction: float = 0
+            for p in component.parameters():
+                if isinstance(p, TorchAOBaseTensor):
+                    param_size = p.numel() * p.element_size()
+                    data_reduction += param_size - param_size / bit_ratio
+
+            pipe_size -= round(data_reduction)
+            LOGQD.info(
+                f"Quantized pipeline component {key} of class {type(component).__name__},"
+                f" saving {data_reduction / 1024**3:.2f} GiB"
+            )
 
     if hasattr(pipe, "unet"):
         pipe.unet = acc.prepare_model(pipe.unet, evaluation_mode=True)
     if hasattr(pipe, "transformer"):
         pipe.transformer = acc.prepare_model(pipe.transformer, evaluation_mode=True)
+    if hasattr(pipe, "transformer_2"):
+        pipe.transformer_2 = acc.prepare_model(pipe.transformer_2, evaluation_mode=True)
     if hasattr(pipe, "prior_pipe"):
         pipe.prior_pipe.prior = acc.prepare_model(pipe.prior_pipe.prior, evaluation_mode=True)
     if hasattr(pipe, "decoder_pipe"):
         pipe.decoder_pipe.decoder = acc.prepare_model(pipe.decoder_pipe.decoder, evaluation_mode=True)
-
-    weight_quant = None
-    match dtype:
-        case DType.F8:
-            # unsigned zero appears much higher quality, closer to i8
-            weight_quant = float8_weight_only(torch.float8_e4m3fnuz)
-        case DType.F8D:
-            weight_quant = float8_dynamic_activation_float8_weight()
-        case DType.F6:
-            weight_quant = fpx_weight_only(3, 2)
-        case DType.I8:
-            weight_quant = int8_weight_only()
-        case DType.I8D:
-            weight_quant = int8_dynamic_activation_int8_weight()
-        case DType.I4:
-            weight_quant = int4_weight_only()
-        case DType.I4D:
-            weight_quant = int8_dynamic_activation_int4_weight()
-        # Just defaults...
-        # GS=128 doesn't work? <64 GS is better spent on more bits
-        # HQQ adds too much mem, better spent on more bits
-        case DType.U7:
-            weight_quant = uintx_weight_only(torch.uint7, 32)  # type: ignore # torch uint
-        case DType.U6:
-            weight_quant = uintx_weight_only(torch.uint6, 32)  # type: ignore # torch uint
-        case DType.U5:
-            weight_quant = uintx_weight_only(torch.uint5, 32)  # type: ignore # torch uint
-        case DType.U4:
-            weight_quant = uintx_weight_only(torch.uint4, 32)  # type: ignore # torch uint
-        case DType.U3:
-            weight_quant = uintx_weight_only(torch.uint3, 32)  # type: ignore # torch uint
-        case DType.U2:
-            weight_quant = uintx_weight_only(torch.uint2, 32)  # type: ignore # torch uint
-        case DType.U1:
-            weight_quant = uintx_weight_only(torch.uint1, 32)  # type: ignore # torch uint
-
-    if weight_quant is not None:
-        if offload == Offload.NONE:
-            quantize_device = acc.device
-        else:
-            quantize_device = None
-        if hasattr(pipe, "unet"):
-            quantize_(pipe.unet, weight_quant, device=quantize_device)
-        if hasattr(pipe, "transformer"):
-            quantize_(pipe.transformer, weight_quant, device=quantize_device)
-        if hasattr(pipe, "prior_pipe"):
-            quantize_(pipe.prior_pipe.prior, weight_quant, device=quantize_device)
-        if hasattr(pipe, "decoder_pipe"):
-            quantize_(pipe.decoder_pipe.decoder, weight_quant, device=quantize_device)
-        # It's not worth quantizing CLIP
-        if isinstance(getattr(pipe, "text_encoder", None), T5EncoderModel):
-            quantize_(pipe.text_encoder, weight_quant, device=quantize_device)
-        if isinstance(getattr(pipe, "text_encoder_2", None), T5EncoderModel):
-            quantize_(pipe.text_encoder_2, weight_quant, device=quantize_device)
-        if isinstance(getattr(pipe, "text_encoder_3", None), T5EncoderModel):
-            quantize_(pipe.text_encoder_3, weight_quant, device=quantize_device)
 
     match offload:
         case Offload.NONE:
@@ -2227,7 +2297,7 @@ def process_job(
 
     # POP PARAMS
     model = job.pop("model")
-    model_dtype = job.pop("dtype", DType.F16)
+    model_dtype = job.pop("dtype", DType.BF16)
     color = job.pop("color", None)
     color_power = job.pop("color_power", 0)
     noise_power = job.pop("noise_power", 1)
@@ -2262,6 +2332,8 @@ def process_job(
             input_image is not None,
             parameters.tile.value_single,
             any(parameters.pag.value_multi),
+            parameters.quantize_threshold.value_single,
+            parameters.quantize_minimum.value_single,
         )
         piperef.name = model
         piperef.loras = lora_meta
