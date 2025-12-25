@@ -1556,7 +1556,6 @@ from accelerate.utils.dataclasses import DynamoBackend, TorchDynamoPlugin
 from diffusers.configuration_utils import ConfigMixin
 from diffusers.loaders.single_file_utils import SingleFileComponentError
 from diffusers.pipelines.auto_pipeline import (
-    AUTO_TEXT2IMAGE_PIPELINES_MAPPING,
     AutoPipelineForImage2Image,
     AutoPipelineForText2Image,
 )
@@ -1614,17 +1613,6 @@ if TYPE_CHECKING:
     from diffusers.loaders.single_file import FromSingleFileMixin
     from torchao.core.config import AOBaseConfig
 
-if "SanaPipeline" in dir(diffusers) and "sana" not in AUTO_TEXT2IMAGE_PIPELINES_MAPPING:
-    AUTO_TEXT2IMAGE_PIPELINES_MAPPING |= {
-        "sana": getattr(diffusers, "SanaPipeline"),
-        "sana-pag": getattr(diffusers, "SanaPAGPipeline"),
-    }
-
-if "QwenImagePipeline" in dir(diffusers) and "qwen" not in AUTO_TEXT2IMAGE_PIPELINES_MAPPING:
-    AUTO_TEXT2IMAGE_PIPELINES_MAPPING["qwen"] = getattr(diffusers, "QwenImagePipeline")  # type: ignore
-
-if "ZImagePipeline" in dir(diffusers) and "z-image" not in AUTO_TEXT2IMAGE_PIPELINES_MAPPING:
-    AUTO_TEXT2IMAGE_PIPELINES_MAPPING["z-image"] = getattr(diffusers, "ZImagePipeline")  # type: ignore
 
 if hasattr(torch.backends.cuda, "allow_fp16_bf16_reduction_math_sdp"):
     torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
@@ -2343,11 +2331,6 @@ def process_job(
         return []
     assert isinstance(pipe, Callable)
 
-    aot: str | None = None
-    if "Sana" in pipe.__class__.__name__:  # Sana is too touchy
-        aot = os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0")
-        os.environ["TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL"] = "0"
-
     # INPUT TENSOR
     generators = [
         torch.Generator(noise_type.torch_device or acc.device).manual_seed(seed + n)
@@ -2512,9 +2495,6 @@ def process_job(
 
     if default_scheduler is not None:
         pipe.scheduler = default_scheduler
-
-    if aot is not None:
-        os.environ["TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL"] = aot
 
     return results
 
