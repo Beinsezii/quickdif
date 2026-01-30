@@ -648,61 +648,27 @@ class SDPB(enum.StrEnum):
 class Compile(enum.StrEnum):
     Off = enum.auto()
     On = enum.auto()
-    On_Dyn = enum.auto()
-    On_Full = enum.auto()
-    On_Dyn_Full = enum.auto()
+    Lite = enum.auto()
     Max = enum.auto()
-    Max_Dyn = enum.auto()
-    Max_Full = enum.auto()
-    Max_Dyn_Full = enum.auto()
-    RO = enum.auto()
-    RO_Dyn = enum.auto()
-    RO_Full = enum.auto()
-    RO_Dyn_Full = enum.auto()
+    Tune = enum.auto()
+    Graphs = enum.auto()
 
     @property
-    def plugin(self) -> "TorchDynamoPlugin | None":
-        if self is Compile.Off:
-            return None
-
-        result = TorchDynamoPlugin(DynamoBackend.INDUCTOR)
-
-        if self in [
-            Compile.On_Dyn,
-            Compile.On_Dyn_Full,
-            Compile.Max_Dyn,
-            Compile.Max_Dyn_Full,
-            Compile.RO_Dyn,
-            Compile.RO_Dyn_Full,
-        ]:
-            result.dynamic = True
-
-        if self in [
-            Compile.On_Full,
-            Compile.On_Dyn_Full,
-            Compile.Max_Full,
-            Compile.Max_Dyn_Full,
-            Compile.RO_Full,
-            Compile.RO_Dyn_Full,
-        ]:
-            result.fullgraph = True
-
-        if self in [
-            Compile.Max,
-            Compile.Max_Dyn,
-            Compile.Max_Full,
-            Compile.Max_Dyn_Full,
-        ]:
-            result.mode = "max-autotune"
-        elif self in [
-            Compile.RO,
-            Compile.RO_Dyn,
-            Compile.RO_Full,
-            Compile.RO_Dyn_Full,
-        ]:
-            result.mode = "reduce-overhead"
-
-        return result
+    def mode(self) -> str | None:
+        match self:
+            case Compile.Off:
+                return None
+            case Compile.On:
+                return "default"
+            case Compile.Lite:
+                return "lite"
+            case Compile.Graphs:
+                return "reduce-overhead"
+            case Compile.Tune:
+                return "max-autotune-no-cudagraphs"
+            case Compile.Max:
+                return "max-autotune"
+        return 0
 
 
 @enum.unique
@@ -1321,7 +1287,9 @@ as smaller components typically lose quality faster than larger components.""",
         docs="Patch the SDPA function with a custom external attention processor.",
     )
     sdpb = QDParam("sdpb", SDPB, multi=True, docs="Override the SDP attention backend(s) to use")
-    compile = QDParam("compile", Compile, value=Compile.Off, docs="Compile network with torch.compile()")
+    compile = QDParam("compile", Compile, Compile.Off, "-T", docs="Compile network with torch.compile()")
+    compile_dynamic = QDParam("compile_dynamic", bool, False, "-TD", docs="Use dynamic shapes for torch.compile()")
+    compile_fullgraph = QDParam("compile_fullgraph", bool, False, "-TF", docs="Capture full model for torch.compile()")
     tunable = QDParam("tunable", bool, value=False, docs="Enable tunable pytorch operations")
     tile = QDParam(
         "tile",
@@ -2500,7 +2468,16 @@ def process_job(
 
 
 def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None) -> None:
-    acc = Accelerator(device_placement=False, dynamo_plugin=parameters.compile.value_single.plugin)
+    if (compile_mode := parameters.compile.value_single.mode) is not None:
+        dynamo_plugin = TorchDynamoPlugin(
+            backend=DynamoBackend.INDUCTOR,
+            mode=compile_mode,
+            fullgraph=parameters.compile_fullgraph.value_single,
+            dynamic=parameters.compile_dynamic.value_single,
+        )
+    else:
+        dynamo_plugin = None
+    acc = Accelerator(device_placement=False, dynamo_plugin=dynamo_plugin)
     images: list[tuple[dict[str, Any], Image.Image, PngImagePlugin.PngInfo]] = []
     piperef = PipeRef()
     jobs = build_jobs(parameters)
