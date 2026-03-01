@@ -246,9 +246,15 @@ class SamplerSK(enum.StrEnum):
     UniPC = enum.auto()
     UniP = enum.auto()
     SPC = enum.auto()
+    RKUltra = enum.auto()
 
     @property
-    def sampler(self) -> tuple[type[skstructured.StructuredSampler] | None, dict[str, Any]]:
+    def sampler(
+        self,
+    ) -> tuple[
+        type[skstructured.StructuredSampler] | type["RKUltraWrapperScheduler"] | None,
+        dict[str, Any],
+    ]:
         match self:
             case SamplerSK.NONE:
                 return None, {}
@@ -268,6 +274,8 @@ class SamplerSK(enum.StrEnum):
                 return skstructured.Euler, {}
             case SamplerSK.SPC:
                 return skstructured.SPC, {}
+            case SamplerSK.RKUltra:
+                return RKUltraWrapperScheduler, {}
 
 
 @enum.unique
@@ -1564,7 +1572,7 @@ from diffusers.schedulers.scheduling_euler_discrete import EulerDiscreteSchedule
 from diffusers.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
 from diffusers.schedulers.scheduling_utils import SchedulerMixin
-from skrample.diffusers import SkrampleWrapperScheduler
+from skrample.diffusers import RKUltraWrapperScheduler, SkrampleWrapperScheduler
 from torch import Tensor
 from torch.nn.attention import SDPBackend
 from torchao.quantization.quant_api import (
@@ -2351,35 +2359,56 @@ def process_job(
                 job.pop("skrample_subschedule", SubScheduleSK.NONE)
             )
 
-            if sampler_type is not None and issubclass(sampler_type, sktraits.HigherOrder):
+            if sampler_type is not None and issubclass(sampler_type, RKUltraWrapperScheduler):
                 order: int | None = job.pop("skrample_order", None)
-                if order is not None:
-                    if order > sampler_type.max_order():
-                        LOGQD.warning(
-                            f"Selected order {order} larger than "
-                            f"{sampler_type.__name__} max order {sampler_type.max_order()}"
-                        )
-                    sampler_props["order"] = order
+                pipe.scheduler = RKUltraWrapperScheduler.from_diffusers_config(
+                    pipe.scheduler,  # type: ignore ConfigMixin
+                    rk_order=order if order is not None else RKUltraWrapperScheduler.rk_order,
+                    schedule=schedule_type,
+                    subschedule=subschedule,
+                    subschedule_props=subschedule_props,
+                    schedule_modifiers=[p for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p],
+                    model=skpredictor.predictor,
+                    compute_scale=skdtype.torch_dtype,
+                    schedule_props=schedule_props,
+                    modifier_merge_strategy=skmodmerge,
+                    allow_dynamic=not any(
+                        "shift" in p[1] for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p
+                    ),
+                )
+                job["steps"] //= pipe.scheduler.order  # TODO (beinsezii): ( replace when added to skrample )
+            else:
+                if sampler_type is not None and issubclass(sampler_type, sktraits.HigherOrder):
+                    order: int | None = job.pop("skrample_order", None)
+                    if order is not None:
+                        if order > sampler_type.max_order():
+                            LOGQD.warning(
+                                f"Selected order {order} larger than "
+                                f"{sampler_type.__name__} max order {sampler_type.max_order()}"
+                            )
+                        sampler_props["order"] = order
 
-            if sampler_type is not None and issubclass(sampler_type, sktraits.DerivativeTransform):
-                sampler_props["derivative_transform"] = sktransform.predictor
+                if sampler_type is not None and issubclass(sampler_type, sktraits.DerivativeTransform):
+                    sampler_props["derivative_transform"] = sktransform.predictor
 
-            pipe.scheduler = SkrampleWrapperScheduler.from_diffusers_config(
-                pipe.scheduler,  # type: ignore ConfigMixin
-                sampler=sampler_type,
-                schedule=schedule_type,
-                subschedule=subschedule,
-                subschedule_props=subschedule_props,
-                schedule_modifiers=[p for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p],
-                model=skpredictor.predictor,
-                noise_type=noise_type,
-                noise_props=noise_props,
-                compute_scale=skdtype.torch_dtype,
-                sampler_props=sampler_props,
-                schedule_props=schedule_props,
-                modifier_merge_strategy=skmodmerge,
-                allow_dynamic=not any("shift" in p[1] for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p),
-            )
+                pipe.scheduler = SkrampleWrapperScheduler.from_diffusers_config(
+                    pipe.scheduler,  # type: ignore ConfigMixin
+                    sampler=sampler_type,
+                    schedule=schedule_type,
+                    subschedule=subschedule,
+                    subschedule_props=subschedule_props,
+                    schedule_modifiers=[p for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p],
+                    model=skpredictor.predictor,
+                    noise_type=noise_type,
+                    noise_props=noise_props,
+                    compute_scale=skdtype.torch_dtype,
+                    sampler_props=sampler_props,
+                    schedule_props=schedule_props,
+                    modifier_merge_strategy=skmodmerge,
+                    allow_dynamic=not any(
+                        "shift" in p[1] for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p
+                    ),
+                )
 
         else:
             pipe.scheduler = get_scheduler(sampler, job.get("spacing", None), pipe.scheduler)
