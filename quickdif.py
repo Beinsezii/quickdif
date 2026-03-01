@@ -2376,6 +2376,7 @@ def process_job(
                         "shift" in p[1] for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p
                     ),
                 )
+                pipe.scheduler.derivative_transform = sktransform.predictor  # TODO (beinsezii): forgor this in from
                 job["steps"] //= pipe.scheduler.order  # TODO (beinsezii): ( replace when added to skrample )
             else:
                 if sampler_type is not None and issubclass(sampler_type, sktraits.HigherOrder):
