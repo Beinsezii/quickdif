@@ -2369,6 +2369,7 @@ def process_job(
                     subschedule_props=subschedule_props,
                     schedule_modifiers=[p for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p],
                     model=skpredictor.predictor,
+                    derivative_transform=sktransform.predictor,
                     compute_scale=skdtype.torch_dtype,
                     schedule_props=schedule_props,
                     modifier_merge_strategy=skmodmerge,
@@ -2376,8 +2377,7 @@ def process_job(
                         "shift" in p[1] for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p
                     ),
                 )
-                pipe.scheduler.derivative_transform = sktransform.predictor  # TODO (beinsezii): forgor this in from
-                job["steps"] //= pipe.scheduler.order  # TODO (beinsezii): ( replace when added to skrample )
+                job["steps"] = pipe.scheduler.adjust_steps(job["steps"])
             else:
                 if sampler_type is not None and issubclass(sampler_type, sktraits.HigherOrder):
                     order: int | None = job.pop("skrample_order", None)
