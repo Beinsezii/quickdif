@@ -1238,6 +1238,13 @@ So -Ko 3 is equivalent to DPM++ 3M, or -S dpm3""",
 Most diffusion applications use F32, sometimes labeled 'upcast sampling'.
 Performance penalty is typically imperceptible, so it's recommended to leave this at F64""",
     )
+    adjust_steps = QDParam(
+        "adjust_steps",
+        bool,
+        value=True,
+        meta=True,
+        docs="Automatically adjust steps when using some samplers to keep inference times similar",
+    )
     ### Global
     lora = QDParam("lora", str, short="-l", meta=True, multi=True, docs='Apply Loras, ex. "ms_paint.safetensors:::0.6"')
     batch_count = QDParam("batch_count", int, short="-b", value=1, docs="Behavior dependant on 'iter'")
@@ -2363,7 +2370,7 @@ def process_job(
                 order: int | None = job.pop("skrample_order", None)
                 pipe.scheduler = RKUltraWrapperScheduler.from_diffusers_config(
                     pipe.scheduler,  # type: ignore ConfigMixin
-                    rk_order=order if order is not None else RKUltraWrapperScheduler.rk_order,
+                    sampler_order=order if order is not None else RKUltraWrapperScheduler.sampler_order,
                     schedule=schedule_type,
                     subschedule=subschedule,
                     subschedule_props=subschedule_props,
@@ -2377,7 +2384,8 @@ def process_job(
                         "shift" in p[1] for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p
                     ),
                 )
-                job["steps"] = pipe.scheduler.adjust_steps(job["steps"])
+                if parameters.adjust_steps.value_single:
+                    job["steps"] = pipe.scheduler.adjust_steps(job["steps"])
             else:
                 if sampler_type is not None and issubclass(sampler_type, sktraits.HigherOrder):
                     order: int | None = job.pop("skrample_order", None)
