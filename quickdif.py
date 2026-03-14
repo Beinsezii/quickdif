@@ -27,6 +27,7 @@ import numpy.linalg as npl
 from PIL import Image, ImageDraw, PngImagePlugin
 from skrample import scheduling as skscheduling
 from skrample.common import MergeStrategy
+from skrample.sampling import functional as skfunctional
 from skrample.sampling import models as skmodels
 from skrample.sampling import structured as skstructured
 from skrample.sampling import traits as sktraits
@@ -247,6 +248,8 @@ class SamplerSK(enum.StrEnum):
     UniP = enum.auto()
     SPC = enum.auto()
     RKUltra = enum.auto()
+    SSPRK = enum.auto()
+    EESRK = enum.auto()
 
     @property
     def sampler(
@@ -276,6 +279,14 @@ class SamplerSK(enum.StrEnum):
                 return skstructured.SPC, {}
             case SamplerSK.RKUltra:
                 return RKUltraWrapperScheduler, {}
+            case SamplerSK.SSPRK:
+                return RKUltraWrapperScheduler, {
+                    "providers": {**skfunctional.DEFAULT_PROVIDERS, **skfunctional.STABLE_PROVIDERS}
+                }
+            case SamplerSK.EESRK:
+                return RKUltraWrapperScheduler, {
+                    "providers": {**skfunctional.DEFAULT_PROVIDERS, **skfunctional.CONVERGENT_PROVIDERS}
+                }
 
 
 @enum.unique
@@ -2383,6 +2394,7 @@ def process_job(
                     allow_dynamic=not any(
                         "shift" in p[1] for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p
                     ),
+                    **sampler_props,
                 )
                 if parameters.adjust_steps.value_single:
                     job["steps"] = pipe.scheduler.adjust_steps(job["steps"])
