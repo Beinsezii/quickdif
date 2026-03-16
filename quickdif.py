@@ -1231,12 +1231,24 @@ Pyramid is a hierarchical algorithm; similar to variance_noise.""",
     skrample_order = QDParam(
         "skrample_order",
         int,
+        sktraits.HigherOrder.order,
         short="-Ko",
         multi=True,
         meta=True,
         docs="""Solver order for skrample_sampler.
 This is equivalent to the number in the sampler name of other diffusion applications.
 So -Ko 3 is equivalent to DPM++ 3M, or -S dpm3""",
+    )
+    skrample_stochasticity = QDParam(
+        "skrample_stochasticity",
+        float,
+        sktraits.Stochastic.stochasticity,
+        short="-KN",
+        multi=True,
+        meta=True,
+        docs="""Solver stochasticity for skrample_sampler.
+This is equivalent to the `eta` parameter in DDPM
+0 is fully a deterministic ODE, 1 is a fully stochastic SDE (Ancestral)""",
     )
     skrample_dtype = QDParam(
         "skrample_dtype",
@@ -2378,10 +2390,12 @@ def process_job(
             )
 
             if sampler_type is not None and issubclass(sampler_type, RKUltraWrapperScheduler):
-                order: int | None = job.pop("skrample_order", None)
+                order: int = job.pop("skrample_order")
+                stochasticity: float = job.pop("skrample_stochasticity")
                 pipe.scheduler = RKUltraWrapperScheduler.from_diffusers_config(
                     pipe.scheduler,  # type: ignore ConfigMixin
-                    sampler_order=order if order is not None else RKUltraWrapperScheduler.sampler_order,
+                    sampler_order=order,
+                    stochasticity=stochasticity,
                     schedule=schedule_type,
                     subschedule=subschedule,
                     subschedule_props=subschedule_props,
@@ -2400,14 +2414,15 @@ def process_job(
                     job["steps"] = pipe.scheduler.adjust_steps(job["steps"])
             else:
                 if sampler_type is not None and issubclass(sampler_type, sktraits.HigherOrder):
-                    order: int | None = job.pop("skrample_order", None)
-                    if order is not None:
-                        if order > sampler_type.max_order():
-                            LOGQD.warning(
-                                f"Selected order {order} larger than "
-                                f"{sampler_type.__name__} max order {sampler_type.max_order()}"
-                            )
-                        sampler_props["order"] = order
+                    order: int = job.pop("skrample_order")
+                    if order > sampler_type.max_order():
+                        LOGQD.warning(
+                            f"Selected order {order} larger than "
+                            f"{sampler_type.__name__} max order {sampler_type.max_order()}"
+                        )
+                    sampler_props["order"] = order
+                if sampler_type is not None and issubclass(sampler_type, sktraits.Stochastic):
+                    sampler_props["stochasticity"] = job.pop("skrample_stochasticity")
 
                 if sampler_type is not None and issubclass(sampler_type, sktraits.DerivativeTransform):
                     sampler_props["derivative_transform"] = sktransform.predictor
