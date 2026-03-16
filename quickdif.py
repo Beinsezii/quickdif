@@ -2402,6 +2402,8 @@ def process_job(
                     schedule_modifiers=[p for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p],
                     model=skpredictor.predictor,
                     derivative_transform=sktransform.predictor,
+                    noise_type=noise_type,
+                    noise_props=noise_props,
                     compute_scale=skdtype.torch_dtype,
                     schedule_props=schedule_props,
                     modifier_merge_strategy=skmodmerge,
