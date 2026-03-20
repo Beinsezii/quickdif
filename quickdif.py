@@ -241,7 +241,6 @@ class SamplerSK(enum.StrEnum):
     NONE = enum.auto()
     Diffusers = enum.auto()
     DPM = enum.auto()
-    SDPM = enum.auto()
     Adams = enum.auto()
     Euler = enum.auto()
     UniPC = enum.auto()
@@ -264,9 +263,7 @@ class SamplerSK(enum.StrEnum):
             case SamplerSK.Diffusers:
                 return None, {}
             case SamplerSK.DPM:
-                return skstructured.DPM, {"add_noise": False}
-            case SamplerSK.SDPM:
-                return skstructured.DPM, {"add_noise": True}
+                return skstructured.DPM, {}
             case SamplerSK.Adams:
                 return skstructured.Adams, {}
             case SamplerSK.UniPC:
