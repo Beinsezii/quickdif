@@ -248,7 +248,6 @@ class SamplerSK(enum.StrEnum):
     SPC = enum.auto()
     RKUltra = enum.auto()
     SSPRK = enum.auto()
-    EESRK = enum.auto()
 
     @property
     def sampler(
@@ -279,10 +278,6 @@ class SamplerSK(enum.StrEnum):
             case SamplerSK.SSPRK:
                 return RKUltraWrapperScheduler, {
                     "providers": {**skfunctional.DEFAULT_PROVIDERS, **skfunctional.STABLE_PROVIDERS}
-                }
-            case SamplerSK.EESRK:
-                return RKUltraWrapperScheduler, {
-                    "providers": {**skfunctional.DEFAULT_PROVIDERS, **skfunctional.CONVERGENT_PROVIDERS}
                 }
 
 
