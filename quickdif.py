@@ -1880,9 +1880,10 @@ def get_latent_params(pipe: DiffusionPipeline) -> tuple[int, float, int] | None:
     channels: int | None = None
     default_size: int | None = None
 
-    # The packing causes the config to report (64, 16, 64) or something
-    if type(pipe).__name__.startswith("Flux"):
-        return (16, 8, 128)
+    if hasattr(pipe, "_unpack_latents_with_ids"):  # flux2
+        return None
+    elif type(pipe).__name__.startswith("Flux"):
+        return (16, 8, 128)  # The packing causes the config to report (64, 16, 64) or something
     elif hasattr(pipe, "_unpack_latents"):
         return None
 
