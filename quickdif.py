@@ -523,8 +523,6 @@ class DType(enum.StrEnum):
                 return Float8WeightOnlyConfig(torch.float8_e4m3fn)
             case DType.F8D:
                 return Float8DynamicActivationFloat8WeightConfig(torch.float8_e4m3fn, torch.float8_e4m3fn)
-            case DType.F6:
-                return FPXWeightOnlyConfig(3, 2)
             case DType.I8:
                 return Int8WeightOnlyConfig()
             case DType.I8D:
@@ -1567,7 +1565,6 @@ from torch.nn.attention import SDPBackend
 from torchao.quantization.quant_api import (
     Float8DynamicActivationFloat8WeightConfig,
     Float8WeightOnlyConfig,
-    FPXWeightOnlyConfig,
     Int4WeightOnlyConfig,
     Int8DynamicActivationInt4WeightConfig,
     Int8DynamicActivationInt8WeightConfig,
