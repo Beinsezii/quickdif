@@ -248,12 +248,13 @@ class SamplerSK(enum.StrEnum):
     SPC = enum.auto()
     RKUltra = enum.auto()
     SSPRK = enum.auto()
+    DYNRK = enum.auto()
 
     @property
     def sampler(
         self,
     ) -> tuple[
-        type[skstructured.StructuredSampler] | type["RKUltraWrapperScheduler"] | None,
+        type["skstructured.StructuredSampler | RKUltraWrapperScheduler | DynasauRKWrapperScheduler"] | None,
         dict[str, Any],
     ]:
         match self:
@@ -279,6 +280,8 @@ class SamplerSK(enum.StrEnum):
                 return RKUltraWrapperScheduler, {
                     "providers": {**skfunctional.DEFAULT_PROVIDERS, **skfunctional.STABLE_PROVIDERS}
                 }
+            case SamplerSK.DYNRK:
+                return DynasauRKWrapperScheduler, {}
 
 
 @enum.unique
@@ -1594,7 +1597,7 @@ from diffusers.schedulers.scheduling_euler_discrete import EulerDiscreteSchedule
 from diffusers.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
 from diffusers.schedulers.scheduling_utils import SchedulerMixin
-from skrample.diffusers import RKUltraWrapperScheduler, SkrampleWrapperScheduler
+from skrample.diffusers import DynasauRKWrapperScheduler, RKUltraWrapperScheduler, SkrampleWrapperScheduler
 from torch import Tensor
 from torch.nn.attention import SDPBackend
 from torchao.quantization.quant_api import (
@@ -2381,10 +2384,12 @@ def process_job(
                 job.pop("skrample_subschedule", SubScheduleSK.NONE)
             )
 
-            if sampler_type is not None and issubclass(sampler_type, RKUltraWrapperScheduler):
+            if sampler_type is not None and issubclass(
+                sampler_type, RKUltraWrapperScheduler | DynasauRKWrapperScheduler
+            ):
                 order: int = job.pop("skrample_order")
                 stochasticity: float = job.pop("skrample_stochasticity")
-                pipe.scheduler = RKUltraWrapperScheduler.from_diffusers_config(
+                pipe.scheduler = sampler_type.from_diffusers_config(
                     pipe.scheduler,  # type: ignore ConfigMixin
                     sampler_order=order,
                     stochasticity=stochasticity,
