@@ -335,7 +335,7 @@ class SubScheduleSK(enum.StrEnum):
     Beta = enum.auto()
     Exponential = enum.auto()
     Karras = enum.auto()
-    Siggauss = enum.auto()
+    Probit = enum.auto()
 
     @property
     def subschedule(self) -> tuple[type[skscheduling.SubSchedule] | None, dict[str, Any]]:
@@ -348,8 +348,8 @@ class SubScheduleSK(enum.StrEnum):
                 return skscheduling.Exponential, {}
             case SubScheduleSK.Karras:
                 return skscheduling.Karras, {}
-            case SubScheduleSK.Siggauss:
-                return skscheduling.Siggauss, {}
+            case SubScheduleSK.Probit:
+                return skscheduling.Probit, {}
         return 0
 
     @classmethod
