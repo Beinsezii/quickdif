@@ -1669,7 +1669,7 @@ def patch_attn(attention: AttentionPatch) -> None:
                         k=k.transpose(1, 2),
                         v=v.transpose(1, 2),
                         dropout_p=p,
-                        softmax_scale=s if s else q.shape[-1] ** (-0.5),
+                        softmax_scale=s or q.shape[-1] ** (-0.5),
                         causal=c,
                     )
                     assert isinstance(result, Tensor)
