@@ -12,7 +12,7 @@ dependencies = [
     "peft>=0.17.0",
     "protobuf>=6.31.1",
     "sentencepiece>=0.2.0",
-    "skrample[all]==0.5.*",
+    "skrample[all]==0.6.*",
     "torch>=2.9.1",
     "torchao>=0.15.0",
     "transformers>=4.53.2,<5",

@@ -24,12 +24,13 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import numpy.linalg as npl
-import skrample.sampling as sampling
-import skrample.scheduling as scheduling
 from PIL import Image, ImageDraw, PngImagePlugin
-from skrample.common import MergeStrategy, Predictor, predict_epsilon, predict_flow, predict_sample, predict_velocity
-from skrample.sampling import HighOrderSampler, SkrampleSampler
-from skrample.scheduling import ScheduleModifier, SkrampleSchedule
+from skrample import scheduling as skscheduling
+from skrample.common import MergeStrategy
+from skrample.sampling import functional as skfunctional
+from skrample.sampling import models as skmodels
+from skrample.sampling import structured as skstructured
+from skrample.sampling import traits as sktraits
 from tqdm import tqdm
 
 
@@ -240,124 +241,172 @@ class SamplerSK(enum.StrEnum):
     NONE = enum.auto()
     Diffusers = enum.auto()
     DPM = enum.auto()
-    SDPM = enum.auto()
     Adams = enum.auto()
     Euler = enum.auto()
     UniPC = enum.auto()
     UniP = enum.auto()
     SPC = enum.auto()
+    RKUltra = enum.auto()
+    SSPRK = enum.auto()
+    DYNRK = enum.auto()
 
     @property
-    def sampler(self) -> tuple[type[SkrampleSampler] | None, dict[str, Any]]:
+    def sampler(
+        self,
+    ) -> tuple[
+        type["skstructured.StructuredSampler | RKUltraWrapperScheduler | DynasauRKWrapperScheduler"] | None,
+        dict[str, Any],
+    ]:
         match self:
             case SamplerSK.NONE:
                 return None, {}
             case SamplerSK.Diffusers:
                 return None, {}
             case SamplerSK.DPM:
-                return sampling.DPM, {"add_noise": False}
-            case SamplerSK.SDPM:
-                return sampling.DPM, {"add_noise": True}
+                return skstructured.DPM, {}
             case SamplerSK.Adams:
-                return sampling.Adams, {}
+                return skstructured.Adams, {}
             case SamplerSK.UniPC:
-                return sampling.UniPC, {}
+                return skstructured.UniPC, {}
             case SamplerSK.UniP:
-                return sampling.UniP, {}
+                return skstructured.UniP, {}
             case SamplerSK.Euler:
-                return sampling.Euler, {}
+                return skstructured.Euler, {}
             case SamplerSK.SPC:
-                return sampling.SPC, {}
+                return skstructured.SPC, {}
+            case SamplerSK.RKUltra:
+                return RKUltraWrapperScheduler, {}
+            case SamplerSK.SSPRK:
+                return RKUltraWrapperScheduler, {
+                    "providers": {**skfunctional.DEFAULT_PROVIDERS, **skfunctional.STABLE_PROVIDERS}
+                }
+            case SamplerSK.DYNRK:
+                return DynasauRKWrapperScheduler, {}
 
 
 @enum.unique
 class ScheduleSK(enum.StrEnum):
     Default = enum.auto()
     Linear = enum.auto()
-    SigmoidCDF = enum.auto()
     Scaled = enum.auto()
-    Uniform = enum.auto()
     ZSNR = enum.auto()
 
     @property
-    def schedule(self) -> tuple[type[SkrampleSchedule] | None, dict[str, Any]]:
+    def schedule(self) -> tuple[type[skscheduling.SkrampleSchedule] | None, dict[str, Any]]:
         match self:
             case ScheduleSK.Default:
                 return None, {}
             case ScheduleSK.Linear:
-                return scheduling.Linear, {}
-            case ScheduleSK.SigmoidCDF:
-                return scheduling.SigmoidCDF, {}
+                return skscheduling.Linear, {}
             case ScheduleSK.Scaled:
-                return scheduling.Scaled, {"uniform": False}
-            case ScheduleSK.Uniform:
-                return scheduling.Scaled, {"uniform": True}
+                return skscheduling.Scaled, {}
             case ScheduleSK.ZSNR:
-                return scheduling.ZSNR, {"uniform": True}
+                return skscheduling.ZSNR, {}
         return 0
 
 
 @enum.unique
 class PredictorSK(enum.StrEnum):
     Default = enum.auto()
-    Epsilon = enum.auto()
+    Noise = enum.auto()
     Flow = enum.auto()
-    Sample = enum.auto()
+    Data = enum.auto()
     Velocity = enum.auto()
 
     @property
-    def predictor(self) -> Predictor | None:
+    def predictor(self) -> skmodels.DiffusionModel | None:
         match self:
             case PredictorSK.Default:
                 return None
-            case PredictorSK.Epsilon:
-                return predict_epsilon
+            case PredictorSK.Noise:
+                return skmodels.NoiseModel()
             case PredictorSK.Flow:
-                return predict_flow
-            case PredictorSK.Sample:
-                return predict_sample
+                return skmodels.FlowModel()
+            case PredictorSK.Data:
+                return skmodels.DataModel()
             case PredictorSK.Velocity:
-                return predict_velocity
+                return skmodels.VelocityModel()
         return 0
+
+
+@enum.unique
+class SubScheduleSK(enum.StrEnum):
+    NONE = enum.auto()
+    Beta = enum.auto()
+    Exponential = enum.auto()
+    Karras = enum.auto()
+    Probit = enum.auto()
+
+    @property
+    def subschedule(self) -> tuple[type[skscheduling.SubSchedule] | None, dict[str, Any]]:
+        match self:
+            case SubScheduleSK.NONE:
+                return None, {}
+            case SubScheduleSK.Beta:
+                return skscheduling.Beta, {}
+            case SubScheduleSK.Exponential:
+                return skscheduling.Exponential, {}
+            case SubScheduleSK.Karras:
+                return skscheduling.Karras, {}
+            case SubScheduleSK.Probit:
+                return skscheduling.Probit, {}
+        return 0
+
+    @classmethod
+    def parse_suffix(cls, item: str) -> tuple[type[skscheduling.SubSchedule] | None, dict[str, Any]]:
+        modifier, scale = get_suffix(item, typing=float)
+        assert modifier in SubScheduleSK, f"Subschedule {modifier} unknown. Must be one of {tuple(cls)}"
+        self = cls(modifier)
+        modifier = self.subschedule
+
+        mod_cls, mod_props = modifier
+
+        if mod_cls is None:
+            return None, {}
+
+        if scale is not None:
+            if issubclass(mod_cls, skscheduling.Probit):
+                mod_props["scale"] = scale
+            elif issubclass(mod_cls, skscheduling.Karras | skscheduling.Exponential):
+                mod_props["rho"] = scale
+
+        return mod_cls, mod_props
 
 
 @enum.unique
 class ModifierSK(enum.StrEnum):
     NONE = enum.auto()
-    Beta = enum.auto()
     FlowShift = enum.auto()
-    Exponential = enum.auto()
-    Karras = enum.auto()
     Hyper = enum.auto()
     Vyper = enum.auto()
     Hype = enum.auto()
     Vype = enum.auto()
+    Sinner = enum.auto()
+    Pinner = enum.auto()
 
     @property
-    def schedule_modifier(self) -> tuple[type[ScheduleModifier], dict[str, Any]] | None:
+    def schedule_modifier(self) -> tuple[type[skscheduling.ScheduleModifier], dict[str, Any]] | None:
         match self:
             case ModifierSK.NONE:
                 return None
-            case ModifierSK.Beta:
-                return scheduling.Beta, {}
             case ModifierSK.FlowShift:
-                return scheduling.FlowShift, {}
-            case ModifierSK.Exponential:
-                return scheduling.Exponential, {}
-            case ModifierSK.Karras:
-                return scheduling.Karras, {}
+                return skscheduling.FlowShift, {}
             case ModifierSK.Hyper:
-                return scheduling.Hyper, {"tail": True}
+                return skscheduling.Hyper, {"tail": True}
             case ModifierSK.Vyper:
-                return scheduling.Hyper, {"tail": True, "scale": -scheduling.Hyper.scale}
+                return skscheduling.Hyper, {"tail": True, "scale": -skscheduling.Hyper.scale}
             case ModifierSK.Hype:
-                return scheduling.Hyper, {"tail": False}
+                return skscheduling.Hyper, {"tail": False}
             case ModifierSK.Vype:
-                return scheduling.Hyper, {"tail": False, "scale": -scheduling.Hyper.scale}
+                return skscheduling.Hyper, {"tail": False, "scale": -skscheduling.Hyper.scale}
+            case ModifierSK.Sinner:
+                return skscheduling.Sinner, {}
+            case ModifierSK.Pinner:
+                return skscheduling.Sinner, {"scale": -skscheduling.Sinner.scale}
         return 0
 
     @classmethod
-    def parse_suffix(cls, item: str) -> tuple[type[ScheduleModifier], dict[str, Any]] | None:
+    def parse_suffix(cls, item: str) -> tuple[type[skscheduling.ScheduleModifier], dict[str, Any]] | None:
         modifier, scale = get_suffix(item, typing=float)
         assert modifier in ModifierSK, f"Modifier {modifier} unknown. Must be one of {tuple(cls)}"
         self = cls(modifier)
@@ -368,12 +417,12 @@ class ModifierSK(enum.StrEnum):
 
         mod_cls, mod_props = modifier
         if scale is not None:
-            if issubclass(mod_cls, scheduling.FlowShift):
+            if issubclass(mod_cls, skscheduling.FlowShift):
                 mod_props["shift"] = scale
-            elif issubclass(mod_cls, scheduling.Karras | scheduling.Exponential):
-                mod_props["rho"] = scale
-            elif issubclass(mod_cls, scheduling.Hyper):
+            elif issubclass(mod_cls, skscheduling.Hyper):
                 mod_props["scale"] = -scale if self in (ModifierSK.Vype, ModifierSK.Vyper) else scale
+            elif issubclass(mod_cls, skscheduling.Sinner):
+                mod_props["count"] = scale
 
         return mod_cls, mod_props
 
@@ -1114,15 +1163,14 @@ Variants with 's' are stochastic, so seuler -> Euler Ancestral""",
 Use Flow/Linear for flow-matching models like SD3 and Flux, otherwise use Scaled/Uniform.
 ZSNR is only for very particular models that explicitly need it, like Terminus or NoobAI-VPred.""",
     )
-    skrample_predictor = QDParam(
-        "skrample_predictor",
-        PredictorSK,
-        value=PredictorSK.Default,
-        short="-Kp",
+    skrample_subschedule = QDParam(
+        "skrample_subschedule",
+        str,
+        value=SubScheduleSK.NONE,
+        short="-KS",
         multi=True,
         meta=True,
-        docs="""Prediction function from https://github.com/Beinsezii/skrample
-This should only need to be set if a model explicitly does not use the default, like Terminus and NoobAI-VPred.""",
+        docs="Subschedule from https://github.com/Beinsezii/skrample",
     )
     skrample_modifier = QDParam(
         "skrample_modifier",
@@ -1133,6 +1181,25 @@ This should only need to be set if a model explicitly does not use the default, 
         meta=True,
         docs="""Schedule modifiers from https://github.com/Beinsezii/skrample
 Affect the ramp of the noise schedule. All modifiers work with all schedules to varying degrees.""",
+    )
+    skrample_predictor = QDParam(
+        "skrample_predictor",
+        PredictorSK,
+        value=PredictorSK.Default,
+        short="-Kp",
+        multi=True,
+        meta=True,
+        docs="""Prediction function from https://github.com/Beinsezii/skrample
+This should only need to be set if a model explicitly does not use the default, like Terminus and NoobAI-VPred.""",
+    )
+    skrample_transform = QDParam(
+        "skrample_transform",
+        PredictorSK,
+        value=PredictorSK.Data,
+        short="-KP",
+        multi=True,
+        meta=True,
+        docs="Transform the derivative to a different prediction type when sampling.",
     )
     skrample_modifier_merge = QDParam(
         "skrample_modifier_merge",
@@ -1159,12 +1226,24 @@ Pyramid is a hierarchical algorithm; similar to variance_noise.""",
     skrample_order = QDParam(
         "skrample_order",
         int,
+        sktraits.HigherOrder.order,
         short="-Ko",
         multi=True,
         meta=True,
         docs="""Solver order for skrample_sampler.
 This is equivalent to the number in the sampler name of other diffusion applications.
 So -Ko 3 is equivalent to DPM++ 3M, or -S dpm3""",
+    )
+    skrample_stochasticity = QDParam(
+        "skrample_stochasticity",
+        float,
+        sktraits.Stochastic.stochasticity,
+        short="-KN",
+        multi=True,
+        meta=True,
+        docs="""Solver stochasticity for skrample_sampler.
+This is equivalent to the `eta` parameter in DDPM
+0 is fully a deterministic ODE, 1 is a fully stochastic SDE (Ancestral)""",
     )
     skrample_dtype = QDParam(
         "skrample_dtype",
@@ -1176,6 +1255,13 @@ So -Ko 3 is equivalent to DPM++ 3M, or -S dpm3""",
         docs="""Skrample samplers support a dtype separate from the model dtype itself.
 Most diffusion applications use F32, sometimes labeled 'upcast sampling'.
 Performance penalty is typically imperceptible, so it's recommended to leave this at F64""",
+    )
+    adjust_steps = QDParam(
+        "adjust_steps",
+        bool,
+        value=True,
+        meta=True,
+        docs="Automatically adjust steps when using some samplers to keep inference times similar",
     )
     ### Global
     lora = QDParam("lora", str, short="-l", meta=True, multi=True, docs='Apply Loras, ex. "ms_paint.safetensors:::0.6"')
@@ -1511,7 +1597,7 @@ from diffusers.schedulers.scheduling_euler_discrete import EulerDiscreteSchedule
 from diffusers.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
 from diffusers.schedulers.scheduling_utils import SchedulerMixin
-from skrample.diffusers import SkrampleWrapperScheduler
+from skrample.diffusers import DynasauRKWrapperScheduler, RKUltraWrapperScheduler, SkrampleWrapperScheduler
 from torch import Tensor
 from torch.nn.attention import SDPBackend
 from torchao.quantization.quant_api import (
@@ -2211,12 +2297,14 @@ def process_job(
     variance_scale = job.pop("variance_scale", 0)
     image_ops: list[dict[str, Any]] = job.pop("image_ops")
     sampler: Sampler = job.pop("sampler", Sampler.Default)
+
     sksampler: SamplerSK = job.pop("skrample_sampler", SamplerSK.NONE)
     skschedule: ScheduleSK = job.pop("skrample_schedule", ScheduleSK.Default)
     skmodifier: list[str] = job.pop("skrample_modifier", [])
     skmodmerge: MergeStrategy = job.pop("skrample_modifier_merge", MergeStrategy.UniqueBefore)
     sknoise: NoiseSK = job.pop("skrample_noise", NoiseSK.Random)
     skpredictor: PredictorSK = job.pop("skrample_predictor", PredictorSK.Default)
+    sktransform: PredictorSK = job.pop("skrample_transform", PredictorSK.Default)
     skdtype: DTypeSK = job.pop("skrample_dtype", DTypeSK.F64)
 
     if skmodifier:
@@ -2292,31 +2380,70 @@ def process_job(
             sampler_type, sampler_props = sksampler.sampler
             schedule_type, schedule_props = skschedule.schedule
             noise_type, noise_props = sknoise.noise
+            subschedule, subschedule_props = SubScheduleSK.parse_suffix(
+                job.pop("skrample_subschedule", SubScheduleSK.NONE)
+            )
 
-            if sampler_type is not None and issubclass(sampler_type, HighOrderSampler):
-                order = job.get("skrample_order", None)
-                if order is not None:
+            if sampler_type is not None and issubclass(
+                sampler_type, RKUltraWrapperScheduler | DynasauRKWrapperScheduler
+            ):
+                order: int = job.pop("skrample_order")
+                stochasticity: float = job.pop("skrample_stochasticity")
+                pipe.scheduler = sampler_type.from_diffusers_config(
+                    pipe.scheduler,  # type: ignore ConfigMixin
+                    sampler_order=order,
+                    stochasticity=stochasticity,
+                    schedule=schedule_type,
+                    subschedule=subschedule,
+                    subschedule_props=subschedule_props,
+                    schedule_modifiers=[p for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p],
+                    model=skpredictor.predictor,
+                    derivative_transform=sktransform.predictor,
+                    noise_type=noise_type,
+                    noise_props=noise_props,
+                    compute_scale=skdtype.torch_dtype,
+                    schedule_props=schedule_props,
+                    modifier_merge_strategy=skmodmerge,
+                    allow_dynamic=not any(
+                        "shift" in p[1] for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p
+                    ),
+                    **sampler_props,
+                )
+                if parameters.adjust_steps.value_single:
+                    job["steps"] = pipe.scheduler.adjust_steps(job["steps"])
+            else:
+                if sampler_type is not None and issubclass(sampler_type, sktraits.HigherOrder):
+                    order: int = job.pop("skrample_order")
                     if order > sampler_type.max_order():
                         LOGQD.warning(
                             f"Selected order {order} larger than "
                             f"{sampler_type.__name__} max order {sampler_type.max_order()}"
                         )
                     sampler_props["order"] = order
+                if sampler_type is not None and issubclass(sampler_type, sktraits.Stochastic):
+                    sampler_props["stochasticity"] = job.pop("skrample_stochasticity")
 
-            pipe.scheduler = SkrampleWrapperScheduler.from_diffusers_config(
-                pipe.scheduler,  # type: ignore ConfigMixin
-                sampler=sampler_type,
-                schedule=schedule_type,
-                schedule_modifiers=[p for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p],
-                predictor=skpredictor.predictor,
-                noise_type=noise_type,
-                noise_props=noise_props,
-                compute_scale=skdtype.torch_dtype,
-                sampler_props=sampler_props,
-                schedule_props=schedule_props,
-                modifier_merge_strategy=skmodmerge,
-                allow_dynamic=not any("shift" in p[1] for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p),
-            )
+                if sampler_type is not None and issubclass(sampler_type, sktraits.DerivativeTransform):
+                    sampler_props["derivative_transform"] = sktransform.predictor
+
+                pipe.scheduler = SkrampleWrapperScheduler.from_diffusers_config(
+                    pipe.scheduler,  # type: ignore ConfigMixin
+                    sampler=sampler_type,
+                    schedule=schedule_type,
+                    subschedule=subschedule,
+                    subschedule_props=subschedule_props,
+                    schedule_modifiers=[p for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p],
+                    model=skpredictor.predictor,
+                    noise_type=noise_type,
+                    noise_props=noise_props,
+                    compute_scale=skdtype.torch_dtype,
+                    sampler_props=sampler_props,
+                    schedule_props=schedule_props,
+                    modifier_merge_strategy=skmodmerge,
+                    allow_dynamic=not any(
+                        "shift" in p[1] for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p
+                    ),
+                )
 
         else:
             pipe.scheduler = get_scheduler(sampler, job.get("spacing", None), pipe.scheduler)
