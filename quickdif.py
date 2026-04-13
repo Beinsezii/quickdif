@@ -481,18 +481,9 @@ class DType(enum.StrEnum):
     F32 = enum.auto()
     F8 = enum.auto()
     F8D = enum.auto()
-    F6 = enum.auto()
     I8 = enum.auto()
     I8D = enum.auto()
     I4 = enum.auto()
-    I4D = enum.auto()
-    U7 = enum.auto()
-    U6 = enum.auto()
-    U5 = enum.auto()
-    U4 = enum.auto()
-    U3 = enum.auto()
-    U2 = enum.auto()
-    U1 = enum.auto()
 
     @property
     def torch_dtype(self) -> "torch.dtype":
@@ -503,14 +494,7 @@ class DType(enum.StrEnum):
                 return torch.bfloat16
             case DType.F32:
                 return torch.float32
-            # Quantization parent types
-            # FloatX should use F16 instead
-            # https://github.com/pytorch/ao/tree/main/torchao/dtypes/floatx
-            # Does not work on AMD but performance absolutely tanks with bfloat16 casting
-            # So I'll just leave it in for my 0 Nvidia users.
-            case DType.F6:
-                return torch.float16
-            # Rest need BF16
+            # Torchao uses BF16
             case _:
                 return torch.bfloat16
 
@@ -523,30 +507,12 @@ class DType(enum.StrEnum):
                 return Float8WeightOnlyConfig(torch.float8_e4m3fn)
             case DType.F8D:
                 return Float8DynamicActivationFloat8WeightConfig(torch.float8_e4m3fn, torch.float8_e4m3fn)
-            case DType.F6:
-                return FPXWeightOnlyConfig(3, 2)
             case DType.I8:
                 return Int8WeightOnlyConfig()
             case DType.I8D:
                 return Int8DynamicActivationInt8WeightConfig()
             case DType.I4:
                 return Int4WeightOnlyConfig()
-            case DType.I4D:
-                return Int8DynamicActivationInt4WeightConfig()
-            case DType.U7:
-                return UIntXWeightOnlyConfig(torch.uint7, 32)  # type: ignore # torch uint
-            case DType.U6:
-                return UIntXWeightOnlyConfig(torch.uint6, 32)  # type: ignore # torch uint
-            case DType.U5:
-                return UIntXWeightOnlyConfig(torch.uint5, 32)  # type: ignore # torch uint
-            case DType.U4:
-                return UIntXWeightOnlyConfig(torch.uint4, 32)  # type: ignore # torch uint
-            case DType.U3:
-                return UIntXWeightOnlyConfig(torch.uint3, 32)  # type: ignore # torch uint
-            case DType.U2:
-                return UIntXWeightOnlyConfig(torch.uint2, 32)  # type: ignore # torch uint
-            case DType.U1:
-                return UIntXWeightOnlyConfig(torch.uint1, 32)  # type: ignore # torch uint
 
         raise NotImplementedError
 
@@ -559,24 +525,8 @@ class DType(enum.StrEnum):
             # Everything assumes whole bytes.
             case DType.F8 | DType.F8D | DType.I8 | DType.I8D:
                 return 8
-            case DType.I4 | DType.I4D:
+            case DType.I4:
                 return 4
-            case DType.F6:
-                return 6
-            case DType.U7:
-                return 7
-            case DType.U6:
-                return 6
-            case DType.U5:
-                return 5
-            case DType.U4:
-                return 4
-            case DType.U3:
-                return 3
-            case DType.U2:
-                return 2
-            case DType.U1:
-                return 1
 
         raise NotImplementedError
 
@@ -1567,12 +1517,9 @@ from torch.nn.attention import SDPBackend
 from torchao.quantization.quant_api import (
     Float8DynamicActivationFloat8WeightConfig,
     Float8WeightOnlyConfig,
-    FPXWeightOnlyConfig,
     Int4WeightOnlyConfig,
-    Int8DynamicActivationInt4WeightConfig,
     Int8DynamicActivationInt8WeightConfig,
     Int8WeightOnlyConfig,
-    UIntXWeightOnlyConfig,
     quantize_,
 )
 from torchao.utils import TorchAOBaseTensor
@@ -1722,7 +1669,7 @@ def patch_attn(attention: AttentionPatch) -> None:
                         k=k.transpose(1, 2),
                         v=v.transpose(1, 2),
                         dropout_p=p,
-                        softmax_scale=s if s else q.shape[-1] ** (-0.5),
+                        softmax_scale=s or q.shape[-1] ** (-0.5),
                         causal=c,
                     )
                     assert isinstance(result, Tensor)
