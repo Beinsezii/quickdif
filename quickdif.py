@@ -365,7 +365,7 @@ class SubScheduleSK(enum.StrEnum):
             return None, {}
 
         if scale is not None:
-            if issubclass(mod_cls, skscheduling.Siggauss):
+            if issubclass(mod_cls, skscheduling.Probit):
                 mod_props["scale"] = scale
             elif issubclass(mod_cls, skscheduling.Karras | skscheduling.Exponential):
                 mod_props["rho"] = scale
