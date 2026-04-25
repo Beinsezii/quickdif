@@ -1707,7 +1707,7 @@ def is_flux_vae(pipe: DiffusionPipeline) -> bool:
 
 
 def _patch_sdpa(
-    patch_func: Callable[[Tensor, Tensor, Tensor, Tensor | None, float, bool, float | None], Tensor],
+    patch_func: Callable[[Tensor, Tensor, Tensor, Tensor | None, float, bool, float | None, bool], Tensor],
 ) -> None:
     """(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None)"""
 
@@ -1721,9 +1721,10 @@ def _patch_sdpa(
         dropout_p: float = 0.0,
         is_causal: bool = False,
         scale: float | None = None,
+        enable_gqa: bool = False,
     ) -> Tensor:
         try:
-            return patch_func(query, key, value, attn_mask, dropout_p, is_causal, scale)
+            return patch_func(query, key, value, attn_mask, dropout_p, is_causal, scale, enable_gqa)
         except BaseException:  # noqa: BLE001
             hidden_states = torch_sdpa(
                 query=query,
@@ -1733,6 +1734,7 @@ def _patch_sdpa(
                 dropout_p=dropout_p,
                 is_causal=is_causal,
                 scale=scale,
+                enable_gqa=enable_gqa,
             )
         return hidden_states
 
@@ -1748,7 +1750,7 @@ def patch_attn(attention: AttentionPatch) -> None:
             try:
                 from flash_attn import flash_attn_func  # type: ignore # Missing import  # noqa: PLC0415
 
-                def sdpa_hijack_flash(q, k, v, m, p, c, s):  # noqa: ANN001, ANN202
+                def sdpa_hijack_flash(q, k, v, m, p, c, s, g):  # noqa: ANN001, ANN202
                     assert m is None
                     result = flash_attn_func(
                         q=q.transpose(1, 2),
@@ -1769,9 +1771,10 @@ def patch_attn(attention: AttentionPatch) -> None:
             try:
                 from sageattention import sageattn  # noqa: PLC0415
 
-                def sdpa_hijack_sage(q, k, v, m, p, c, s):  # noqa: ANN001, ANN202
+                def sdpa_hijack_sage(q, k, v, m, p, c, s, g):  # noqa: ANN001, ANN202
                     assert m is None
                     assert p == 0.0
+                    assert not g
                     result = sageattn(q, k, v, is_causal=c, sm_scale=s)
                     return result
 
