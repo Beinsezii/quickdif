@@ -1757,8 +1757,8 @@ class AttnProcessorDispatch(AttnProcessor2_0):
         elif attn.norm_cross:
             encoder_hidden_states = attn.norm_encoder_hidden_states(encoder_hidden_states)
 
-        key = attn.to_k(encoder_hidden_states)
-        value = attn.to_v(encoder_hidden_states)
+        key = attn.to_k(encoder_hidden_states)  # type: ignore # idk why diffusers did this
+        value = attn.to_v(encoder_hidden_states)  # type: ignore # idk why diffusers did this
 
         inner_dim = key.shape[-1]
         head_dim = inner_dim // attn.heads
@@ -1792,12 +1792,12 @@ class AttnProcessorDispatch(AttnProcessor2_0):
         hidden_states = hidden_states.to(query.dtype)
 
         # linear proj
-        hidden_states = attn.to_out[0](hidden_states)
+        hidden_states = attn.to_out[0](hidden_states)  # type: ignore # idk why diffusers did this
         # dropout
-        hidden_states = attn.to_out[1](hidden_states)
+        hidden_states = attn.to_out[1](hidden_states)  # type: ignore # idk why diffusers did this
 
         if input_ndim == 4:
-            hidden_states = hidden_states.transpose(-1, -2).reshape(batch_size, channel, height, width)
+            hidden_states = hidden_states.transpose(-1, -2).reshape(batch_size, channel, height, width)  # pyright: ignore
 
         if attn.residual_connection:
             hidden_states = hidden_states + residual
