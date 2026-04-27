@@ -7,7 +7,7 @@ authors = [{ name = "Beinsezii" }]
 requires-python = ">= 3.12"
 dependencies = [
     "accelerate>=1.8.1",
-    "diffusers>=0.35.1",
+    "diffusers>=0.36",
     "huggingface-hub>=0.33.4",
     "peft>=0.17.0",
     "protobuf>=6.31.1",
@@ -19,8 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-sageattn = ["sageattention==1.0.6"]
-all = ["quickdif[sageattn]"]
+all = ["quickdif"]
 
 [build-system]
 requires = ["setuptools"]
@@ -35,37 +34,37 @@ namespace-packages = ["tests"]
 
 [tool.ruff.lint]
 select = [
-    "A",    # std types
-    "ANN",  # annotations
-    "BLE",  # blanket except
-    "C4",   # comprehension
-    "E",    # style errors
-    "EM",   # error messages
-    "EXE",  # shebangs
-    "F",    # format
-    "FA",   # future
-    "FLY",  # expr fstring
-    "FURB", # syn upgrades
-    "G",    # log messages
-    "I",    # imports
-    "ICN",  # import conventions
+    "A",      # std types
+    "ANN",    # annotations
+    "BLE",    # blanket except
+    "C4",     # comprehension
+    "E",      # style errors
+    "EM",     # error messages
+    "EXE",    # shebangs
+    "F",      # format
+    "FA",     # future
+    "FLY",    # expr fstring
+    "FURB",   # syn upgrades
+    "G",      # log messages
+    "I",      # imports
+    "ICN",    # import conventions
     "INP001",
-    "ISC",  # str cat
-    "LOG",  # logging
-    "NPY",  # numpy
-    "PERF", # perflint
-    "PIE",  # misc
-    "PL",   # pylint
-    "PT",   # pytest
-    "Q",    # quotes
-    "RUF",  # variety
-    "T10",  # pdb.trace
-    "T20",  # print
-    "TC",   # type checking
-    "TD",   # todos
-    "TRY",  # try/catch
-    "UP",   # syn upgrades
-    "W",    # style warnings
+    "ISC",    # str cat
+    "LOG",    # logging
+    "NPY",    # numpy
+    "PERF",   # perflint
+    "PIE",    # misc
+    "PL",     # pylint
+    "PT",     # pytest
+    "Q",      # quotes
+    "RUF",    # variety
+    "T10",    # pdb.trace
+    "T20",    # print
+    "TC",     # type checking
+    "TD",     # todos
+    "TRY",    # try/catch
+    "UP",     # syn upgrades
+    "W",      # style warnings
 ]
 ignore = [
     "G004",   # Log f-string
@@ -76,8 +75,11 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"latent_colors.py" = ["T201"]  # prints
-"quickdif.py" = ["E402"]  # import not on top
+"latent_colors.py" = ["T201"] # prints
+"quickdif.py" = ["E402"]      # import not on top
+
+[tool.pyright]
+reportPrivateImportUsage = "warning"
 
 [tool.pytest.ini_options]
 python_files = "tests/*.py"
