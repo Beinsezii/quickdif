@@ -7,7 +7,7 @@ authors = [{ name = "Beinsezii" }]
 requires-python = ">= 3.12"
 dependencies = [
     "accelerate>=1.8.1",
-    "diffusers>=0.35.1",
+    "diffusers>=0.36",
     "huggingface-hub>=0.33.4",
     "peft>=0.17.0",
     "protobuf>=6.31.1",
