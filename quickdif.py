@@ -616,10 +616,51 @@ class NoiseType(enum.StrEnum):
 
 
 @enum.unique
-class AttentionPatch(enum.StrEnum):
-    NONE = enum.auto()
+class AttentionBackend(enum.StrEnum):
+    Default = enum.auto()
+    Aiter = enum.auto()
     Flash = enum.auto()
+    FlashH = enum.auto()
+    FlashVL = enum.auto()
+    FlashVLH = enum.auto()
+    Flash4H = enum.auto()
+    Flex = enum.auto()
+    Native = enum.auto()
     Sage = enum.auto()
+    SageH = enum.auto()
+    SageVL = enum.auto()
+    XFormers = enum.auto()
+
+    @property
+    def backend(self) -> "AttentionBackendName | None":
+        match self:
+            case self.Default:
+                return None
+            case self.Aiter:
+                return AttentionBackendName.AITER
+            case self.Flash:
+                return AttentionBackendName.FLASH
+            case self.FlashH:
+                return AttentionBackendName.FLASH_HUB
+            case self.FlashVL:
+                return AttentionBackendName.FLASH_VARLEN
+            case self.FlashVLH:
+                return AttentionBackendName.FLASH_VARLEN_HUB
+            case self.Flash4H:
+                return AttentionBackendName.FLASH_4_HUB
+            case self.Flex:
+                return AttentionBackendName.FLEX
+            case self.Native:
+                return AttentionBackendName.NATIVE
+            case self.Sage:
+                return AttentionBackendName.SAGE
+            case self.SageVL:
+                return AttentionBackendName.SAGE_VARLEN
+            case self.SageH:
+                return AttentionBackendName.SAGE_HUB
+            case self.XFormers:
+                return AttentionBackendName.XFORMERS
+        return 0
 
 
 @enum.unique
@@ -1316,11 +1357,11 @@ Recommended to set this to your GPU memory with a margin based on upper image si
 Recommended to leave this unless you absolutely need the memory,
 as smaller components typically lose quality faster than larger components.""",
     )
-    attn_patch = QDParam(
-        "attn-patch",
-        AttentionPatch,
-        value=AttentionPatch.NONE,
-        docs="Patch the SDPA function with a custom external attention processor.",
+    attention = QDParam(
+        "attention",
+        AttentionBackend,
+        value=AttentionBackend.Default,
+        docs="Set the attention backend for the model if supported",
     )
     sdpb = QDParam("sdpb", SDPB, multi=True, docs="Override the SDP attention backend(s) to use")
     compile = QDParam("compile", Compile, Compile.Off, "-T", docs="Compile network with torch.compile()")
@@ -1559,6 +1600,10 @@ from accelerate.accelerator import Accelerator
 from accelerate.utils.dataclasses import DynamoBackend, TorchDynamoPlugin
 from diffusers.configuration_utils import ConfigMixin
 from diffusers.loaders.single_file_utils import SingleFileComponentError
+from diffusers.models.attention import AttentionMixin
+from diffusers.models.attention_dispatch import AttentionBackendName, dispatch_attention_fn
+from diffusers.models.attention_processor import Attention, AttnProcessor2_0
+from diffusers.models.modeling_utils import ModelMixin
 from diffusers.pipelines.auto_pipeline import (
     AutoPipelineForImage2Image,
     AutoPipelineForText2Image,
@@ -1598,7 +1643,6 @@ from diffusers.schedulers.scheduling_flow_match_euler_discrete import FlowMatchE
 from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
 from diffusers.schedulers.scheduling_utils import SchedulerMixin
 from skrample.diffusers import DynasauRKWrapperScheduler, RKUltraWrapperScheduler, SkrampleWrapperScheduler
-from torch import Tensor
 from torch.nn.attention import SDPBackend
 from torchao.quantization.quant_api import (
     Float8DynamicActivationFloat8WeightConfig,
@@ -1670,6 +1714,99 @@ class SmartSigint(AbstractContextManager):
         self.terminate()
 
 
+class AttnProcessorDispatch(AttnProcessor2_0):
+    _attention_backend: AttentionBackendName | None = None
+
+    def __call__(
+        self,
+        attn: Attention,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        temb: torch.Tensor | None = None,
+        *args,
+        **kwargs,
+    ) -> torch.Tensor:
+        residual = hidden_states
+        if attn.spatial_norm is not None:
+            hidden_states = attn.spatial_norm(hidden_states, temb)
+
+        input_ndim = hidden_states.ndim
+
+        if input_ndim == 4:
+            batch_size, channel, height, width = hidden_states.shape
+            hidden_states = hidden_states.view(batch_size, channel, height * width).transpose(1, 2)
+
+        batch_size, sequence_length, _ = (
+            hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
+        )
+
+        if attention_mask is not None:
+            attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length, batch_size)
+            # scaled_dot_product_attention expects attention_mask shape to be
+            # (batch, heads, source_length, target_length)
+            attention_mask = attention_mask.view(batch_size, attn.heads, -1, attention_mask.shape[-1])
+
+        if attn.group_norm is not None:
+            hidden_states = attn.group_norm(hidden_states.transpose(1, 2)).transpose(1, 2)
+
+        query = attn.to_q(hidden_states)
+
+        if encoder_hidden_states is None:
+            encoder_hidden_states = hidden_states
+        elif attn.norm_cross:
+            encoder_hidden_states = attn.norm_encoder_hidden_states(encoder_hidden_states)
+
+        key = attn.to_k(encoder_hidden_states)
+        value = attn.to_v(encoder_hidden_states)
+
+        inner_dim = key.shape[-1]
+        head_dim = inner_dim // attn.heads
+
+        query = query.view(batch_size, -1, attn.heads, head_dim)
+
+        key = key.view(batch_size, -1, attn.heads, head_dim)
+        value = value.view(batch_size, -1, attn.heads, head_dim)
+
+        if attn.norm_q is not None:
+            query = attn.norm_q(query)
+        if attn.norm_k is not None:
+            key = attn.norm_k(key)
+
+        try:
+            hidden_states = dispatch_attention_fn(
+                query,
+                key,
+                value,
+                attn_mask=attention_mask,
+                dropout_p=0.0,
+                is_causal=False,
+                backend=self._attention_backend,
+            )
+        except BaseException:  # noqa: BLE001
+            hidden_states = dispatch_attention_fn(
+                query.T, key.T, value.T, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
+            ).T
+
+        hidden_states = hidden_states.reshape(batch_size, -1, attn.heads * head_dim)
+        hidden_states = hidden_states.to(query.dtype)
+
+        # linear proj
+        hidden_states = attn.to_out[0](hidden_states)
+        # dropout
+        hidden_states = attn.to_out[1](hidden_states)
+
+        if input_ndim == 4:
+            hidden_states = hidden_states.transpose(-1, -2).reshape(batch_size, channel, height, width)
+
+        if attn.residual_connection:
+            hidden_states = hidden_states + residual
+
+        hidden_states = hidden_states / attn.rescale_output_factor
+
+        return hidden_states
+
+
 # BOTTOM LEVEL
 
 
@@ -1704,86 +1841,6 @@ def is_sd3_vae(pipe: DiffusionPipeline) -> bool:
 
 def is_flux_vae(pipe: DiffusionPipeline) -> bool:
     return isinstance(pipe, FluxPipeline)
-
-
-def _patch_sdpa(
-    patch_func: Callable[[Tensor, Tensor, Tensor, Tensor | None, float, bool, float | None, bool], Tensor],
-) -> None:
-    """(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None)"""
-
-    torch_sdpa = torch.nn.functional.scaled_dot_product_attention
-
-    def sdpa_hijack_flash(
-        query: Tensor,
-        key: Tensor,
-        value: Tensor,
-        attn_mask: Tensor | None = None,
-        dropout_p: float = 0.0,
-        is_causal: bool = False,
-        scale: float | None = None,
-        enable_gqa: bool = False,
-    ) -> Tensor:
-        try:
-            return patch_func(query, key, value, attn_mask, dropout_p, is_causal, scale, enable_gqa)
-        except BaseException:  # noqa: BLE001
-            hidden_states = torch_sdpa(
-                query=query,
-                key=key,
-                value=value,
-                attn_mask=attn_mask,
-                dropout_p=dropout_p,
-                is_causal=is_causal,
-                scale=scale,
-                enable_gqa=enable_gqa,
-            )
-        return hidden_states
-
-    torch.nn.functional.scaled_dot_product_attention = sdpa_hijack_flash
-
-
-def patch_attn(attention: AttentionPatch) -> None:
-    match attention:
-        case AttentionPatch.NONE:
-            pass
-
-        case AttentionPatch.Flash:
-            try:
-                from flash_attn import flash_attn_func  # type: ignore # Missing import  # noqa: PLC0415
-
-                def sdpa_hijack_flash(q, k, v, m, p, c, s, g):  # noqa: ANN001, ANN202
-                    assert m is None
-                    result = flash_attn_func(
-                        q=q.transpose(1, 2),
-                        k=k.transpose(1, 2),
-                        v=v.transpose(1, 2),
-                        dropout_p=p,
-                        softmax_scale=s or q.shape[-1] ** (-0.5),
-                        causal=c,
-                    )
-                    assert isinstance(result, Tensor)
-                    return result.transpose(1, 2)
-
-                _patch_sdpa(sdpa_hijack_flash)
-            except ImportError:
-                LOGQD.exception("Could not load Flash Attention for hijack")
-
-        case AttentionPatch.Sage:
-            try:
-                from sageattention import sageattn  # noqa: PLC0415
-
-                def sdpa_hijack_sage(q, k, v, m, p, c, s, g):  # noqa: ANN001, ANN202
-                    assert m is None
-                    assert p == 0.0
-                    assert not g
-                    result = sageattn(q, k, v, is_causal=c, sm_scale=s)
-                    return result
-
-                _patch_sdpa(sdpa_hijack_sage)
-            except ImportError:
-                LOGQD.exception("Could not load SageAttention for hijack")
-
-        case _:
-            raise NotImplementedError
 
 
 def apply_loras(loras: list[str], pipe: DiffusionPipeline) -> None:
@@ -2037,6 +2094,7 @@ def get_pipe(
     pag: bool,
     quantize_threshold_gb: float,
     quantize_minimum_gb: float,
+    attention: AttentionBackendName | None,
 ) -> DiffusionPipeline:
     pipe_args = {
         "add_watermarker": False,
@@ -2105,6 +2163,17 @@ def get_pipe(
 
     pipe.safety_checker = None
     pipe.watermarker = None
+
+    if attention is not None:
+        for comp_key, module in pipe.components.items():
+            if isinstance(module, ModelMixin):
+                if isinstance(module, AttentionMixin) and all(
+                    isinstance(p, AttnProcessor2_0) for p in module.attn_processors.values()
+                ):
+                    module.set_attn_processor(AttnProcessorDispatch())
+                    LOGQD.info(f"Repalced {comp_key} attention processor")
+                module.set_attention_backend(attention)
+                LOGQD.info(f"Set {comp_key} attention backend to {attention}")
 
     if hasattr(pipe, "vae"):
         set_vae(pipe, tile_vae)
@@ -2329,6 +2398,7 @@ def process_job(
             any(parameters.pag.value_multi),
             parameters.quantize_threshold.value_single,
             parameters.quantize_minimum.value_single,
+            parameters.attention.value_single.backend,
         )
         piperef.name = model
         piperef.loras = lora_meta
@@ -2562,9 +2632,6 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
 
     if parameters.tunable.value and torch.cuda.is_available():
         torch.cuda.tunable.enable(val=True)
-
-    if parameters.attn_patch.value_single is not AttentionPatch.NONE:
-        patch_attn(parameters.attn_patch.value_single)
 
     kernel_ctx = nullcontext()
     if parameters.sdpb.value_multi:
