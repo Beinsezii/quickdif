@@ -78,6 +78,9 @@ ignore = [
 "latent_colors.py" = ["T201"] # prints
 "quickdif.py" = ["E402"]      # import not on top
 
+[tool.pyright]
+reportPrivateImportUsage = "warning"
+
 [tool.pytest.ini_options]
 python_files = "tests/*.py"
 

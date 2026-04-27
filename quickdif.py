@@ -2076,7 +2076,7 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
     for j in jobs:
         for key in "prompt", "negative":
             if key in j:
-                expands = pexpand(j[key], body=("[", "]"), single=True)
+                expands = pexpand(j[key], body=("[", "]"), single=True)  # type: ignore # pos/neg is str
                 assert len(expands) == 1
                 j[key] = expands[0]
 
