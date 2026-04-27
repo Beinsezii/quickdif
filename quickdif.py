@@ -1784,9 +1784,14 @@ class AttnProcessorDispatch(AttnProcessor2_0):
                 backend=self._attention_backend,
             )
         except BaseException:  # noqa: BLE001
-            hidden_states = dispatch_attention_fn(
-                query.T, key.T, value.T, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-            ).T
+            hidden_states = torch.nn.functional.scaled_dot_product_attention(
+                query.transpose(1, 2),
+                key.transpose(1, 2),
+                value.transpose(1, 2),
+                attn_mask=attention_mask,
+                dropout_p=0.0,
+                is_causal=False,
+            ).transpose(1, 2)
 
         hidden_states = hidden_states.reshape(batch_size, -1, attn.heads * head_dim)
         hidden_states = hidden_states.to(query.dtype)
