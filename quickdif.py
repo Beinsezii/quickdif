@@ -623,7 +623,7 @@ class AttentionBackend(enum.StrEnum):
     FlashH = enum.auto()
     FlashVL = enum.auto()
     FlashVLH = enum.auto()
-    Flash4H = enum.auto()
+    # Flash4H = enum.auto()
     Flex = enum.auto()
     Native = enum.auto()
     Sage = enum.auto()
@@ -646,8 +646,8 @@ class AttentionBackend(enum.StrEnum):
                 return AttentionBackendName.FLASH_VARLEN
             case self.FlashVLH:
                 return AttentionBackendName.FLASH_VARLEN_HUB
-            case self.Flash4H:
-                return AttentionBackendName.FLASH_4_HUB
+            # case self.Flash4H:
+            #     return AttentionBackendName.FLASH_4_HUB
             case self.Flex:
                 return AttentionBackendName.FLEX
             case self.Native:
