@@ -1724,8 +1724,8 @@ class AttnProcessorDispatch(AttnProcessor2_0):
         encoder_hidden_states: torch.Tensor | None = None,
         attention_mask: torch.Tensor | None = None,
         temb: torch.Tensor | None = None,
-        *args,
-        **kwargs,
+        *args: Any,  # noqa: ANN401
+        **kwargs: Any,  # noqa: ANN401
     ) -> torch.Tensor:
         residual = hidden_states
         if attn.spatial_norm is not None:
