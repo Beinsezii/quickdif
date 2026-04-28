@@ -4,6 +4,7 @@ import enum
 import functools
 import json
 import logging
+import math
 import os
 import random
 import re
@@ -2701,6 +2702,14 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
                     ) -> None:
                         sam_path = base_path.with_stem(base_path.stem + "_sampler")
                         sch_path = base_path.with_stem(base_path.stem + "_schedule")
+                        # get maximum step count such that adjust_steps(steps) == steps
+                        # for more representative higher-order singlestep plotting
+                        steps = (
+                            math.ceil(100_000 / sampler.adjust_steps(100_000) * sampler.adjust_steps(steps))
+                            if isinstance(sampler, skfunctional.FunctionalHigher)
+                            and parameters.adjust_steps.value_single
+                            else steps
+                        )
                         Image.fromarray(
                             skplotting.draw(
                                 skplotting.plot_samplers(
