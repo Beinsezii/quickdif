@@ -2710,6 +2710,7 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
                                     schedule=schedule,
                                     model=model,
                                     steps=steps,
+                                    title="Sampler",
                                     adjust_steps=parameters.adjust_steps.value_single,
                                 )
                             )
@@ -2719,6 +2720,7 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
                                 skplotting.plot_schedules(
                                     schedules=[schedule],
                                     steps=steps,
+                                    title="Schedule",
                                     alphas=True,
                                 )
                             )
