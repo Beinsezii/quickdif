@@ -6,16 +6,17 @@ license = { file = "LICENSE" }
 authors = [{ name = "Beinsezii" }]
 requires-python = ">= 3.12"
 dependencies = [
-    "accelerate>=1.8.1",
-    "diffusers>=0.36",
-    "huggingface-hub>=0.33.4",
-    "peft>=0.17.0",
-    "protobuf>=6.31.1",
-    "sentencepiece>=0.2.0",
+    "accelerate>=1.13",
+    "diffusers>=0.38",
+    "peft>=0.19",
+    "protobuf>=7",
+    "safetensors>=0.8.0rc0",
+    "sentencepiece>=0.2",
     "skrample[all]==0.6.*",
     "torch>=2.9.1",
-    "torchao>=0.15.0",
-    "transformers>=4.53.2,<5",
+    "torchao>=0.15",
+    "torchvision>=0.24.1",
+    "transformers>5.8,<6",
 ]
 
 [project.optional-dependencies]
