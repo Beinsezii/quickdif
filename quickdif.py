@@ -2503,7 +2503,7 @@ def process_job(
                     ),
                     **sampler_props,
                 )
-                if parameters.adjust_steps.value_single:
+                if parameters.adjust_steps.value_single and "steps" in job:
                     job["steps"] = pipe.scheduler.adjust_steps(job["steps"])
             else:
                 if sampler_type is not None and issubclass(sampler_type, sktraits.HigherOrder):
@@ -2671,7 +2671,7 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
         # INFO (beinsezii): don't set for 1.0 or else it turns into decimals?
         for job in tqdm(rank_jobs, desc="Images", smoothing=0, unit_scale=batch_size if batch_size > 1 else False):
             with SmartSigint(job_name="current batch"):
-                steps: int = job.get("steps", None)  # pyright: ignore # ???
+                steps: int | None = job.get("steps", None)  # pyright: ignore # ???
                 results, skresults = process_job(
                     parameters,
                     piperef,
@@ -2738,8 +2738,8 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
                         ).save(sch_path, "PNG", compress_level=9)
 
                     tpe.submit(Image.Image.save, im, im_path, "PNG", pnginfo=info, compress_level=9)
-                    if parameters.skrample_visualize.value_single and skresults is not None and steps is not None:
-                        tpe.submit(sksave, im_path, steps, *skresults)
+                    if parameters.skrample_visualize.value_single and skresults is not None:
+                        tpe.submit(sksave, im_path, 50 if steps is None else steps, *skresults)
                     im_num += 1
 
         if parameters.grid.value is not None:
