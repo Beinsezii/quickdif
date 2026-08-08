@@ -26,8 +26,10 @@ import numpy as np
 import numpy.linalg as npl
 from PIL import Image, ImageDraw, PngImagePlugin
 from skrample import scheduling as skscheduling
+from skrample.analytics import plotting as skplotting
 from skrample.common import MergeStrategy
 from skrample.sampling import functional as skfunctional
+from skrample.sampling import interface as skinterface
 from skrample.sampling import models as skmodels
 from skrample.sampling import structured as skstructured
 from skrample.sampling import traits as sktraits
@@ -1300,6 +1302,13 @@ This is equivalent to the `eta` parameter in DDPM
 Most diffusion applications use F32, sometimes labeled 'upcast sampling'.
 Performance penalty is typically imperceptible, so it's recommended to leave this at F64""",
     )
+    skrample_visualize = QDParam(
+        "skrample_visualize",
+        bool,
+        value=False,
+        short="-KV",
+        docs="Additionally save visual plots for skrample sampler/schedule",
+    )
     adjust_steps = QDParam(
         "adjust_steps",
         bool,
@@ -2351,7 +2360,10 @@ def process_job(
     job: dict[str, Any],
     meta: dict[str, str],
     input_image: Image.Image | None,
-) -> list[tuple[dict[str, Any], Image.Image, PngImagePlugin.PngInfo]]:
+) -> tuple[
+    list[tuple[dict[str, Any], Image.Image, PngImagePlugin.PngInfo]],
+    tuple[skfunctional.FunctionalSampler, skscheduling.SkrampleSchedule, skmodels.DiffusionModel] | None,
+]:
     # POP SEED first because the meta is set in PngInfo directly
     seed = job.pop("seed")
 
@@ -2413,7 +2425,7 @@ def process_job(
         piperef.dtype = model_dtype
     pipe = piperef.pipe
     if pipe is None:
-        return []
+        return [], None
     assert isinstance(pipe, Callable)
 
     # INPUT TENSOR
@@ -2451,6 +2463,7 @@ def process_job(
 
     pipe_params = signature(pipe).parameters  # type: ignore Callable
 
+    skrample_return = None
     if hasattr(pipe, "scheduler"):
         default_scheduler = pipe.scheduler
 
@@ -2490,7 +2503,7 @@ def process_job(
                     ),
                     **sampler_props,
                 )
-                if parameters.adjust_steps.value_single:
+                if parameters.adjust_steps.value_single and "steps" in job:
                     job["steps"] = pipe.scheduler.adjust_steps(job["steps"])
             else:
                 if sampler_type is not None and issubclass(sampler_type, sktraits.HigherOrder):
@@ -2525,6 +2538,8 @@ def process_job(
                         "shift" in p[1] for p in (ModifierSK.parse_suffix(i) for i in skmodifier) if p
                     ),
                 )
+
+            skrample_return = pipe.scheduler.functional_interface()
 
         else:
             pipe.scheduler = get_scheduler(sampler, job.get("spacing", None), pipe.scheduler)
@@ -2620,7 +2635,7 @@ def process_job(
     if default_scheduler is not None:
         pipe.scheduler = default_scheduler
 
-    return results
+    return results, skrample_return
 
 
 def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None) -> None:
@@ -2656,11 +2671,12 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
         # INFO (beinsezii): don't set for 1.0 or else it turns into decimals?
         for job in tqdm(rank_jobs, desc="Images", smoothing=0, unit_scale=batch_size if batch_size > 1 else False):
             with SmartSigint(job_name="current batch"):
-                results = process_job(
+                steps: int | None = job.get("steps", None)  # pyright: ignore # ???
+                results, skresults = process_job(
                     parameters,
                     piperef,
                     acc,
-                    job,  # type: ignore
+                    job,  # pyright: ignore
                     meta.copy(),
                     image,
                 )
@@ -2678,7 +2694,52 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
                             im_path = parameters.output.value_single.joinpath(f"{im_num:05}.png")
                             continue
                         break
+
+                    def sksave(
+                        base_path: Path,
+                        steps: int,
+                        sampler: skfunctional.FunctionalSampler,
+                        schedule: skscheduling.SkrampleSchedule,
+                        model: skmodels.DiffusionModel,
+                    ) -> None:
+                        sam_path = base_path.with_stem(base_path.stem + "_sampler")
+                        sch_path = base_path.with_stem(base_path.stem + "_schedule")
+                        # get maximum step count such that adjust_steps(steps) == steps
+                        # for more representative higher-order singlestep plotting
+                        steps = (
+                            round(100_000 / sampler.adjust_steps(100_000) * sampler.adjust_steps(steps))
+                            if isinstance(sampler, skfunctional.FunctionalHigher)
+                            and parameters.adjust_steps.value_single
+                            else steps
+                        )
+                        Image.fromarray(
+                            skplotting.draw(
+                                skplotting.plot_samplers(
+                                    samplers=[sampler.sampler]
+                                    if isinstance(sampler, skinterface.StructuredFunctionalAdapter)
+                                    else [sampler],
+                                    schedule=schedule,
+                                    model=model,
+                                    steps=steps,
+                                    title="Sampler",
+                                    adjust_steps=parameters.adjust_steps.value_single,
+                                )
+                            )
+                        ).save(sam_path, "PNG", compress_level=9)
+                        Image.fromarray(
+                            skplotting.draw(
+                                skplotting.plot_schedules(
+                                    schedules=[schedule],
+                                    steps=steps,
+                                    title="Schedule",
+                                    alphas=True,
+                                )
+                            )
+                        ).save(sch_path, "PNG", compress_level=9)
+
                     tpe.submit(Image.Image.save, im, im_path, "PNG", pnginfo=info, compress_level=9)
+                    if parameters.skrample_visualize.value_single and skresults is not None:
+                        tpe.submit(sksave, im_path, 50 if steps is None else steps, *skresults)
                     im_num += 1
 
         if parameters.grid.value is not None:
