@@ -641,7 +641,7 @@ class AttentionBackend(enum.StrEnum):
             case self.Default:
                 return None
             case self.Aiter:
-                return AttentionBackendName.AITER
+                return AttentionBackendName.AITER_FA2_HUB
             case self.Flash:
                 return AttentionBackendName.FLASH
             case self.FlashH:
