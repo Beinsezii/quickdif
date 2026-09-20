@@ -10,7 +10,6 @@ dependencies = [
     "diffusers>=0.40",
     "peft>=0.19",
     "protobuf>=7",
-    "safetensors>=0.8.0rc0",
     "sentencepiece>=0.2",
     "skrample[all]>=0.7,<0.8",
     "torch>=2.9.1",
