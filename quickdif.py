@@ -10,7 +10,6 @@ import re
 import signal
 import sys
 import tomllib
-from collections import OrderedDict
 from collections.abc import Callable, Iterable
 from contextlib import AbstractContextManager, nullcontext
 from copy import copy
@@ -1605,7 +1604,6 @@ addenv("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 #
 # Load Torch and libs that depend on it after the CLI cause it's laggy.
 import accelerate
-import diffusers
 import skrample.pytorch.noise as sknoise
 import torch
 from accelerate.accelerator import Accelerator
@@ -1673,15 +1671,6 @@ if TYPE_CHECKING:
 
 if hasattr(torch.backends.cuda, "allow_fp16_bf16_reduction_math_sdp"):
     torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
-
-# Patch pipes in while PRs await merge
-diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING = OrderedDict(
-    [(k, v) for k, v in diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING.items()]
-    + [("lumina", LuminaText2ImgPipeline)]
-)
-diffusers.pipelines.auto_pipeline.SUPPORTED_TASKS_MAPPINGS[0] = (
-    diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING
-)
 
 
 @dataclass
@@ -2160,7 +2149,7 @@ def get_pipe(
             msg = f'Could not load "{model}" as single file pipeline'
             raise ValueError(msg)
     else:
-        pipe = AutoPipelineForText2Image.from_pretrained(model, **pipe_args)
+        pipe = DiffusionPipeline.from_pretrained(model, **pipe_args)
 
     if img2img:
         pipe = AutoPipelineForImage2Image.from_pipe(pipe, torch_dtype=None)  # avoid recasts
