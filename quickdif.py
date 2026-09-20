@@ -2492,8 +2492,8 @@ def process_job(
                     ),
                     **sampler_props,
                 )
-                if parameters.adjust_steps.value_single and "steps" in job:
-                    job["steps"] = pipe.scheduler.adjust_steps(job["steps"])
+                if parameters.adjust_steps.value_single:
+                    job["steps"] = pipe.scheduler.adjust_steps(job.get("steps", 50))  # diffusers default
             else:
                 if sampler_type is not None and issubclass(sampler_type, sktraits.HigherOrder):
                     order: int = job.pop("skrample_order")
@@ -2528,7 +2528,8 @@ def process_job(
                     ),
                 )
 
-            skrample_return = pipe.scheduler.functional_interface()
+            if parameters.skrample_visualize.value_single:
+                skrample_return = pipe.scheduler.functional_interface()
 
         else:
             pipe.scheduler = get_scheduler(sampler, job.get("spacing", None), pipe.scheduler)
@@ -2627,6 +2628,11 @@ def process_job(
     return results, skrample_return
 
 
+def _future_error_callback(future: concurrent.futures.Future[Any]) -> None:
+    if err := future.exception():
+        LOGQD.error("Background task failed", exc_info=err)
+
+
 def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None) -> None:
     if (compile_mode := parameters.compile.value_single.mode) is not None:
         dynamo_plugin = TorchDynamoPlugin(
@@ -2660,7 +2666,7 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
         # INFO (beinsezii): don't set for 1.0 or else it turns into decimals?
         for job in tqdm(rank_jobs, desc="Images", smoothing=0, unit_scale=batch_size if batch_size > 1 else False):
             with SmartSigint(job_name="current batch"):
-                steps: int | None = job.get("steps", None)  # pyright: ignore # ???
+                steps: int | None = job.get("steps", None)  # pyright: ignore # split_between_processes unannotated generic
                 results, skresults = process_job(
                     parameters,
                     piperef,
@@ -2728,7 +2734,12 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
 
                     tpe.submit(Image.Image.save, im, im_path, "PNG", pnginfo=info, compress_level=9)
                     if parameters.skrample_visualize.value_single and skresults is not None:
-                        tpe.submit(sksave, im_path, 50 if steps is None else steps, *skresults)
+                        tpe.submit(
+                            sksave,
+                            im_path,
+                            50 if steps is None else steps,  # diffusers default, when steps=[]
+                            *skresults,
+                        ).add_done_callback(_future_error_callback)
                     im_num += 1
 
         if parameters.grid.value is not None:
