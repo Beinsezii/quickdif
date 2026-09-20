@@ -161,7 +161,7 @@ def oklab_to_lrgb(array: np.ndarray) -> np.ndarray:
 
 
 @functools.cache
-def _pexpand_bounds(string: str, body: tuple[str, str]) -> None | tuple[int, int]:
+def _pexpand_bounds(string: str, body: tuple[str, str]) -> tuple[int, int] | None:
     start = len(string) + 1
     end = 0
     escape = False
@@ -780,7 +780,7 @@ class Resolution:
 class Grid:
     other_iters: tuple[str, ...] = ("resolution", "lora", "dtype")
 
-    def __init__(self, axes: None | str | tuple[str | None, str | None]) -> None:
+    def __init__(self, axes: str | tuple[str | None, str | None] | None) -> None:
         self._x: str | None = None
         self._y: str | None = None
         self._str: str | None = None
@@ -2094,7 +2094,7 @@ def get_pipe(
     acc: Accelerator,
     dtype: DType,
     offload: Offload,
-    loras: None | list[str],
+    loras: list[str] | None,
     img2img: bool,
     tile_vae: bool,
     pag: bool,
