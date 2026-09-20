@@ -10,7 +10,6 @@ import re
 import signal
 import sys
 import tomllib
-from collections import OrderedDict
 from collections.abc import Callable, Iterable
 from contextlib import AbstractContextManager, nullcontext
 from copy import copy
@@ -26,8 +25,10 @@ import numpy as np
 import numpy.linalg as npl
 from PIL import Image, ImageDraw, PngImagePlugin
 from skrample import scheduling as skscheduling
+from skrample.analytics import plotting as skplotting
 from skrample.common import MergeStrategy
 from skrample.sampling import functional as skfunctional
+from skrample.sampling import interface as skinterface
 from skrample.sampling import models as skmodels
 from skrample.sampling import structured as skstructured
 from skrample.sampling import traits as sktraits
@@ -160,7 +161,7 @@ def oklab_to_lrgb(array: np.ndarray) -> np.ndarray:
 
 
 @functools.cache
-def _pexpand_bounds(string: str, body: tuple[str, str]) -> None | tuple[int, int]:
+def _pexpand_bounds(string: str, body: tuple[str, str]) -> tuple[int, int] | None:
     start = len(string) + 1
     end = 0
     escape = False
@@ -640,7 +641,7 @@ class AttentionBackend(enum.StrEnum):
             case self.Default:
                 return None
             case self.Aiter:
-                return AttentionBackendName.AITER
+                return AttentionBackendName.AITER_FA2_HUB
             case self.Flash:
                 return AttentionBackendName.FLASH
             case self.FlashH:
@@ -779,7 +780,7 @@ class Resolution:
 class Grid:
     other_iters: tuple[str, ...] = ("resolution", "lora", "dtype")
 
-    def __init__(self, axes: None | str | tuple[str | None, str | None]) -> None:
+    def __init__(self, axes: str | tuple[str | None, str | None] | None) -> None:
         self._x: str | None = None
         self._y: str | None = None
         self._str: str | None = None
@@ -1063,13 +1064,13 @@ class Parameters:
         docs="Rescale the noise during guidance. "
         "Moderate values may help produce more natural images when using strong guidance",
     )
-    pag = QDParam(
-        "pag",
+    cfg = QDParam(
+        "cfg",
         float,
         value=0.0,
         multi=True,
         meta=True,
-        docs="Perturbed-Attention Guidance scale",
+        docs="True CFG Scale, for models where `guidance` is not actually CFG (Flux.1, Qwen 2.1, distilled models)",
     )
     denoise = QDParam(
         "denoise",
@@ -1299,6 +1300,13 @@ This is equivalent to the `eta` parameter in DDPM
         docs="""Skrample samplers support a dtype separate from the model dtype itself.
 Most diffusion applications use F32, sometimes labeled 'upcast sampling'.
 Performance penalty is typically imperceptible, so it's recommended to leave this at F64""",
+    )
+    skrample_visualize = QDParam(
+        "skrample_visualize",
+        bool,
+        value=False,
+        short="-KV",
+        docs="Additionally save visual plots for skrample sampler/schedule",
     )
     adjust_steps = QDParam(
         "adjust_steps",
@@ -1596,7 +1604,6 @@ addenv("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 #
 # Load Torch and libs that depend on it after the CLI cause it's laggy.
 import accelerate
-import diffusers
 import skrample.pytorch.noise as sknoise
 import torch
 from accelerate.accelerator import Accelerator
@@ -1609,19 +1616,12 @@ from diffusers.models.attention_processor import Attention, AttnProcessor2_0
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.pipelines.auto_pipeline import (
     AutoPipelineForImage2Image,
-    AutoPipelineForText2Image,
 )
 from diffusers.pipelines.flux.pipeline_flux import FluxPipeline
 from diffusers.pipelines.hunyuandit.pipeline_hunyuandit import HunyuanDiTPipeline
 from diffusers.pipelines.kolors.pipeline_kolors import KolorsPipeline
 from diffusers.pipelines.kolors.pipeline_kolors_img2img import KolorsImg2ImgPipeline
 from diffusers.pipelines.lumina.pipeline_lumina import LuminaText2ImgPipeline
-from diffusers.pipelines.pag.pipeline_pag_hunyuandit import HunyuanDiTPAGPipeline
-from diffusers.pipelines.pag.pipeline_pag_kolors import KolorsPAGPipeline
-from diffusers.pipelines.pag.pipeline_pag_pixart_sigma import PixArtSigmaPAGPipeline
-from diffusers.pipelines.pag.pipeline_pag_sd import StableDiffusionPAGPipeline
-from diffusers.pipelines.pag.pipeline_pag_sd_3 import StableDiffusion3PAGPipeline
-from diffusers.pipelines.pag.pipeline_pag_sd_xl import StableDiffusionXLPAGPipeline
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.pipelines.pixart_alpha.pipeline_pixart_alpha import PixArtAlphaPipeline
 from diffusers.pipelines.pixart_alpha.pipeline_pixart_sigma import PixArtSigmaPipeline
@@ -1664,15 +1664,6 @@ if TYPE_CHECKING:
 
 if hasattr(torch.backends.cuda, "allow_fp16_bf16_reduction_math_sdp"):
     torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
-
-# Patch pipes in while PRs await merge
-diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING = OrderedDict(
-    [(k, v) for k, v in diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING.items()]
-    + [("lumina", LuminaText2ImgPipeline)]
-)
-diffusers.pipelines.auto_pipeline.SUPPORTED_TASKS_MAPPINGS[0] = (
-    diffusers.pipelines.auto_pipeline.AUTO_TEXT2IMAGE_PIPELINES_MAPPING
-)
 
 
 @dataclass
@@ -1822,16 +1813,12 @@ def is_xl_vae(pipe: DiffusionPipeline) -> bool:
     # TODO (beinsezii): agnostic detection?
     return isinstance(
         pipe,
-        HunyuanDiTPAGPipeline
-        | HunyuanDiTPipeline
+        HunyuanDiTPipeline
         | KolorsImg2ImgPipeline
-        | KolorsPAGPipeline
         | KolorsPipeline
         | LuminaText2ImgPipeline
-        | PixArtSigmaPAGPipeline
         | PixArtSigmaPipeline
         | StableDiffusionXLImg2ImgPipeline
-        | StableDiffusionXLPAGPipeline
         | StableDiffusionXLPipeline,
     )
 
@@ -1839,12 +1826,12 @@ def is_xl_vae(pipe: DiffusionPipeline) -> bool:
 def is_sd_vae(pipe: DiffusionPipeline) -> bool:
     return isinstance(
         pipe,
-        PixArtAlphaPipeline | StableDiffusionImg2ImgPipeline | StableDiffusionPAGPipeline | StableDiffusionPipeline,
+        PixArtAlphaPipeline | StableDiffusionImg2ImgPipeline | StableDiffusionPipeline,
     )
 
 
 def is_sd3_vae(pipe: DiffusionPipeline) -> bool:
-    return isinstance(pipe, StableDiffusion3Pipeline | StableDiffusion3Img2ImgPipeline | StableDiffusion3PAGPipeline)
+    return isinstance(pipe, StableDiffusion3Pipeline | StableDiffusion3Img2ImgPipeline)
 
 
 def is_flux_vae(pipe: DiffusionPipeline) -> bool:
@@ -2096,10 +2083,9 @@ def get_pipe(
     acc: Accelerator,
     dtype: DType,
     offload: Offload,
-    loras: None | list[str],
+    loras: list[str] | None,
     img2img: bool,
     tile_vae: bool,
-    pag: bool,
     quantize_threshold_gb: float,
     quantize_minimum_gb: float,
     attention: AttentionBackendName | None,
@@ -2151,21 +2137,10 @@ def get_pipe(
             msg = f'Could not load "{model}" as single file pipeline'
             raise ValueError(msg)
     else:
-        pipe = AutoPipelineForText2Image.from_pretrained(model, **pipe_args)
+        pipe = DiffusionPipeline.from_pretrained(model, **pipe_args)
 
     if img2img:
         pipe = AutoPipelineForImage2Image.from_pipe(pipe, torch_dtype=None)  # avoid recasts
-
-    if pag:
-        try:
-            if img2img:
-                pipe = AutoPipelineForImage2Image.from_pipe(pipe, enable_pag=True, torch_dtype=None)
-            else:
-                pipe = AutoPipelineForText2Image.from_pipe(pipe, enable_pag=True, torch_dtype=None)
-        except BaseException:
-            LOGQD.exception(
-                f"Could not find a PAG pipeline variant for `{type(pipe).__name__}, parameter `pag` will be ignored"
-            )
 
     assert pipe is not None
 
@@ -2351,7 +2326,10 @@ def process_job(
     job: dict[str, Any],
     meta: dict[str, str],
     input_image: Image.Image | None,
-) -> list[tuple[dict[str, Any], Image.Image, PngImagePlugin.PngInfo]]:
+) -> tuple[
+    list[tuple[dict[str, Any], Image.Image, PngImagePlugin.PngInfo]],
+    tuple[skfunctional.FunctionalSampler, skscheduling.SkrampleSchedule, skmodels.DiffusionModel] | None,
+]:
     # POP SEED first because the meta is set in PngInfo directly
     seed = job.pop("seed")
 
@@ -2403,7 +2381,6 @@ def process_job(
             loras,
             input_image is not None,
             parameters.tile.value_single,
-            any(parameters.pag.value_multi),
             parameters.quantize_threshold.value_single,
             parameters.quantize_minimum.value_single,
             parameters.attention.value_single.backend,
@@ -2413,7 +2390,7 @@ def process_job(
         piperef.dtype = model_dtype
     pipe = piperef.pipe
     if pipe is None:
-        return []
+        return [], None
     assert isinstance(pipe, Callable)
 
     # INPUT TENSOR
@@ -2451,6 +2428,7 @@ def process_job(
 
     pipe_params = signature(pipe).parameters  # type: ignore Callable
 
+    skrample_return = None
     if hasattr(pipe, "scheduler"):
         default_scheduler = pipe.scheduler
 
@@ -2491,7 +2469,7 @@ def process_job(
                     **sampler_props,
                 )
                 if parameters.adjust_steps.value_single:
-                    job["steps"] = pipe.scheduler.adjust_steps(job["steps"])
+                    job["steps"] = pipe.scheduler.adjust_steps(job.get("steps", 50))  # diffusers default
             else:
                 if sampler_type is not None and issubclass(sampler_type, sktraits.HigherOrder):
                     order: int = job.pop("skrample_order")
@@ -2526,6 +2504,9 @@ def process_job(
                     ),
                 )
 
+            if parameters.skrample_visualize.value_single:
+                skrample_return = pipe.scheduler.functional_interface()
+
         else:
             pipe.scheduler = get_scheduler(sampler, job.get("spacing", None), pipe.scheduler)
     else:
@@ -2547,7 +2528,7 @@ def process_job(
         ("guidance", ["guidance_scale", "prior_guidance_scale"]),
         ("decoder_guidance", ["decoder_guidance_scale"]),
         ("rescale", ["guidance_rescale"]),
-        ("pag", ["pag_scale"]),
+        ("cfg", ["true_cfg_scale"]),
     ]:
         if f in job:
             for to in t:
@@ -2620,7 +2601,12 @@ def process_job(
     if default_scheduler is not None:
         pipe.scheduler = default_scheduler
 
-    return results
+    return results, skrample_return
+
+
+def _future_error_callback(future: concurrent.futures.Future[Any]) -> None:
+    if err := future.exception():
+        LOGQD.error("Background task failed", exc_info=err)
 
 
 def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None) -> None:
@@ -2656,11 +2642,12 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
         # INFO (beinsezii): don't set for 1.0 or else it turns into decimals?
         for job in tqdm(rank_jobs, desc="Images", smoothing=0, unit_scale=batch_size if batch_size > 1 else False):
             with SmartSigint(job_name="current batch"):
-                results = process_job(
+                steps: int | None = job.get("steps", None)  # pyright: ignore # split_between_processes unannotated generic
+                results, skresults = process_job(
                     parameters,
                     piperef,
                     acc,
-                    job,  # type: ignore
+                    job,  # pyright: ignore
                     meta.copy(),
                     image,
                 )
@@ -2678,7 +2665,57 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
                             im_path = parameters.output.value_single.joinpath(f"{im_num:05}.png")
                             continue
                         break
+
+                    def sksave(
+                        base_path: Path,
+                        steps: int,
+                        sampler: skfunctional.FunctionalSampler,
+                        schedule: skscheduling.SkrampleSchedule,
+                        model: skmodels.DiffusionModel,
+                    ) -> None:
+                        sam_path = base_path.with_stem(base_path.stem + "_sampler")
+                        sch_path = base_path.with_stem(base_path.stem + "_schedule")
+                        # get maximum step count such that adjust_steps(steps) == steps
+                        # for more representative higher-order singlestep plotting
+                        steps = (
+                            round(100_000 / sampler.adjust_steps(100_000) * sampler.adjust_steps(steps))
+                            if isinstance(sampler, skfunctional.FunctionalHigher)
+                            and parameters.adjust_steps.value_single
+                            else steps
+                        )
+                        Image.fromarray(
+                            skplotting.draw(
+                                skplotting.plot_samplers(
+                                    samplers=[sampler.sampler]
+                                    if isinstance(sampler, skinterface.StructuredFunctionalAdapter)
+                                    else [sampler],
+                                    schedule=schedule,
+                                    model=model,
+                                    steps=steps,
+                                    title="Sampler",
+                                    adjust_steps=parameters.adjust_steps.value_single,
+                                )
+                            )
+                        ).save(sam_path, "PNG", compress_level=9)
+                        Image.fromarray(
+                            skplotting.draw(
+                                skplotting.plot_schedules(
+                                    schedules=[schedule],
+                                    steps=steps,
+                                    title="Schedule",
+                                    alphas=True,
+                                )
+                            )
+                        ).save(sch_path, "PNG", compress_level=9)
+
                     tpe.submit(Image.Image.save, im, im_path, "PNG", pnginfo=info, compress_level=9)
+                    if parameters.skrample_visualize.value_single and skresults is not None:
+                        tpe.submit(
+                            sksave,
+                            im_path,
+                            50 if steps is None else steps,  # diffusers default, when steps=[]
+                            *skresults,
+                        ).add_done_callback(_future_error_callback)
                     im_num += 1
 
         if parameters.grid.value is not None:
