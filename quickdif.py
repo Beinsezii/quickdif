@@ -1064,13 +1064,13 @@ class Parameters:
         docs="Rescale the noise during guidance. "
         "Moderate values may help produce more natural images when using strong guidance",
     )
-    pag = QDParam(
-        "pag",
+    cfg = QDParam(
+        "cfg",
         float,
         value=0.0,
         multi=True,
         meta=True,
-        docs="Perturbed-Attention Guidance scale",
+        docs="True CFG Scale, for models where `guidance` is not actually CFG (Flux.1, Qwen 2.1, distilled models)",
     )
     denoise = QDParam(
         "denoise",
@@ -1616,19 +1616,12 @@ from diffusers.models.attention_processor import Attention, AttnProcessor2_0
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.pipelines.auto_pipeline import (
     AutoPipelineForImage2Image,
-    AutoPipelineForText2Image,
 )
 from diffusers.pipelines.flux.pipeline_flux import FluxPipeline
 from diffusers.pipelines.hunyuandit.pipeline_hunyuandit import HunyuanDiTPipeline
 from diffusers.pipelines.kolors.pipeline_kolors import KolorsPipeline
 from diffusers.pipelines.kolors.pipeline_kolors_img2img import KolorsImg2ImgPipeline
 from diffusers.pipelines.lumina.pipeline_lumina import LuminaText2ImgPipeline
-from diffusers.pipelines.pag.pipeline_pag_hunyuandit import HunyuanDiTPAGPipeline
-from diffusers.pipelines.pag.pipeline_pag_kolors import KolorsPAGPipeline
-from diffusers.pipelines.pag.pipeline_pag_pixart_sigma import PixArtSigmaPAGPipeline
-from diffusers.pipelines.pag.pipeline_pag_sd import StableDiffusionPAGPipeline
-from diffusers.pipelines.pag.pipeline_pag_sd_3 import StableDiffusion3PAGPipeline
-from diffusers.pipelines.pag.pipeline_pag_sd_xl import StableDiffusionXLPAGPipeline
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.pipelines.pixart_alpha.pipeline_pixart_alpha import PixArtAlphaPipeline
 from diffusers.pipelines.pixart_alpha.pipeline_pixart_sigma import PixArtSigmaPipeline
@@ -1820,16 +1813,12 @@ def is_xl_vae(pipe: DiffusionPipeline) -> bool:
     # TODO (beinsezii): agnostic detection?
     return isinstance(
         pipe,
-        HunyuanDiTPAGPipeline
-        | HunyuanDiTPipeline
+        HunyuanDiTPipeline
         | KolorsImg2ImgPipeline
-        | KolorsPAGPipeline
         | KolorsPipeline
         | LuminaText2ImgPipeline
-        | PixArtSigmaPAGPipeline
         | PixArtSigmaPipeline
         | StableDiffusionXLImg2ImgPipeline
-        | StableDiffusionXLPAGPipeline
         | StableDiffusionXLPipeline,
     )
 
@@ -1837,12 +1826,12 @@ def is_xl_vae(pipe: DiffusionPipeline) -> bool:
 def is_sd_vae(pipe: DiffusionPipeline) -> bool:
     return isinstance(
         pipe,
-        PixArtAlphaPipeline | StableDiffusionImg2ImgPipeline | StableDiffusionPAGPipeline | StableDiffusionPipeline,
+        PixArtAlphaPipeline | StableDiffusionImg2ImgPipeline | StableDiffusionPipeline,
     )
 
 
 def is_sd3_vae(pipe: DiffusionPipeline) -> bool:
-    return isinstance(pipe, StableDiffusion3Pipeline | StableDiffusion3Img2ImgPipeline | StableDiffusion3PAGPipeline)
+    return isinstance(pipe, StableDiffusion3Pipeline | StableDiffusion3Img2ImgPipeline)
 
 
 def is_flux_vae(pipe: DiffusionPipeline) -> bool:
@@ -2097,7 +2086,6 @@ def get_pipe(
     loras: list[str] | None,
     img2img: bool,
     tile_vae: bool,
-    pag: bool,
     quantize_threshold_gb: float,
     quantize_minimum_gb: float,
     attention: AttentionBackendName | None,
@@ -2153,17 +2141,6 @@ def get_pipe(
 
     if img2img:
         pipe = AutoPipelineForImage2Image.from_pipe(pipe, torch_dtype=None)  # avoid recasts
-
-    if pag:
-        try:
-            if img2img:
-                pipe = AutoPipelineForImage2Image.from_pipe(pipe, enable_pag=True, torch_dtype=None)
-            else:
-                pipe = AutoPipelineForText2Image.from_pipe(pipe, enable_pag=True, torch_dtype=None)
-        except BaseException:
-            LOGQD.exception(
-                f"Could not find a PAG pipeline variant for `{type(pipe).__name__}, parameter `pag` will be ignored"
-            )
 
     assert pipe is not None
 
@@ -2404,7 +2381,6 @@ def process_job(
             loras,
             input_image is not None,
             parameters.tile.value_single,
-            any(parameters.pag.value_multi),
             parameters.quantize_threshold.value_single,
             parameters.quantize_minimum.value_single,
             parameters.attention.value_single.backend,
@@ -2552,7 +2528,7 @@ def process_job(
         ("guidance", ["guidance_scale", "prior_guidance_scale"]),
         ("decoder_guidance", ["decoder_guidance_scale"]),
         ("rescale", ["guidance_rescale"]),
-        ("pag", ["pag_scale"]),
+        ("cfg", ["true_cfg_scale"]),
     ]:
         if f in job:
             for to in t:
