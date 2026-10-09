@@ -18,7 +18,6 @@ from inspect import getmembers, signature
 from io import BytesIO, UnsupportedOperation
 from math import copysign
 from pathlib import Path
-from types import FrameType, TracebackType
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -33,6 +32,65 @@ from skrample.sampling import models as skmodels
 from skrample.sampling import structured as skstructured
 from skrample.sampling import traits as sktraits
 from tqdm import tqdm
+
+# Lazy import everything that depends on torch so CLI isn't laggy.
+lazy import accelerate
+lazy import skrample.pytorch.noise as sknoise
+lazy import torch
+lazy from accelerate.accelerator import Accelerator
+lazy from accelerate.utils.dataclasses import DynamoBackend, TorchDynamoPlugin
+lazy from diffusers.configuration_utils import ConfigMixin
+lazy from diffusers.loaders.single_file import FromSingleFileMixin
+lazy from diffusers.loaders.single_file_utils import SingleFileComponentError
+lazy from diffusers.models.attention import AttentionMixin
+lazy from diffusers.models.attention_dispatch import AttentionBackendName, dispatch_attention_fn
+lazy from diffusers.models.attention_processor import Attention, AttnProcessor2_0
+lazy from diffusers.models.modeling_utils import ModelMixin
+lazy from diffusers.pipelines.auto_pipeline import (
+    AutoPipelineForImage2Image,
+)
+lazy from diffusers.pipelines.flux.pipeline_flux import FluxPipeline
+lazy from diffusers.pipelines.hunyuandit.pipeline_hunyuandit import HunyuanDiTPipeline
+lazy from diffusers.pipelines.kolors.pipeline_kolors import KolorsPipeline
+lazy from diffusers.pipelines.kolors.pipeline_kolors_img2img import KolorsImg2ImgPipeline
+lazy from diffusers.pipelines.pipeline_utils import DiffusionPipeline
+lazy from diffusers.pipelines.pixart_alpha.pipeline_pixart_alpha import PixArtAlphaPipeline
+lazy from diffusers.pipelines.pixart_alpha.pipeline_pixart_sigma import PixArtSigmaPipeline
+lazy from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import StableDiffusionPipeline
+lazy from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import (
+    StableDiffusionImg2ImgPipeline,
+)
+lazy from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import StableDiffusion3Pipeline
+lazy from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3_img2img import (
+    StableDiffusion3Img2ImgPipeline,
+)
+lazy from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl import StableDiffusionXLPipeline
+lazy from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl_img2img import (
+    StableDiffusionXLImg2ImgPipeline,
+)
+lazy from diffusers.schedulers.scheduling_ddim import DDIMScheduler
+lazy from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
+lazy from diffusers.schedulers.scheduling_dpmsolver_multistep import DPMSolverMultistepScheduler
+lazy from diffusers.schedulers.scheduling_euler_ancestral_discrete import EulerAncestralDiscreteScheduler
+lazy from diffusers.schedulers.scheduling_euler_discrete import EulerDiscreteScheduler
+lazy from diffusers.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
+lazy from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
+lazy from diffusers.schedulers.scheduling_utils import SchedulerMixin
+lazy from skrample.diffusers import DynasauRKWrapperScheduler, RKUltraWrapperScheduler, SkrampleWrapperScheduler
+lazy from torch.nn.attention import SDPBackend
+lazy from torchao.core.config import AOBaseConfig
+lazy from torchao.quantization.quant_api import (
+    Float8DynamicActivationFloat8WeightConfig,
+    Float8WeightOnlyConfig,
+    Int4WeightOnlyConfig,
+    Int8DynamicActivationInt8WeightConfig,
+    Int8WeightOnlyConfig,
+    quantize_,
+)
+lazy from torchao.utils import TorchAOBaseTensor
+
+if TYPE_CHECKING:
+    from types import FrameType, TracebackType
 
 
 class _NoErrF(logging.Filter):
@@ -255,7 +313,7 @@ class SamplerSK(enum.StrEnum):
     def sampler(
         self,
     ) -> tuple[
-        type["skstructured.StructuredSampler | RKUltraWrapperScheduler | DynasauRKWrapperScheduler"] | None,
+        type[skstructured.StructuredSampler | RKUltraWrapperScheduler | DynasauRKWrapperScheduler] | None,
         dict[str, Any],
     ]:
         match self:
@@ -438,7 +496,7 @@ class NoiseSK(enum.StrEnum):
     Pyramid = enum.auto()
 
     @property
-    def noise(self) -> tuple[type["sknoise.TensorNoiseCommon"], "sknoise.TensorNoiseProps | None"]:
+    def noise(self) -> tuple[type[sknoise.TensorNoiseCommon], sknoise.TensorNoiseProps | None]:
         match self:
             case NoiseSK.Random:
                 return sknoise.Random, None
@@ -464,7 +522,7 @@ class DTypeSK(enum.StrEnum):
     BF16 = enum.auto()
 
     @property
-    def torch_dtype(self) -> "torch.dtype | None":
+    def torch_dtype(self) -> torch.dtype | None:
         match self:
             case DTypeSK.F64:
                 return torch.float64
@@ -539,7 +597,7 @@ class DType(enum.StrEnum):
     I4 = enum.auto()
 
     @property
-    def torch_dtype(self) -> "torch.dtype":
+    def torch_dtype(self) -> torch.dtype:
         match self:
             case DType.F16:
                 return torch.float16
@@ -552,7 +610,7 @@ class DType(enum.StrEnum):
                 return torch.bfloat16
 
     @property
-    def quant_config(self) -> "AOBaseConfig | None":
+    def quant_config(self) -> AOBaseConfig | None:
         match self:
             case DType.F32 | DType.F16 | DType.BF16:
                 return None
@@ -609,7 +667,7 @@ class NoiseType(enum.StrEnum):
                 return None
 
     @property
-    def torch_dtype(self) -> "torch.dtype":
+    def torch_dtype(self) -> torch.dtype:
         match self:
             case NoiseType.Cpu16 | NoiseType.Acc16:
                 return torch.float16
@@ -636,7 +694,7 @@ class AttentionBackend(enum.StrEnum):
     XFormers = enum.auto()
 
     @property
-    def backend(self) -> "AttentionBackendName | None":
+    def backend(self) -> AttentionBackendName | None:
         match self:
             case self.Default:
                 return None
@@ -675,7 +733,7 @@ class SDPB(enum.StrEnum):
     CuDNN = enum.auto()
 
     @property
-    def torch_sdp_backend(self) -> "torch._C._SDPBackend":
+    def torch_sdp_backend(self) -> torch._C._SDPBackend:
         match self:
             case SDPB.Math:
                 return SDPBackend.MATH
@@ -1584,82 +1642,8 @@ def parse_cli(parameters: Parameters) -> Image.Image | None:
     return input_image
 
 
-do_miopen_autotune = False
-if __name__ == "__main__":
-    cli_params = Parameters()
-    cli_image = parse_cli(cli_params)
-    do_miopen_autotune = cli_params.miopen_autotune.value
-    if not cli_params.model.value:
-        LOGQD.fatal("No model was provided! Exiting...")
-        exit()
-
-
-# Skip kernel lookups as they're really bad in ROCm 6.2+
-if not do_miopen_autotune:
-    addenv("MIOPEN_FIND_MODE", "FAST")
 # Enables memory efficient attention on GFX11/Navi31
 addenv("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
-
-
-#
-# Load Torch and libs that depend on it after the CLI cause it's laggy.
-import accelerate
-import skrample.pytorch.noise as sknoise
-import torch
-from accelerate.accelerator import Accelerator
-from accelerate.utils.dataclasses import DynamoBackend, TorchDynamoPlugin
-from diffusers.configuration_utils import ConfigMixin
-from diffusers.loaders.single_file_utils import SingleFileComponentError
-from diffusers.models.attention import AttentionMixin
-from diffusers.models.attention_dispatch import AttentionBackendName, dispatch_attention_fn
-from diffusers.models.attention_processor import Attention, AttnProcessor2_0
-from diffusers.models.modeling_utils import ModelMixin
-from diffusers.pipelines.auto_pipeline import (
-    AutoPipelineForImage2Image,
-)
-from diffusers.pipelines.flux.pipeline_flux import FluxPipeline
-from diffusers.pipelines.hunyuandit.pipeline_hunyuandit import HunyuanDiTPipeline
-from diffusers.pipelines.kolors.pipeline_kolors import KolorsPipeline
-from diffusers.pipelines.kolors.pipeline_kolors_img2img import KolorsImg2ImgPipeline
-from diffusers.pipelines.lumina.pipeline_lumina import LuminaText2ImgPipeline
-from diffusers.pipelines.pipeline_utils import DiffusionPipeline
-from diffusers.pipelines.pixart_alpha.pipeline_pixart_alpha import PixArtAlphaPipeline
-from diffusers.pipelines.pixart_alpha.pipeline_pixart_sigma import PixArtSigmaPipeline
-from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import StableDiffusionPipeline
-from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import (
-    StableDiffusionImg2ImgPipeline,
-)
-from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import StableDiffusion3Pipeline
-from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3_img2img import (
-    StableDiffusion3Img2ImgPipeline,
-)
-from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl import StableDiffusionXLPipeline
-from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl_img2img import (
-    StableDiffusionXLImg2ImgPipeline,
-)
-from diffusers.schedulers.scheduling_ddim import DDIMScheduler
-from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
-from diffusers.schedulers.scheduling_dpmsolver_multistep import DPMSolverMultistepScheduler
-from diffusers.schedulers.scheduling_euler_ancestral_discrete import EulerAncestralDiscreteScheduler
-from diffusers.schedulers.scheduling_euler_discrete import EulerDiscreteScheduler
-from diffusers.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
-from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
-from diffusers.schedulers.scheduling_utils import SchedulerMixin
-from skrample.diffusers import DynasauRKWrapperScheduler, RKUltraWrapperScheduler, SkrampleWrapperScheduler
-from torch.nn.attention import SDPBackend
-from torchao.quantization.quant_api import (
-    Float8DynamicActivationFloat8WeightConfig,
-    Float8WeightOnlyConfig,
-    Int4WeightOnlyConfig,
-    Int8DynamicActivationInt8WeightConfig,
-    Int8WeightOnlyConfig,
-    quantize_,
-)
-from torchao.utils import TorchAOBaseTensor
-
-if TYPE_CHECKING:
-    from diffusers.loaders.single_file import FromSingleFileMixin
-    from torchao.core.config import AOBaseConfig
 
 
 if hasattr(torch.backends.cuda, "allow_fp16_bf16_reduction_math_sdp"):
@@ -1816,7 +1800,6 @@ def is_xl_vae(pipe: DiffusionPipeline) -> bool:
         HunyuanDiTPipeline
         | KolorsImg2ImgPipeline
         | KolorsPipeline
-        | LuminaText2ImgPipeline
         | PixArtSigmaPipeline
         | StableDiffusionXLImg2ImgPipeline
         | StableDiffusionXLPipeline,
@@ -2742,10 +2725,19 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
 
 
 if __name__ == "__main__":
-    main_parameters = locals()["cli_params"]
-    main_image = locals()["cli_image"]
-    main_meta: dict[str, str] = {"url": "https://github.com/Beinsezii/quickdif"}
-    if main_parameters.comment.value:
-        main_meta["comment"] = main_meta["comment"] = main_parameters.comment.value
+    cli_params = Parameters()
+    cli_image = parse_cli(cli_params)
 
-    main(main_parameters, main_meta, main_image)
+    # Skip kernel lookups as they're really bad in ROCm 6.2+
+    if not cli_params.miopen_autotune.value:
+        addenv("MIOPEN_FIND_MODE", "FAST")
+
+    if not cli_params.model.value:
+        LOGQD.fatal("No model was provided! Exiting...")
+        exit()
+
+    main_meta: dict[str, str] = {"url": "https://github.com/Beinsezii/quickdif"}
+    if cli_params.comment.value:
+        main_meta["comment"] = main_meta["comment"] = cli_params.comment.value
+
+    main(cli_params, main_meta, cli_image)
