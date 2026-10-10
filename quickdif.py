@@ -1,5 +1,6 @@
 import argparse
 import concurrent.futures
+import dataclasses
 import enum
 import functools
 import json
@@ -13,12 +14,11 @@ import tomllib
 from collections.abc import Callable, Iterable
 from contextlib import AbstractContextManager, nullcontext
 from copy import copy
-from dataclasses import dataclass
 from inspect import getmembers, signature
 from io import BytesIO, UnsupportedOperation
 from math import copysign
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, final
 
 import numpy as np
 import numpy.linalg as npl
@@ -1638,12 +1638,14 @@ def parse_cli(parameters: Parameters) -> Image.Image | None:
     return input_image
 
 
-@dataclass
+@final
+@dataclasses.dataclass(slots=True)
 class PipeRef:
     name: str | None = None
     loras: str | None = None
     dtype: DType | None = None
-    pipe: DiffusionPipeline | None = None
+    pipe: Any | None = None
+    "DiffusionPipeline, Any for lazy"
 
 
 # elegent solution from <https://stackoverflow.com/questions/842557/>
@@ -1678,104 +1680,6 @@ class SmartSigint(AbstractContextManager):
         self, exc_type: type[BaseException] | None, exc_value: BaseException | None, traceback: TracebackType | None, /
     ) -> None:
         self.terminate()
-
-
-class AttnProcessorDispatch(AttnProcessor2_0):
-    _attention_backend: AttentionBackendName | None = None
-
-    def __call__(
-        self,
-        attn: Attention,
-        hidden_states: torch.Tensor,
-        encoder_hidden_states: torch.Tensor | None = None,
-        attention_mask: torch.Tensor | None = None,
-        temb: torch.Tensor | None = None,
-        *args: Any,  # noqa: ANN401
-        **kwargs: Any,  # noqa: ANN401
-    ) -> torch.Tensor:
-        residual = hidden_states
-        if attn.spatial_norm is not None:
-            hidden_states = attn.spatial_norm(hidden_states, temb)
-
-        input_ndim = hidden_states.ndim
-
-        if input_ndim == 4:
-            batch_size, channel, height, width = hidden_states.shape
-            hidden_states = hidden_states.view(batch_size, channel, height * width).transpose(1, 2)
-
-        batch_size, sequence_length, _ = (
-            hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
-        )
-
-        if attention_mask is not None:
-            attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length, batch_size)
-            # scaled_dot_product_attention expects attention_mask shape to be
-            # (batch, heads, source_length, target_length)
-            attention_mask = attention_mask.view(batch_size, attn.heads, -1, attention_mask.shape[-1])
-
-        if attn.group_norm is not None:
-            hidden_states = attn.group_norm(hidden_states.transpose(1, 2)).transpose(1, 2)
-
-        query = attn.to_q(hidden_states)
-
-        if encoder_hidden_states is None:
-            encoder_hidden_states = hidden_states
-        elif attn.norm_cross:
-            encoder_hidden_states = attn.norm_encoder_hidden_states(encoder_hidden_states)
-
-        key = attn.to_k(encoder_hidden_states)  # type: ignore # idk why diffusers did this
-        value = attn.to_v(encoder_hidden_states)  # type: ignore # idk why diffusers did this
-
-        inner_dim = key.shape[-1]
-        head_dim = inner_dim // attn.heads
-
-        query = query.view(batch_size, -1, attn.heads, head_dim)
-
-        key = key.view(batch_size, -1, attn.heads, head_dim)
-        value = value.view(batch_size, -1, attn.heads, head_dim)
-
-        if attn.norm_q is not None:
-            query = attn.norm_q(query)
-        if attn.norm_k is not None:
-            key = attn.norm_k(key)
-
-        try:
-            hidden_states = dispatch_attention_fn(
-                query,
-                key,
-                value,
-                attn_mask=attention_mask,
-                dropout_p=0.0,
-                is_causal=False,
-                backend=self._attention_backend,
-            )
-        except BaseException:  # noqa: BLE001
-            hidden_states = torch.nn.functional.scaled_dot_product_attention(
-                query.transpose(1, 2),
-                key.transpose(1, 2),
-                value.transpose(1, 2),
-                attn_mask=attention_mask,
-                dropout_p=0.0,
-                is_causal=False,
-            ).transpose(1, 2)
-
-        hidden_states = hidden_states.reshape(batch_size, -1, attn.heads * head_dim)
-        hidden_states = hidden_states.to(query.dtype)
-
-        # linear proj
-        hidden_states = attn.to_out[0](hidden_states)  # type: ignore # idk why diffusers did this
-        # dropout
-        hidden_states = attn.to_out[1](hidden_states)  # type: ignore # idk why diffusers did this
-
-        if input_ndim == 4:
-            hidden_states = hidden_states.transpose(-1, -2).reshape(batch_size, channel, height, width)  # pyright: ignore
-
-        if attn.residual_connection:
-            hidden_states = hidden_states + residual
-
-        hidden_states = hidden_states / attn.rescale_output_factor
-
-        return hidden_states
 
 
 # BOTTOM LEVEL
@@ -2061,6 +1965,104 @@ def get_pipe(
     quantize_minimum_gb: float,
     attention: AttentionBackendName | None,
 ) -> DiffusionPipeline:
+    # Inline def for lazy
+    class AttnProcessorDispatch(AttnProcessor2_0):
+        _attention_backend: AttentionBackendName | None = None
+
+        def __call__(
+            self,
+            attn: Attention,
+            hidden_states: torch.Tensor,
+            encoder_hidden_states: torch.Tensor | None = None,
+            attention_mask: torch.Tensor | None = None,
+            temb: torch.Tensor | None = None,
+            *args: Any,  # noqa: ANN401
+            **kwargs: Any,  # noqa: ANN401
+        ) -> torch.Tensor:
+            residual = hidden_states
+            if attn.spatial_norm is not None:
+                hidden_states = attn.spatial_norm(hidden_states, temb)
+
+            input_ndim = hidden_states.ndim
+
+            if input_ndim == 4:
+                batch_size, channel, height, width = hidden_states.shape
+                hidden_states = hidden_states.view(batch_size, channel, height * width).transpose(1, 2)
+
+            batch_size, sequence_length, _ = (
+                hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
+            )
+
+            if attention_mask is not None:
+                attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length, batch_size)
+                # scaled_dot_product_attention expects attention_mask shape to be
+                # (batch, heads, source_length, target_length)
+                attention_mask = attention_mask.view(batch_size, attn.heads, -1, attention_mask.shape[-1])
+
+            if attn.group_norm is not None:
+                hidden_states = attn.group_norm(hidden_states.transpose(1, 2)).transpose(1, 2)
+
+            query = attn.to_q(hidden_states)
+
+            if encoder_hidden_states is None:
+                encoder_hidden_states = hidden_states
+            elif attn.norm_cross:
+                encoder_hidden_states = attn.norm_encoder_hidden_states(encoder_hidden_states)
+
+            key = attn.to_k(encoder_hidden_states)  # type: ignore # idk why diffusers did this
+            value = attn.to_v(encoder_hidden_states)  # type: ignore # idk why diffusers did this
+
+            inner_dim = key.shape[-1]
+            head_dim = inner_dim // attn.heads
+
+            query = query.view(batch_size, -1, attn.heads, head_dim)
+
+            key = key.view(batch_size, -1, attn.heads, head_dim)
+            value = value.view(batch_size, -1, attn.heads, head_dim)
+
+            if attn.norm_q is not None:
+                query = attn.norm_q(query)
+            if attn.norm_k is not None:
+                key = attn.norm_k(key)
+
+            try:
+                hidden_states = dispatch_attention_fn(
+                    query,
+                    key,
+                    value,
+                    attn_mask=attention_mask,
+                    dropout_p=0.0,
+                    is_causal=False,
+                    backend=self._attention_backend,
+                )
+            except BaseException:  # noqa: BLE001
+                hidden_states = torch.nn.functional.scaled_dot_product_attention(
+                    query.transpose(1, 2),
+                    key.transpose(1, 2),
+                    value.transpose(1, 2),
+                    attn_mask=attention_mask,
+                    dropout_p=0.0,
+                    is_causal=False,
+                ).transpose(1, 2)
+
+            hidden_states = hidden_states.reshape(batch_size, -1, attn.heads * head_dim)
+            hidden_states = hidden_states.to(query.dtype)
+
+            # linear proj
+            hidden_states = attn.to_out[0](hidden_states)  # type: ignore # idk why diffusers did this
+            # dropout
+            hidden_states = attn.to_out[1](hidden_states)  # type: ignore # idk why diffusers did this
+
+            if input_ndim == 4:
+                hidden_states = hidden_states.transpose(-1, -2).reshape(batch_size, channel, height, width)  # pyright: ignore
+
+            if attn.residual_connection:
+                hidden_states = hidden_states + residual
+
+            hidden_states = hidden_states / attn.rescale_output_factor
+
+            return hidden_states
+
     pipe_args = {
         "add_watermarker": False,
         "safety_checker": None,
@@ -2289,7 +2291,6 @@ def make_noise(
 # TOP LEVEL
 
 
-@torch.no_grad()  # torchao breaks with inference_mode
 def process_job(
     parameters: Parameters,
     piperef: PipeRef,
@@ -2359,7 +2360,7 @@ def process_job(
         piperef.name = model
         piperef.loras = lora_meta
         piperef.dtype = model_dtype
-    pipe = piperef.pipe
+    pipe: DiffusionPipeline | None = piperef.pipe
     if pipe is None:
         return [], None
     assert isinstance(pipe, Callable)
@@ -2602,7 +2603,12 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
     if parameters.sdpb.value_multi:
         kernel_ctx = torch.nn.attention.sdpa_kernel([k.torch_sdp_backend for k in parameters.sdpb.value_multi])
 
-    with kernel_ctx, concurrent.futures.ThreadPoolExecutor() as tpe, acc.split_between_processes(jobs) as rank_jobs:
+    with (
+        torch.no_grad(),
+        kernel_ctx,
+        concurrent.futures.ThreadPoolExecutor() as tpe,
+        acc.split_between_processes(jobs) as rank_jobs,
+    ):
         batch_size = parameters.batch_size.value_single
         LOGQD.info(
             f"Generating {len(rank_jobs)} batches of {batch_size} images "
