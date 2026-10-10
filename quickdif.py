@@ -2405,7 +2405,7 @@ def process_job(
     job["generator"] = generators
     LOGQD.info(f"seeds: {' '.join([str(seed + n) for n in range(parameters.batch_size.value_single)])}")
 
-    pipe_params = signature(pipe).parameters  # type: ignore Callable
+    pipe_params = signature(pipe).parameters
 
     skrample_return = None
     if hasattr(pipe, "scheduler"):
@@ -2734,6 +2734,6 @@ if __name__ == "__main__":
 
     main_meta: dict[str, str] = {"url": "https://github.com/Beinsezii/quickdif"}
     if cli_params.comment.value:
-        main_meta["comment"] = main_meta["comment"] = cli_params.comment.value
+        main_meta["comment"] = main_meta["comment"] = cli_params.comment.value_single
 
     main(cli_params, main_meta, cli_image)
