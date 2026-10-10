@@ -1638,14 +1638,6 @@ def parse_cli(parameters: Parameters) -> Image.Image | None:
     return input_image
 
 
-# Enables memory efficient attention on GFX11/Navi31
-addenv("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
-
-
-if hasattr(torch.backends.cuda, "allow_fp16_bf16_reduction_math_sdp"):
-    torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
-
-
 @dataclass
 class PipeRef:
     name: str | None = None
@@ -2724,13 +2716,19 @@ if __name__ == "__main__":
     cli_params = Parameters()
     cli_image = parse_cli(cli_params)
 
+    if not cli_params.model.value:
+        LOGQD.fatal("No model was provided! Exiting...")
+        exit()
+
     # Skip kernel lookups as they're really bad in ROCm 6.2+
     if not cli_params.miopen_autotune.value:
         addenv("MIOPEN_FIND_MODE", "FAST")
 
-    if not cli_params.model.value:
-        LOGQD.fatal("No model was provided! Exiting...")
-        exit()
+    # Enables memory efficient attention on GFX11/Navi31
+    addenv("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
+
+    if hasattr(torch.backends.cuda, "allow_fp16_bf16_reduction_math_sdp"):
+        torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
 
     main_meta: dict[str, str] = {"url": "https://github.com/Beinsezii/quickdif"}
     if cli_params.comment.value:
