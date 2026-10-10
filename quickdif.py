@@ -46,9 +46,7 @@ lazy from diffusers.models.attention import AttentionMixin
 lazy from diffusers.models.attention_dispatch import AttentionBackendName, dispatch_attention_fn
 lazy from diffusers.models.attention_processor import Attention, AttnProcessor2_0
 lazy from diffusers.models.modeling_utils import ModelMixin
-lazy from diffusers.pipelines.auto_pipeline import (
-    AutoPipelineForImage2Image,
-)
+lazy from diffusers.pipelines.auto_pipeline import AutoPipelineForImage2Image
 lazy from diffusers.pipelines.flux.pipeline_flux import FluxPipeline
 lazy from diffusers.pipelines.hunyuandit.pipeline_hunyuandit import HunyuanDiTPipeline
 lazy from diffusers.pipelines.kolors.pipeline_kolors import KolorsPipeline
@@ -57,9 +55,7 @@ lazy from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 lazy from diffusers.pipelines.pixart_alpha.pipeline_pixart_alpha import PixArtAlphaPipeline
 lazy from diffusers.pipelines.pixart_alpha.pipeline_pixart_sigma import PixArtSigmaPipeline
 lazy from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import StableDiffusionPipeline
-lazy from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import (
-    StableDiffusionImg2ImgPipeline,
-)
+lazy from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import StableDiffusionImg2ImgPipeline
 lazy from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import StableDiffusion3Pipeline
 lazy from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3_img2img import (
     StableDiffusion3Img2ImgPipeline,
