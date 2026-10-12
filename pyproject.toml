@@ -84,4 +84,4 @@ reportPrivateImportUsage = "warning"
 python_files = "tests/*.py"
 
 [dependency-groups]
-dev = ["quickdif[all]", "ruff>=0.15.10", "pyright>=1.1.407", "pytest>=9.0.3"]
+dev = ["quickdif[all]", "ruff>=0.17.0", "pyright>=1.1.414", "pytest>=9.1.1"]
