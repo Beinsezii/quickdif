@@ -4,7 +4,7 @@ dynamic = ["version"]
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Beinsezii" }]
-requires-python = ">= 3.12"
+requires-python = ">= 3.15"
 dependencies = [
     "accelerate>=1.13",
     "diffusers>=0.40",
@@ -76,7 +76,6 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "latent_colors.py" = ["T201"] # prints
-"quickdif.py" = ["E402"]      # import not on top
 
 [tool.pyright]
 reportPrivateImportUsage = "warning"
@@ -85,4 +84,4 @@ reportPrivateImportUsage = "warning"
 python_files = "tests/*.py"
 
 [dependency-groups]
-dev = ["quickdif[all]", "ruff>=0.15.10", "pyright>=1.1.407", "pytest>=9.0.3"]
+dev = ["quickdif[all]", "ruff>=0.17.0", "pyright>=1.1.414", "pytest>=9.1.1"]

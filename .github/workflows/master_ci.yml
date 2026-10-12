@@ -18,12 +18,12 @@ jobs:
   low:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           enable-cache: true
 
-      - run: uv venv --python 3.12  # torch index breaks sync
+      - run: uv venv --python 3.15  # torch index breaks sync
       - name: Install
         run: uv pip install -e . --group dev --index https://download.pytorch.org/whl/cpu --resolution lowest-direct
 
@@ -46,12 +46,12 @@ jobs:
   high:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           enable-cache: true
 
-      - run: uv venv --python 3.14
+      - run: uv venv --python 3.15
       - name: Install
         run: uv pip install -e . --group dev --index https://download.pytorch.org/whl/cpu -U
 
