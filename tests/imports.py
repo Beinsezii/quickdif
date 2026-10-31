@@ -30,9 +30,17 @@ def test_audit_hook_records() -> None:
 
 
 def test_quickdif_never_imports_torch() -> None:
+    """All import checks in one function.
+    Do not separate; pytest-xdist will likely race."""
+
+    # check global imports
     assert quickdif.__file__ is not None
-    assert not torches()
-    # prove the detector isn't vacuously passing by importing torch for real and catching it.
-    # must stay in this same test function or pytest-xdist would race on import
+    assert not torches(), "Torch imported globally!"
+
+    # check cli func
+    quickdif.parse_cli(quickdif.Parameters())
+    assert not torches(), "Torch imported during CLI!"
+
+    # check tester itself
     assert __import__("torch").__version__
-    assert torches()
+    assert torches(), "Torch import was not caught!"
