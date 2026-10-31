@@ -1,6 +1,9 @@
 import sys
 from importlib import import_module
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import pytest
 
 IMPORTED: set[str] = set()
 
@@ -29,7 +32,7 @@ def test_audit_hook_records() -> None:
     assert "not_a_real_module_zzz" in IMPORTED
 
 
-def test_quickdif_never_imports_torch() -> None:
+def test_quickdif_never_imports_torch(monkeypatch: pytest.MonkeyPatch) -> None:
     """All import checks in one function.
     Do not separate; pytest-xdist will likely race."""
 
@@ -37,7 +40,8 @@ def test_quickdif_never_imports_torch() -> None:
     assert quickdif.__file__ is not None
     assert not torches(), "Torch imported globally!"
 
-    # check cli func
+    # check cli func. parse_cli() reads sys.argv, which is pytest's own argv unless we lie about it.
+    monkeypatch.setattr(sys, "argv", ["quickdif"])
     quickdif.parse_cli(quickdif.Parameters())
     assert not torches(), "Torch imported during CLI!"
 
