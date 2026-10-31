@@ -77,6 +77,11 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "latent_colors.py" = ["T201"] # prints
 
+[tool.uv]
+# pytorch's index caps packaging at 24.1 and uv only consults the first index that has a name. setuptools>=77
+# needs packaging>=24.2 to read PEP 639 licenses, which any sdist build (sentencepiece has no cp315 wheels) hits.
+build-constraint-dependencies = ["packaging>=24.2"]
+
 [tool.pyright]
 reportPrivateImportUsage = "warning"
 
