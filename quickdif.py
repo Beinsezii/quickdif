@@ -1493,7 +1493,7 @@ def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
             flags = [param.short] if param.short else []
             flags.append("--" + param.name.replace("_", "-"))
 
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
 
         docs = [param.docs]
         if isinstance(param.value, list) and len(param.value) == 1:
@@ -1518,7 +1518,7 @@ def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
             else:
                 kwargs["nargs"] = "?"
 
-        parser.add_argument(*flags, **kwargs)  # ty: ignore[invalid-argument-type] generic solver issues?
+        parser.add_argument(*flags, **kwargs)
 
     parser.add_argument("-i", "--input", type=argparse.FileType(mode="rb"), help="Input image")
     parser.add_argument(
