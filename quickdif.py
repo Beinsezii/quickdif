@@ -1422,6 +1422,13 @@ Recommended to set this to your GPU memory with a margin based on upper image si
 Recommended to leave this unless you absolutely need the memory,
 as smaller components typically lose quality faster than larger components.""",
     )
+    custom_pipeline = QDParam(
+        "custom_pipeline",
+        str,
+        value="",
+        docs="Load remote pipeline code from the model repo by file name without extension, ex. `pipeline_moss_image`. "
+        "Requires a pinned model revision so the code cannot change under you",
+    )
     attention = QDParam(
         "attention",
         AttentionBackend,
@@ -1964,6 +1971,7 @@ def get_pipe(
     quantize_threshold_gb: float,
     quantize_minimum_gb: float,
     attention: AttentionBackendName | None,
+    custom_pipeline: str,
 ) -> DiffusionPipeline:
     # Inline def for lazy
     class AttnProcessorDispatch(AttnProcessor2_0):
@@ -2077,6 +2085,9 @@ def get_pipe(
     model, revision = get_suffix(model)
     if revision is not None:
         pipe_args["revision"] = revision
+    elif custom_pipeline:
+        msg = f"Remote pipeline '{custom_pipeline}' requires a pinned revision, ex. '{model}:::<commit>'"
+        raise ValueError(msg)
 
     if model.casefold().endswith(".safetensors") or model.casefold().endswith(".sft"):
         pipes: list[type[FromSingleFileMixin]] = [
@@ -2110,7 +2121,12 @@ def get_pipe(
             msg = f'Could not load "{model}" as single file pipeline'
             raise ValueError(msg)
     else:
-        pipe = DiffusionPipeline.from_pretrained(model, **pipe_args)
+        pipe = DiffusionPipeline.from_pretrained(
+            model,
+            custom_pipeline=custom_pipeline or None,
+            trust_remote_code=bool(custom_pipeline),
+            **pipe_args,
+        )
 
     if img2img:
         pipe = AutoPipelineForImage2Image.from_pipe(pipe, torch_dtype=None)  # avoid recasts
@@ -2356,6 +2372,7 @@ def process_job(
             parameters.quantize_threshold.value_single,
             parameters.quantize_minimum.value_single,
             parameters.attention.value_single.backend,
+            parameters.custom_pipeline.value_single,
         )
         piperef.name = model
         piperef.loras = lora_meta
