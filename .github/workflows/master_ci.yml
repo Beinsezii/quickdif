@@ -1,72 +1,56 @@
 name: Master CI
 
-on: 
+on:
   push:
-    branches:
-      - 'master'
-      - 'release_*'
+    branches: ["master"] # rolling: no release branches, so no release_* filters
   pull_request:
-    branches:
-      - 'master'
-      - 'release_*'
+    branches: ["master"]
 
 env:
   HF_HUB_ETAG_TIMEOUT: 35
   HF_HUB_DOWNLOAD_TIMEOUT: 35
 
 jobs:
-  low:
+  test:
+    name: py ${{ matrix.python }} uv ${{ matrix.resolution.name }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false # report both legs; a broken low shouldn't hide a clean high
+      matrix:
+        python: ["3.15"]
+        # Can't use UV_RESOLUTION=highest because we also need --refresh from --upgrade
+        resolution:
+          - name: low
+            args: --resolution lowest-direct
+          - name: high
+            args: --upgrade
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
+          cache-dependency-glob: pyproject.toml # uv.lock is gitignored; the default glob only matches requirements/constraints
+          python-version: ${{ matrix.python }} # sets UV_PYTHON, so the venv below uses it
 
-      - run: uv venv --python 3.12  # torch index breaks sync
+      - run: uv venv --clear # torch index breaks sync
+
       - name: Install
-        run: uv pip install -e . --group dev --index https://download.pytorch.org/whl/cpu --resolution lowest-direct
+        id: install
+        run: uv pip install --editable . --group dev --torch-backend cpu ${{ matrix.resolution.args }}
 
       - name: Ruff Check
-        if: '!cancelled()'
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: uv run --no-sync ruff check
 
       - name: Ruff Format
-        if: '!cancelled()'
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: uv run --no-sync ruff format --check
 
       - name: Pyright
-        if: '!cancelled()'
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: uv run --no-sync pyright
 
       - name: Pytest
-        if: '!cancelled()'
-        run: uv run --no-sync pytest
-
-  high:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      - run: uv venv --python 3.14
-      - name: Install
-        run: uv pip install -e . --group dev --index https://download.pytorch.org/whl/cpu -U
-
-      - name: Ruff Check
-        if: '!cancelled()'
-        run: uv run --no-sync ruff check
-
-      - name: Ruff Format
-        if: '!cancelled()'
-        run: uv run --no-sync ruff format --check
-
-      - name: Pyright
-        if: '!cancelled()'
-        run: uv run --no-sync pyright
-
-      - name: Pytest
-        if: '!cancelled()'
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: uv run --no-sync pytest

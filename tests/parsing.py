@@ -1,5 +1,5 @@
-from collections.abc import Callable
 from typing import Any
+lazy from collections.abc import Callable
 
 from quickdif import Grid, Resolution, loras_to_str, pexpand, splitlist
 
