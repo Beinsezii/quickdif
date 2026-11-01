@@ -22,6 +22,9 @@ all = ["quickdif"]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
+[dependency-groups]
+dev = ["quickdif[all]", "ruff>=0.17.3", "ty>=0.0.95", "pytest>=9.2.0"]
+
 [tool.setuptools]
 py-modules = ["quickdif"]
 
@@ -74,16 +77,17 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "latent_colors.py" = ["T201"] # prints
 
+[tool.pytest.ini_options]
+python_files = "tests/*.py"
+
+[tool.ty.analysis]
+# pyright infers return types recursively; ty defaults to `never` (only where annotated or trivial)
+return-type-inference = "always"
+
+[tool.ty.rules]
+unused-type-ignore-comment = "error"
+
 [tool.uv]
 # pytorch's index caps packaging at 24.1 and uv only consults the first index that has a name. setuptools>=77
 # needs packaging>=24.2 to read PEP 639 licenses, which any sdist build (sentencepiece has no cp315 wheels) hits.
 build-constraint-dependencies = ["packaging>=24.2"]
-
-[tool.pyright]
-reportPrivateImportUsage = "warning"
-
-[tool.pytest.ini_options]
-python_files = "tests/*.py"
-
-[dependency-groups]
-dev = ["quickdif[all]", "ruff>=0.17.0", "pyright>=1.1.414", "pytest>=9.1.1"]

@@ -18,7 +18,7 @@ from inspect import getmembers, signature
 from io import BytesIO, UnsupportedOperation
 from math import copysign
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, final
+from typing import TYPE_CHECKING, Any, assert_never, final
 
 import numpy as np
 import numpy.linalg as npl
@@ -145,8 +145,8 @@ def addenv(k: str, val: str) -> None:
 def get_suffix[T, U](
     string: str,
     separator: str = ":::",
-    typing: Callable[[str], T] = str,
-    default: U = None,
+    typing: Callable[[str], T] = str,  # ty: ignore[invalid-parameter-default] T has no generic contraints
+    default: U = None,  # ty: ignore[invalid-parameter-default] U should have no generic constraints
 ) -> tuple[str, T | U]:
     split = string.rsplit(separator, 1)
     match len(split):
@@ -357,7 +357,7 @@ class ScheduleSK(enum.StrEnum):
                 return skscheduling.Scaled, {}
             case ScheduleSK.ZSNR:
                 return skscheduling.ZSNR, {}
-        return 0
+        assert_never(self)
 
 
 @enum.unique
@@ -381,7 +381,7 @@ class PredictorSK(enum.StrEnum):
                 return skmodels.DataModel()
             case PredictorSK.Velocity:
                 return skmodels.VelocityModel()
-        return 0
+        assert_never(self)
 
 
 @enum.unique
@@ -405,7 +405,7 @@ class SubScheduleSK(enum.StrEnum):
                 return skscheduling.Karras, {}
             case SubScheduleSK.Probit:
                 return skscheduling.Probit, {}
-        return 0
+        assert_never(self)
 
     @classmethod
     def parse_suffix(cls, item: str) -> tuple[type[skscheduling.SubSchedule] | None, dict[str, Any]]:
@@ -458,7 +458,7 @@ class ModifierSK(enum.StrEnum):
                 return skscheduling.Sinner, {}
             case ModifierSK.Pinner:
                 return skscheduling.Sinner, {"scale": -skscheduling.Sinner.scale}
-        return 0
+        assert_never(self)
 
     @classmethod
     def parse_suffix(cls, item: str) -> tuple[type[skscheduling.ScheduleModifier], dict[str, Any]] | None:
@@ -506,7 +506,7 @@ class NoiseSK(enum.StrEnum):
                 return sknoise.Offset, sknoise.OffsetProps(static=True)
             case NoiseSK.Pyramid:
                 return sknoise.Pyramid, None
-        return 0
+        assert_never(self)
 
 
 @enum.unique
@@ -530,7 +530,7 @@ class DTypeSK(enum.StrEnum):
                 return torch.bfloat16
             case DTypeSK.Default:
                 return None
-        return 0
+        assert_never(self)
 
 
 @enum.unique
@@ -621,7 +621,7 @@ class DType(enum.StrEnum):
             case DType.I4:
                 return Int4WeightOnlyConfig()
 
-        raise NotImplementedError
+        assert_never(self)
 
     @property
     def bits(self) -> int:
@@ -635,7 +635,7 @@ class DType(enum.StrEnum):
             case DType.I4:
                 return 4
 
-        raise NotImplementedError
+        assert_never(self)
 
 
 @enum.unique
@@ -718,7 +718,8 @@ class AttentionBackend(enum.StrEnum):
                 return AttentionBackendName.SAGE_HUB
             case self.XFormers:
                 return AttentionBackendName.XFORMERS
-        return 0
+
+        assert_never(self)
 
 
 @enum.unique
@@ -739,7 +740,8 @@ class SDPB(enum.StrEnum):
                 return SDPBackend.EFFICIENT_ATTENTION
             case SDPB.CuDNN:
                 return SDPBackend.CUDNN_ATTENTION
-        return 0
+
+        assert_never(self)
 
 
 @enum.unique
@@ -766,7 +768,8 @@ class Compile(enum.StrEnum):
                 return "max-autotune-no-cudagraphs"
             case Compile.Max:
                 return "max-autotune"
-        return 0
+
+        assert_never(self)
 
 
 @enum.unique
@@ -1009,7 +1012,7 @@ class QDParam[T: str | bool | int | float | Path | Resolution | Grid]:
         self.default = copy(self.value)
 
     def _cast(self, new: str | T) -> T:
-        return new if isinstance(new, self.typing) else self.typing(new)
+        return new if isinstance(new, self.typing) else self.typing(new)  # ty: ignore[invalid-argument-type] generic solver issues?
 
     @property
     def value(self) -> T | list[T] | None:
@@ -1515,7 +1518,7 @@ def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
             else:
                 kwargs["nargs"] = "?"
 
-        parser.add_argument(*flags, **kwargs)
+        parser.add_argument(*flags, **kwargs)  # ty: ignore[invalid-argument-type] generic solver issues?
 
     parser.add_argument("-i", "--input", type=argparse.FileType(mode="rb"), help="Input image")
     parser.add_argument(
@@ -1551,15 +1554,15 @@ def parse_cli(parameters: Parameters) -> Image.Image | None:
 
     if args["include"]:
         for reader in args["include"]:
-            data = reader.read()
+            data: bytes = reader.read()
             try:
-                data = data.decode()
+                strdata: str = data.decode()
                 for f, e in [
                     (tomllib.loads, tomllib.TOMLDecodeError),
                     (json.loads, json.JSONDecodeError),
                 ]:
                     try:
-                        for k, v in f(data).items():
+                        for k, v in f(strdata).items():
                             if k in parameters:
                                 try:
                                     parameters.get(k).value = v
@@ -1609,7 +1612,7 @@ def parse_cli(parameters: Parameters) -> Image.Image | None:
                 elif isinstance(val, list):
                     if all(isinstance(x, Resolution) for x in val):
                         val = [str(val) for val in val]
-                dump[k] = v
+                dump[k] = val
         s = json.dumps(dump)
         try:
             args["json"].seek(0)
@@ -1842,7 +1845,7 @@ def get_scheduler(sampler: Sampler, spacing: Spacing | None, default_scheduler: 
         Sampler.Unipc3K: (UniPCMultistepScheduler, {"solver_order": 3, "use_karras_sigmas": True}),
     }[sampler]
 
-    return scheduler.from_config(default_scheduler.config, **(sampler_args | scheduler_args))
+    return scheduler.from_config(default_scheduler.config, **(sampler_args | scheduler_args))  # ty: ignore[invalid-return-type] diffusers nonsense
 
 
 def get_latent_params(pipe: DiffusionPipeline) -> tuple[int, float, int] | None:
@@ -1879,7 +1882,7 @@ def get_latent_params(pipe: DiffusionPipeline) -> tuple[int, float, int] | None:
 
 
 def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
-    job = {
+    job: dict[str, Any] = {
         "num_images_per_prompt": parameters.batch_size.value,
         "clean_caption": False,  # stop IF nag. what does this even do
         "use_resolution_binning": False,  # True breaks with pre-noised latents
@@ -1891,7 +1894,7 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
     image_ops = [{}]
 
     if parameters.iter.value is Iter.Shuffle:
-        jobs = [job] * parameters.batch_count.value_single
+        jobs: list[dict[str, Any]] = [job] * parameters.batch_count.value_single
         merger = lambda sets, name, vals: [i | {name: v} for i, v in zip(sets, oversample(vals, len(sets)))]  # noqa: E731
     else:
         jobs = [job]
@@ -1953,7 +1956,7 @@ def build_jobs(parameters: Parameters) -> list[dict[str, Any]]:
     for j in jobs:
         for key in "prompt", "negative":
             if key in j:
-                expands = pexpand(j[key], body=("[", "]"), single=True)  # type: ignore # pos/neg is str
+                expands: list[str] = pexpand(j[key], body=("[", "]"), single=True)
                 assert len(expands) == 1
                 j[key] = expands[0]
 
@@ -1979,7 +1982,7 @@ def get_pipe(
 
         def __call__(
             self,
-            attn: Attention,
+            attn: Attention,  # ty: ignore[invalid-type-form] bug? think it's imporing the dummy class
             hidden_states: torch.Tensor,
             encoder_hidden_states: torch.Tensor | None = None,
             attention_mask: torch.Tensor | None = None,
@@ -2017,8 +2020,8 @@ def get_pipe(
             elif attn.norm_cross:
                 encoder_hidden_states = attn.norm_encoder_hidden_states(encoder_hidden_states)
 
-            key = attn.to_k(encoder_hidden_states)  # type: ignore # idk why diffusers did this
-            value = attn.to_v(encoder_hidden_states)  # type: ignore # idk why diffusers did this
+            key = attn.to_k(encoder_hidden_states)  # pyright: ignore[reportOptionalCall] idk why diffusers did this
+            value = attn.to_v(encoder_hidden_states)  # pyright: ignore[reportOptionalCall] idk why diffusers did this
 
             inner_dim = key.shape[-1]
             head_dim = inner_dim // attn.heads
@@ -2057,9 +2060,9 @@ def get_pipe(
             hidden_states = hidden_states.to(query.dtype)
 
             # linear proj
-            hidden_states = attn.to_out[0](hidden_states)  # type: ignore # idk why diffusers did this
+            hidden_states = attn.to_out[0](hidden_states)  # pyright: ignore[reportOptionalSubscript] idk why diffusers did this
             # dropout
-            hidden_states = attn.to_out[1](hidden_states)  # type: ignore # idk why diffusers did this
+            hidden_states = attn.to_out[1](hidden_states)  # pyright: ignore[reportOptionalSubscript] idk why diffusers did this
 
             if input_ndim == 4:
                 hidden_states = hidden_states.transpose(-1, -2).reshape(batch_size, channel, height, width)  # pyright: ignore
@@ -2109,7 +2112,6 @@ def get_pipe(
                 if str(e).startswith("Failed to load T5EncoderModel.") and issubclass(cls, StableDiffusion3Pipeline):
                     del e  # free gc
                     maybe_pipe = cls.from_single_file(model, text_encoder_3=None, tokenizer_3=None, **pipe_args)
-                    break
 
             if maybe_pipe is not None:
                 if hasattr(maybe_pipe, "text_encoder_2") and maybe_pipe.text_encoder_2 is None:
@@ -2215,7 +2217,7 @@ def get_pipe(
         case Offload.Sequential:
             pipe.enable_sequential_cpu_offload()
         case _:
-            raise ValueError
+            assert_never(offload)
 
     return pipe
 
@@ -2438,7 +2440,7 @@ def process_job(
                 order: int = job.pop("skrample_order")
                 stochasticity: float = job.pop("skrample_stochasticity")
                 pipe.scheduler = sampler_type.from_diffusers_config(
-                    pipe.scheduler,  # type: ignore ConfigMixin
+                    pipe.scheduler,  # pyright: ignore[reportArgumentType] is also ConfigMixin
                     sampler_order=order,
                     stochasticity=stochasticity,
                     schedule=schedule_type,
@@ -2475,7 +2477,7 @@ def process_job(
                     sampler_props["derivative_transform"] = sktransform.predictor
 
                 pipe.scheduler = SkrampleWrapperScheduler.from_diffusers_config(
-                    pipe.scheduler,  # type: ignore ConfigMixin
+                    pipe.scheduler,  # pyright: ignore[reportArgumentType] is also ConfigMixin
                     sampler=sampler_type,
                     schedule=schedule_type,
                     subschedule=subschedule,

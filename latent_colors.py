@@ -47,21 +47,21 @@ def measure(vae: str, subfolder: str | None = None) -> dict[str, list[float]]:
     shift = encoder.config.get("shift_factor", 0)
     factor = 1 if factor is None else factor
     shift = 0 if shift is None else shift
-    processor = VaeImageProcessor(2 ** (len(encoder.config.block_out_channels) - 1))  # type: ignore # They should all have this
+    processor = VaeImageProcessor(2 ** (len(encoder.config.block_out_channels) - 1))  # pyright: ignore [reportAttributeAccessIssue]
 
     with torch.inference_mode():
         for k, v in CARDINALS.items():
             # permute to w, h, c, like in PIL
             image: torch.Tensor = (
                 torch.tensor(v)
-                .expand([encoder.config.sample_size, encoder.config.sample_size, len(v)])  # type: ignore # They should all have this
+                .expand([encoder.config.sample_size, encoder.config.sample_size, len(v)])  # pyright: ignore [reportAttributeAccessIssue]
                 .permute(2, 0, 1)
                 .contiguous()
             )
             # flatten to c, w·h
             encoded: torch.Tensor = (
                 encoder.encode(processor.preprocess(image))
-                .latent_dist.sample(torch.Generator(device).manual_seed(0))  # type: ignore
+                .latent_dist.sample(torch.Generator(device).manual_seed(0))  # pyright: ignore [reportAttributeAccessIssue]
                 .permute(1, 0, 2, 3)
                 .flatten(start_dim=1)
             )
