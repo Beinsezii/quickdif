@@ -47,9 +47,9 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: uv run --no-sync ruff format --check
 
-      - name: Pyright
+      - name: Ty Check
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: uv run --no-sync pyright
+        run: uv run --no-sync ty check --exit-zero-on-warning
 
       - name: Pytest
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
