@@ -145,7 +145,7 @@ def addenv(k: str, val: str) -> None:
 def get_suffix[T, U](
     string: str,
     separator: str = ":::",
-    typing: Callable[[str], T] = str,  # ty: ignore[invalid-parameter-default] T has no generic contraints
+    typing: Callable[[str], T] = str,  # ty: ignore[invalid-parameter-default] T has no generic constraints
     default: U = None,  # ty: ignore[invalid-parameter-default] U should have no generic constraints
 ) -> tuple[str, T | U]:
     split = string.rsplit(separator, 1)
@@ -1982,7 +1982,7 @@ def get_pipe(
 
         def __call__(
             self,
-            attn: Attention,  # ty: ignore[invalid-type-form] bug? think it's imporing the dummy class
+            attn: Attention,  # ty: ignore[invalid-type-form] bug? think it's importing the dummy class
             hidden_states: torch.Tensor,
             encoder_hidden_states: torch.Tensor | None = None,
             attention_mask: torch.Tensor | None = None,
