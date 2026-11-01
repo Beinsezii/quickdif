@@ -1982,7 +1982,7 @@ def get_pipe(
 
         def __call__(
             self,
-            attn: Attention,  # ty: ignore[invalid-type-form] bug? think it's importing the dummy class
+            attn: Attention,  # ty: ignore[invalid-type-form] return-type-inference bug
             hidden_states: torch.Tensor,
             encoder_hidden_states: torch.Tensor | None = None,
             attention_mask: torch.Tensor | None = None,
