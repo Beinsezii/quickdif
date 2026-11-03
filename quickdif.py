@@ -137,11 +137,6 @@ OKLAB_M2 = np.array(
 )
 
 
-def addenv(k: str, val: str) -> None:
-    if k not in os.environ:
-        os.environ[k] = val
-
-
 def get_suffix[T, U](
     string: str,
     separator: str = ":::",
@@ -2747,10 +2742,10 @@ def main_cli() -> None:
 
     # Skip kernel lookups as they're really bad in ROCm 6.2+
     if not cli_params.miopen_autotune.value:
-        addenv("MIOPEN_FIND_MODE", "FAST")
+        os.environ.setdefault("MIOPEN_FIND_MODE", "FAST")
 
     # Enables memory efficient attention on GFX11/Navi31
-    addenv("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
+    os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 
     if hasattr(torch.backends.cuda, "allow_fp16_bf16_reduction_math_sdp"):
         torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
