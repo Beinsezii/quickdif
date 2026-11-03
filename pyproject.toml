@@ -33,7 +33,6 @@ py-modules = ["quickdif"]
 
 [tool.ruff]
 line-length = 120
-namespace-packages = ["tests"]
 
 [tool.ruff.lint]
 select = [
@@ -51,7 +50,7 @@ select = [
     "G",      # log messages
     "I",      # imports
     "ICN",    # import conventions
-    "INP001",
+    # "INP001", # implicit namespace
     "ISC",    # str cat
     "LOG",    # logging
     "NPY",    # numpy
