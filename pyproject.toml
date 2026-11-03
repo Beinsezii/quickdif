@@ -26,7 +26,7 @@ requires = ["setuptools>=66"]
 build-backend = "setuptools.build_meta"
 
 [dependency-groups]
-dev = ["quickdif[all]", "ruff>=0.17.3", "ty>=0.0.95", "pytest>=9.2.0"]
+dev = ["quickdif[all]", "ruff==0.17.3", "ty==0.0.96", "pytest==9.2.0"]
 
 [tool.setuptools]
 py-modules = ["quickdif"]
