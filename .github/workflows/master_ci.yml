@@ -49,7 +49,7 @@ jobs:
 
       - name: Ty Check
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: uv run --no-sync ty check --exit-zero-on-warning
+        run: uv run --no-sync ty check
 
       - name: Pytest
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}

@@ -87,6 +87,9 @@ return-type-inference = "always"
 [tool.ty.rules]
 unused-type-ignore-comment = "error"
 
+[tool.ty.terminal]
+error-on-warning = false
+
 [tool.uv]
 # pytorch's index caps packaging at 24.1 and uv only consults the first index that has a name. setuptools>=77
 # needs packaging>=24.2 to read PEP 639 licenses, which any sdist build (sentencepiece has no cp315 wheels) hits.
