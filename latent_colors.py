@@ -42,7 +42,7 @@ def measure(vae: str, subfolder: str | None = None) -> dict[str, list[float]]:
         use_safetensors=True,
         torch_dtype=dtype,
         subfolder=subfolder,
-    ).to(device)  # type: ignore self
+    ).to(device)  # pyright: ignore[reportArgumentType] self
     factor = encoder.config.get("scaling_factor", 1)
     shift = encoder.config.get("shift_factor", 0)
     factor = 1 if factor is None else factor

@@ -4,11 +4,12 @@ dynamic = ["version"]
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Beinsezii" }]
-requires-python = ">= 3.15"
+requires-python = ">=3.15"
 dependencies = [
     "accelerate>=1.13",
     "diffusers[torch,torchao]>=0.40",
     "peft>=0.19",
+    "platformdirs>=4",
     "skrample[all]>=0.7,<0.8",
     "torch>=2.14",                                        # no cp315 torchvision wheels below 0.29, requires torch 2.14
     "torchao>=0.15",
@@ -18,19 +19,21 @@ dependencies = [
 [project.optional-dependencies]
 all = ["quickdif"]
 
+[project.scripts]
+quickdif = "quickdif:main_cli"
+
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=66"]
 build-backend = "setuptools.build_meta"
 
 [dependency-groups]
-dev = ["quickdif[all]", "ruff>=0.17.3", "ty>=0.0.95", "pytest>=9.2.0"]
+dev = ["quickdif[all]", "ruff==0.17.3", "ty==0.0.96", "pytest==9.2.0"]
 
 [tool.setuptools]
 py-modules = ["quickdif"]
 
 [tool.ruff]
 line-length = 120
-namespace-packages = ["tests"]
 
 [tool.ruff.lint]
 select = [
@@ -48,7 +51,7 @@ select = [
     "G",      # log messages
     "I",      # imports
     "ICN",    # import conventions
-    "INP001",
+    # "INP001", # implicit namespace
     "ISC",    # str cat
     "LOG",    # logging
     "NPY",    # numpy

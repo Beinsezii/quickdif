@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, assert_never, final
 
 import numpy as np
 import numpy.linalg as npl
+import platformdirs
 from PIL import Image, ImageDraw, PngImagePlugin
 from skrample import scheduling as skscheduling
 from skrample.analytics import plotting as skplotting
@@ -135,11 +136,6 @@ OKLAB_M2 = np.array(
         [-0.0040720468, 0.4505937099, -0.8086757660],
     ]
 )
-
-
-def addenv(k: str, val: str) -> None:
-    if k not in os.environ:
-        os.environ[k] = val
 
 
 def get_suffix[T, U](
@@ -1395,7 +1391,7 @@ Performance penalty is typically imperceptible, so it's recommended to leave thi
         "output",
         Path,
         short="-o",
-        value=Path("./quickdif_output/"),
+        value=Path(),
         docs="Output directory for images",
     )
     offload = QDParam(
@@ -1539,18 +1535,20 @@ def build_parser(parameters: Parameters) -> argparse.ArgumentParser:
     return parser
 
 
-def parse_cli(parameters: Parameters) -> Image.Image | None:
+def parse_cli(parameters: Parameters, tool: bool) -> Image.Image | None:
     args = vars(build_parser(parameters).parse_args())
     LOGQD.setLevel(max(LOGQD.level - args["V"] * 10, 10))
 
-    for ext in "json", "toml":
-        default = Path(__file__).parent.joinpath(Path(f"quickdif.{ext}"))
-        if default.exists():
-            reader = default.open(mode="rb")
-            if args["include"] is None:
-                args["include"] = [reader]
-            else:
-                args["include"].insert(0, reader)
+    xdg_cfg = platformdirs.user_config_path()
+    for cfg in [xdg_cfg] if tool else [Path(__file__).parent, xdg_cfg]:
+        for ext in "json", "toml":
+            defaults_file = cfg / f"quickdif.{ext}"
+            if defaults_file.exists():
+                defaults_reader = defaults_file.open(mode="rb")
+                if args["include"] is None:
+                    args["include"] = [defaults_reader]
+                else:
+                    args["include"].insert(0, defaults_reader)
 
     if args["include"]:
         for reader in args["include"]:
@@ -2652,13 +2650,13 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
                     images += results
 
                 for _, im, info in results:
-                    im_path = parameters.output.value_single.joinpath(f"{im_num:05}.png")
+                    im_path = parameters.output.value_single.joinpath(f"quickdif_{im_num:05}.png")
                     while True:
                         try:
                             im_path.touch(exist_ok=False)
                         except FileExistsError:
                             im_num += 1
-                            im_path = parameters.output.value_single.joinpath(f"{im_num:05}.png")
+                            im_path = parameters.output.value_single.joinpath(f"quickdif_{im_num:05}.png")
                             continue
                         break
 
@@ -2721,13 +2719,13 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
             gd_num = 0
             grids, others = parameters.grid.value_single.fold((m, i) for m, i, _ in images)
             for gd in grids:
-                gd_path = parameters.output.value_single.joinpath(f"grid_{gd_num:05}.png")
+                gd_path = parameters.output.value_single.joinpath(f"quickdif_grid_{gd_num:05}.png")
                 while True:
                     try:
                         gd_path.touch(exist_ok=False)
                     except FileExistsError:
                         gd_num += 1
-                        gd_path = parameters.output.value_single.joinpath(f"grid_{gd_num:05}.png")
+                        gd_path = parameters.output.value_single.joinpath(f"quickdif_grid_{gd_num:05}.png")
                         continue
                     break
                 tpe.submit(Image.Image.save, gd, gd_path, "PNG", compress_level=4)
@@ -2737,9 +2735,9 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
                 LOGQD.warning(f"{len(others)} images not included in grid output")
 
 
-if __name__ == "__main__":
+def main_cli(tool: bool = True) -> None:
     cli_params = Parameters()
-    cli_image = parse_cli(cli_params)
+    cli_image = parse_cli(cli_params, tool)
 
     if not cli_params.model.value:
         LOGQD.fatal("No model was provided! Exiting...")
@@ -2747,10 +2745,10 @@ if __name__ == "__main__":
 
     # Skip kernel lookups as they're really bad in ROCm 6.2+
     if not cli_params.miopen_autotune.value:
-        addenv("MIOPEN_FIND_MODE", "FAST")
+        os.environ.setdefault("MIOPEN_FIND_MODE", "FAST")
 
     # Enables memory efficient attention on GFX11/Navi31
-    addenv("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
+    os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 
     if hasattr(torch.backends.cuda, "allow_fp16_bf16_reduction_math_sdp"):
         torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
@@ -2760,3 +2758,7 @@ if __name__ == "__main__":
         main_meta["comment"] = main_meta["comment"] = cli_params.comment.value_single
 
     main(cli_params, main_meta, cli_image)
+
+
+if __name__ == "__main__":
+    main_cli(tool=False)

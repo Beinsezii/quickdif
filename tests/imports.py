@@ -42,7 +42,8 @@ def test_quickdif_never_imports_torch(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # check cli func. parse_cli() reads sys.argv, which is pytest's own argv unless we lie about it.
     monkeypatch.setattr(sys, "argv", ["quickdif"])
-    quickdif.parse_cli(quickdif.Parameters())
+    quickdif.parse_cli(quickdif.Parameters(), False)
+    quickdif.parse_cli(quickdif.Parameters(), True)
     assert not torches(), "Torch imported during CLI!"
 
     # check tester itself
