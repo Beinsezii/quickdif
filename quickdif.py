@@ -2737,7 +2737,7 @@ def main(parameters: Parameters, meta: dict[str, str], image: Image.Image | None
                 LOGQD.warning(f"{len(others)} images not included in grid output")
 
 
-if __name__ == "__main__":
+def main_cli() -> None:
     cli_params = Parameters()
     cli_image = parse_cli(cli_params)
 
@@ -2760,3 +2760,7 @@ if __name__ == "__main__":
         main_meta["comment"] = main_meta["comment"] = cli_params.comment.value_single
 
     main(cli_params, main_meta, cli_image)
+
+
+if __name__ == "__main__":
+    main_cli()

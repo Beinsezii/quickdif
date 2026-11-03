@@ -4,7 +4,7 @@ dynamic = ["version"]
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Beinsezii" }]
-requires-python = ">= 3.15"
+requires-python = ">=3.15"
 dependencies = [
     "accelerate>=1.13",
     "diffusers[torch,torchao]>=0.40",
@@ -18,8 +18,11 @@ dependencies = [
 [project.optional-dependencies]
 all = ["quickdif"]
 
+[project.scripts]
+quickdif = "quickdif:main_cli"
+
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=66"]
 build-backend = "setuptools.build_meta"
 
 [dependency-groups]
