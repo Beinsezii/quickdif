@@ -1540,15 +1540,15 @@ def parse_cli(parameters: Parameters, tool: bool) -> Image.Image | None:
     LOGQD.setLevel(max(LOGQD.level - args["V"] * 10, 10))
 
     xdg_cfg = platformdirs.user_config_path()
-    for cfg in [xdg_cfg] if tool else [xdg_cfg, Path(__file__).parent]:
-        for ext in "toml", "json":
+    for cfg in [xdg_cfg] if tool else [Path(__file__).parent, xdg_cfg]:
+        for ext in "json", "toml":
             defaults_file = cfg / f"quickdif.{ext}"
             if defaults_file.exists():
                 defaults_reader = defaults_file.open(mode="rb")
                 if args["include"] is None:
                     args["include"] = [defaults_reader]
                 else:
-                    args["include"].append(defaults_reader)
+                    args["include"].insert(0, defaults_reader)
 
     if args["include"]:
         for reader in args["include"]:
